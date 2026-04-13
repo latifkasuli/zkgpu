@@ -1,3 +1,4 @@
+mod common;
 mod four_step;
 mod planner;
 pub(crate) mod stockham;

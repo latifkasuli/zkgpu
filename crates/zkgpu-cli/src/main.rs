@@ -35,12 +35,13 @@ struct FeaturesReport {
     timestamp_query_inside_passes: bool,
     mappable_primary_buffers: bool,
     pipeline_cache: bool,
+    transient_saves_memory: bool,
 }
 
 #[derive(Serialize)]
 struct LimitsReport {
     max_buffer_size_mb: u64,
-    max_storage_buffer_binding_size_mb: u32,
+    max_storage_buffer_binding_size_mb: u64,
     max_compute_workgroup_size_x: u32,
     max_compute_invocations_per_workgroup: u32,
     max_compute_workgroups_per_dimension: u32,
@@ -133,6 +134,7 @@ fn device_report(caps: &CapabilityProfile) -> DeviceReport {
             timestamp_query_inside_passes: caps.has_timestamp_query_inside_passes,
             mappable_primary_buffers: caps.has_mappable_primary_buffers,
             pipeline_cache: caps.has_pipeline_cache,
+            transient_saves_memory: caps.transient_saves_memory,
         },
         limits: LimitsReport {
             max_buffer_size_mb: caps.max_buffer_size / (1024 * 1024),

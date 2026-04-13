@@ -95,14 +95,7 @@ impl<F: GpuField> GpuBuffer<F> for WgpuBuffer<F> {
         self.queue.submit(Some(encoder.finish()));
 
         let slice = staging.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = tx.send(result);
-        });
-        self.device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?
-            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
+        async_util::map_buffer_read_blocking(&self.device, slice)?;
 
         let mapped = slice.get_mapped_range();
         let repr_slice: &[F::Repr] = bytemuck::cast_slice(&mapped);

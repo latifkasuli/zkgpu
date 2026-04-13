@@ -41,9 +41,9 @@ impl WgpuDevice {
     /// also usable on native. On native, the blocking [`new`](Self::new)
     /// wrapper calls this internally.
     pub async fn new_async() -> Result<Self, ZkGpuError> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let adapter = instance
@@ -53,7 +53,7 @@ impl WgpuDevice {
                 force_fallback_adapter: false,
             })
             .await
-            .ok_or(ZkGpuError::DeviceNotFound)?;
+            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
 
         let mut caps = CapabilityProfile::from_adapter(&adapter);
 
@@ -63,9 +63,10 @@ impl WgpuDevice {
                     label: Some("zkgpu"),
                     required_features: caps.required_features(),
                     required_limits: caps.required_limits(&adapter.limits()),
+                    experimental_features: wgpu::ExperimentalFeatures::default(),
                     memory_hints: wgpu::MemoryHints::Performance,
+                    trace: wgpu::Trace::Off,
                 },
-                None,
             )
             .await
             .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
@@ -74,7 +75,7 @@ impl WgpuDevice {
 
         let pipeline_cache = pipeline_cache::load_cache(&device, &caps);
 
-        device.on_uncaptured_error(Box::new(|error| {
+        device.on_uncaptured_error(Arc::new(|error| {
             log::error!("zkgpu uncaptured device error: {error}");
         }));
 
@@ -119,14 +120,14 @@ impl WgpuDevice {
         }
     }
 
-    /// Begin capturing GPU validation errors on the current thread.
+    /// Begin capturing GPU validation errors and return a scope guard.
     ///
-    /// Must be paired with `pop_validation_scope` or
+    /// The guard must be consumed via `pop_validation_scope` or
     /// `pop_validation_scope_async` to collect the result.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(crate) fn push_validation_scope(&self) {
+    pub(crate) fn push_validation_scope(&self) -> wgpu::ErrorScopeGuard {
         self.device
-            .push_error_scope(wgpu::ErrorFilter::Validation);
+            .push_error_scope(wgpu::ErrorFilter::Validation)
     }
 
     /// Pop the validation error scope (blocking).
@@ -137,8 +138,12 @@ impl WgpuDevice {
     /// **Native only.** On WebAssembly, use
     /// [`pop_validation_scope_async`](Self::pop_validation_scope_async).
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn pop_validation_scope(&self, context: &str) -> Result<(), ZkGpuError> {
-        match pollster::block_on(self.device.pop_error_scope()) {
+    pub(crate) fn pop_validation_scope(
+        &self,
+        scope: wgpu::ErrorScopeGuard,
+        context: &str,
+    ) -> Result<(), ZkGpuError> {
+        match pollster::block_on(scope.pop()) {
             Some(err) => Err(ZkGpuError::GpuValidation(format!("{context}: {err}"))),
             None => Ok(()),
         }
@@ -148,9 +153,10 @@ impl WgpuDevice {
     #[allow(dead_code)] // kept for cross-target parity; wasm uses async, native uses blocking
     pub(crate) async fn pop_validation_scope_async(
         &self,
+        scope: wgpu::ErrorScopeGuard,
         context: &str,
     ) -> Result<(), ZkGpuError> {
-        match self.device.pop_error_scope().await {
+        match scope.pop().await {
             Some(err) => Err(ZkGpuError::GpuValidation(format!("{context}: {err}"))),
             None => Ok(()),
         }

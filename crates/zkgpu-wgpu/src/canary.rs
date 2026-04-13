@@ -90,12 +90,12 @@ pub(crate) async fn canary_dispatch(
     };
 
     // --- Compile the shader ---
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let shader_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("zkgpu canary ntt local"),
         source: wgpu::ShaderSource::Wgsl(shader_source.into()),
     });
-    if let Some(err) = device.pop_error_scope().await {
+    if let Some(err) = shader_scope.pop().await {
         return Err(ZkGpuError::GpuComputeUnsupported(format!(
             "canary NTT shader compilation error: {err}"
         )));
@@ -165,8 +165,8 @@ pub(crate) async fn canary_dispatch(
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("zkgpu canary layout"),
-        bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
     });
 
     // Use the same pipeline cache as the NTT path — on some Vulkan
@@ -281,7 +281,7 @@ pub(crate) async fn canary_dispatch(
             ],
         });
 
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let dispatch_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("zkgpu canary encoder"),
@@ -302,9 +302,11 @@ pub(crate) async fn canary_dispatch(
         queue.submit(std::iter::once(encoder.finish()));
 
         // Synchronise with the GPU — matches the NTT's device.poll(Wait).
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
 
-        if let Some(err) = device.pop_error_scope().await {
+        if let Some(err) = dispatch_scope.pop().await {
             return Err(ZkGpuError::GpuComputeUnsupported(format!(
                 "canary NTT dispatch {round} validation error: {err}"
             )));

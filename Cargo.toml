@@ -20,7 +20,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/latifkasuli/zkgpu"
-rust-version = "1.85.0"
+rust-version = "1.87.0"
 
 [workspace.dependencies]
 zkgpu-core = { path = "crates/zkgpu-core" }
@@ -32,7 +32,7 @@ zkgpu-testkit = { path = "crates/zkgpu-testkit" }
 zkgpu-report = { path = "crates/zkgpu-report" }
 zkgpu-pacer = { path = "crates/zkgpu-pacer" }
 
-wgpu = "24"
+wgpu = "29"
 bytemuck = { version = "1", features = ["derive"] }
 thiserror = "2"
 log = "0.4"

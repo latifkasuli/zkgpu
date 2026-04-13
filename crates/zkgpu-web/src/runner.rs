@@ -425,17 +425,6 @@ fn make_plan(
 
 fn build_device_report_from(device: &WgpuDevice) -> DeviceReport {
     let caps = device.caps();
-    let mut feature_flags = Vec::new();
-    if caps.has_subgroup {
-        feature_flags.push("subgroup".to_string());
-    }
-    if caps.has_timestamp_query {
-        feature_flags.push("timestamp_query".to_string());
-    }
-    if caps.has_pipeline_cache {
-        feature_flags.push("pipeline_cache".to_string());
-    }
-
     DeviceReport {
         name: caps.device_name.clone(),
         backend: format!("{:?}", caps.backend),
@@ -449,7 +438,7 @@ fn build_device_report_from(device: &WgpuDevice) -> DeviceReport {
         max_buffer_size_bytes: caps.max_buffer_size,
         max_workgroup_size_x: caps.max_compute_workgroup_size_x,
         max_compute_invocations: caps.max_compute_invocations_per_workgroup,
-        feature_flags,
+        feature_flags: caps.feature_flags_flat(),
     }
 }
 

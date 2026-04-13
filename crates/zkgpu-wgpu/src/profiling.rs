@@ -123,14 +123,7 @@ impl GpuProfiler {
     /// After submission + poll(Wait), read back the resolved timestamps.
     pub fn read_timestamps(&self, device: &wgpu::Device) -> Result<Vec<u64>, ZkGpuError> {
         let slice = self.readback_buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = tx.send(result);
-        });
-        device.poll(wgpu::Maintain::Wait);
-        rx.recv()
-            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?
-            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
+        async_util::map_buffer_read_blocking(device, slice)?;
 
         let mapped = slice.get_mapped_range();
         let timestamps: Vec<u64> = bytemuck::cast_slice(&mapped).to_vec();

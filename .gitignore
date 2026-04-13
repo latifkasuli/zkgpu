@@ -15,7 +15,7 @@ flamegraph.svg
 /research/
 
 # Build artifacts and test results
-/test-results/
+**/test-results/
 **/build/
 !**/gradle/wrapper/
 

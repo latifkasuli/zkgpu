@@ -95,7 +95,9 @@ pub(crate) async fn map_buffer_read(
     });
 
     #[cfg(not(target_arch = "wasm32"))]
-    device.poll(wgpu::Maintain::Wait);
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
 
     // Suppress unused variable warning on wasm where poll is not called.
     #[cfg(target_arch = "wasm32")]
@@ -103,6 +105,36 @@ pub(crate) async fn map_buffer_read(
 
     future
         .await
+        .map_err(|e| ZkGpuError::BackendError(Box::new(e)))
+}
+
+// ---------------------------------------------------------------------------
+// Blocking buffer mapping helper
+// ---------------------------------------------------------------------------
+
+/// Synchronously map a buffer slice for reading.
+///
+/// Uses an `mpsc` channel + `device.poll(Wait)` to fire the mapping
+/// callback inline, matching the pattern wgpu recommends for blocking
+/// readback. Propagates both poll errors (device loss) and mapping
+/// errors.
+///
+/// On native this is the standard blocking readback path. On wasm it
+/// compiles but is not the preferred path — use [`map_buffer_read`]
+/// (async) instead for browser targets.
+pub(crate) fn map_buffer_read_blocking(
+    device: &wgpu::Device,
+    slice: wgpu::BufferSlice<'_>,
+) -> Result<(), ZkGpuError> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
+    rx.recv()
+        .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?
         .map_err(|e| ZkGpuError::BackendError(Box::new(e)))
 }
 
@@ -120,14 +152,19 @@ pub(crate) async fn map_buffer_read(
 /// completes implicitly before `map_async` callbacks fire, so the
 /// subsequent buffer readback already provides the synchronization
 /// barrier we need.
-pub(crate) async fn wait_for_submission(device: &wgpu::Device, queue: &wgpu::Queue) {
+pub(crate) async fn wait_for_submission(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Result<(), ZkGpuError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (sender, future) = CallbackFuture::new();
         queue.on_submitted_work_done(move || {
             sender.send(());
         });
-        device.poll(wgpu::Maintain::Wait);
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
         future.await;
     }
 
@@ -138,4 +175,6 @@ pub(crate) async fn wait_for_submission(device: &wgpu::Device, queue: &wgpu::Que
     {
         let _ = (device, queue);
     }
+
+    Ok(())
 }
