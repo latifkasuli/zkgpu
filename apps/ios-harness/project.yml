@@ -1,0 +1,57 @@
+name: ZkgpuHarness
+options:
+  bundleIdPrefix: com.zkgpu
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.3"
+  generateEmptyDirectories: false
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+
+targets:
+  ZkgpuHarness:
+    type: application
+    platform: iOS
+    sources:
+      - path: ZkgpuHarness
+        excludes:
+          - "**/.DS_Store"
+    settings:
+      base:
+        INFOPLIST_FILE: ZkgpuHarness/Resources/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: ZkgpuHarness/ZkgpuHarness-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/RustBridge/include"
+        LIBRARY_SEARCH_PATHS:
+          - "$(SRCROOT)/RustBridge/build/device"
+        OTHER_LDFLAGS:
+          - "-lzkgpu_ffi"
+          - "-lresolv"
+        PRODUCT_BUNDLE_IDENTIFIER: com.zkgpu.ZkgpuHarness
+        DEVELOPMENT_TEAM: WMG5Q625D5
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: false
+    dependencies: []
+
+  ZkgpuHarnessTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ZkgpuHarnessTests
+        excludes:
+          - "**/.DS_Store"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zkgpu.ZkgpuHarnessTests
+        DEVELOPMENT_TEAM: WMG5Q625D5
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/RustBridge/include"
+        SWIFT_OBJC_BRIDGING_HEADER: ZkgpuHarness/ZkgpuHarness-Bridging-Header.h
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ZkgpuHarness.app/ZkgpuHarness"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: ZkgpuHarness

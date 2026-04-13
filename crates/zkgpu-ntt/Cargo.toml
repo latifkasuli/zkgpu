@@ -1,0 +1,13 @@
+[package]
+name = "zkgpu-ntt"
+description = "GPU-accelerated NTT for zkgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zkgpu-core = { workspace = true }
+bytemuck = { workspace = true }
+log = { workspace = true }

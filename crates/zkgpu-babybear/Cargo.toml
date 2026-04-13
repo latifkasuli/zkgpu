@@ -1,0 +1,15 @@
+[package]
+name = "zkgpu-babybear"
+description = "BabyBear (p = 2^31 - 2^27 + 1) field implementation for zkgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zkgpu-core = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+rand = "0.8"

@@ -1,0 +1,468 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		40EA79C7DC24D6535A4EBBAE /* ZkgpuBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD751A067FEC826533AE019 /* ZkgpuBridge.swift */; };
+		8DB1EBC7BC52DD1CB0190236 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F6C7C79E794A648C34BCA917 /* Assets.xcassets */; };
+		95A5DA98B251B3FC0B40D959 /* ZkgpuHarnessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A365A23AE5B0859BDA1B66FF /* ZkgpuHarnessApp.swift */; };
+		C8E7D1F90383C1F6CB7F5549 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81FCD077A8B978CEADF8734 /* AppDelegate.swift */; };
+		E0748E55805A08E40AB4D78E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B4299C8635B19F3AF393DF /* ContentView.swift */; };
+		FA23CE7C4D9CE0610D154DEA /* ZkgpuHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631E8B6E1E44DE892541A53C /* ZkgpuHarnessTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		3C0DCE13B8AA38D60966E900 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CF4A74E83732422744324153 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CB156730A4B1AF7426057427;
+			remoteInfo = ZkgpuHarness;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		2E0C3867F5D3FB939671356A /* ZkgpuHarness.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ZkgpuHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		41B4299C8635B19F3AF393DF /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		5304A220C7DAE86FD1493355 /* ZkgpuHarnessTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ZkgpuHarnessTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		631E8B6E1E44DE892541A53C /* ZkgpuHarnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZkgpuHarnessTests.swift; sourceTree = "<group>"; };
+		91335C888BC714B4570D845A /* ZkgpuHarness-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ZkgpuHarness-Bridging-Header.h"; sourceTree = "<group>"; };
+		A365A23AE5B0859BDA1B66FF /* ZkgpuHarnessApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZkgpuHarnessApp.swift; sourceTree = "<group>"; };
+		D63A397F173A0CE486A465E5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		D81FCD077A8B978CEADF8734 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		EFD751A067FEC826533AE019 /* ZkgpuBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZkgpuBridge.swift; sourceTree = "<group>"; };
+		F6C7C79E794A648C34BCA917 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		044A5DEF78A08492D44EFCB3 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				D63A397F173A0CE486A465E5 /* Info.plist */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		0D958A3B3AE42449FAF07BA7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				2E0C3867F5D3FB939671356A /* ZkgpuHarness.app */,
+				5304A220C7DAE86FD1493355 /* ZkgpuHarnessTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		5992419A00E2495617BE5697 = {
+			isa = PBXGroup;
+			children = (
+				5FD082C64C086C29DE9C803B /* ZkgpuHarness */,
+				92C81C5BEA134E627E9F7303 /* ZkgpuHarnessTests */,
+				0D958A3B3AE42449FAF07BA7 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5FD082C64C086C29DE9C803B /* ZkgpuHarness */ = {
+			isa = PBXGroup;
+			children = (
+				D81FCD077A8B978CEADF8734 /* AppDelegate.swift */,
+				F6C7C79E794A648C34BCA917 /* Assets.xcassets */,
+				41B4299C8635B19F3AF393DF /* ContentView.swift */,
+				EFD751A067FEC826533AE019 /* ZkgpuBridge.swift */,
+				91335C888BC714B4570D845A /* ZkgpuHarness-Bridging-Header.h */,
+				A365A23AE5B0859BDA1B66FF /* ZkgpuHarnessApp.swift */,
+				044A5DEF78A08492D44EFCB3 /* Resources */,
+			);
+			path = ZkgpuHarness;
+			sourceTree = "<group>";
+		};
+		92C81C5BEA134E627E9F7303 /* ZkgpuHarnessTests */ = {
+			isa = PBXGroup;
+			children = (
+				631E8B6E1E44DE892541A53C /* ZkgpuHarnessTests.swift */,
+			);
+			path = ZkgpuHarnessTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		594815751750D756E94E2C9F /* ZkgpuHarnessTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C80325BBBBE67CA314D50464 /* Build configuration list for PBXNativeTarget "ZkgpuHarnessTests" */;
+			buildPhases = (
+				353B6AD7BF49D9B7D2D60AF2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3D00471193F00D870047346D /* PBXTargetDependency */,
+			);
+			name = ZkgpuHarnessTests;
+			packageProductDependencies = (
+			);
+			productName = ZkgpuHarnessTests;
+			productReference = 5304A220C7DAE86FD1493355 /* ZkgpuHarnessTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CB156730A4B1AF7426057427 /* ZkgpuHarness */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6F719DFE4A275052CCB79B26 /* Build configuration list for PBXNativeTarget "ZkgpuHarness" */;
+			buildPhases = (
+				0A7DDE5A768869DD975DC3B4 /* Sources */,
+				F6A595FEF69FE09102D9A820 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ZkgpuHarness;
+			packageProductDependencies = (
+			);
+			productName = ZkgpuHarness;
+			productReference = 2E0C3867F5D3FB939671356A /* ZkgpuHarness.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CF4A74E83732422744324153 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1630;
+				TargetAttributes = {
+					594815751750D756E94E2C9F = {
+						DevelopmentTeam = WMG5Q625D5;
+						ProvisioningStyle = Automatic;
+					};
+					CB156730A4B1AF7426057427 = {
+						DevelopmentTeam = WMG5Q625D5;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 8466A60A53900421FEABA437 /* Build configuration list for PBXProject "ZkgpuHarness" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 5992419A00E2495617BE5697;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 0D958A3B3AE42449FAF07BA7 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CB156730A4B1AF7426057427 /* ZkgpuHarness */,
+				594815751750D756E94E2C9F /* ZkgpuHarnessTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F6A595FEF69FE09102D9A820 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8DB1EBC7BC52DD1CB0190236 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0A7DDE5A768869DD975DC3B4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C8E7D1F90383C1F6CB7F5549 /* AppDelegate.swift in Sources */,
+				E0748E55805A08E40AB4D78E /* ContentView.swift in Sources */,
+				40EA79C7DC24D6535A4EBBAE /* ZkgpuBridge.swift in Sources */,
+				95A5DA98B251B3FC0B40D959 /* ZkgpuHarnessApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		353B6AD7BF49D9B7D2D60AF2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FA23CE7C4D9CE0610D154DEA /* ZkgpuHarnessTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		3D00471193F00D870047346D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CB156730A4B1AF7426057427 /* ZkgpuHarness */;
+			targetProxy = 3C0DCE13B8AA38D60966E900 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		14D8281BD8D53B3202B99B98 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = WMG5Q625D5;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/include",
+				);
+				INFOPLIST_FILE = ZkgpuHarness/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/build/device",
+				);
+				OTHER_LDFLAGS = (
+					"-lzkgpu_ffi",
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.zkgpu.ZkgpuHarness;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "ZkgpuHarness/ZkgpuHarness-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5FE17BDC26329F3D1F479BCD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = WMG5Q625D5;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/include",
+				);
+				INFOPLIST_FILE = ZkgpuHarness/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/build/device",
+				);
+				OTHER_LDFLAGS = (
+					"-lzkgpu_ffi",
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.zkgpu.ZkgpuHarness;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "ZkgpuHarness/ZkgpuHarness-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		61F391DA5D43B64962F5F427 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+		9F0FC710D5E6941C398699E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = WMG5Q625D5;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/include",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.zkgpu.ZkgpuHarnessTests;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "ZkgpuHarness/ZkgpuHarness-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ZkgpuHarness.app/ZkgpuHarness";
+			};
+			name = Release;
+		};
+		AF610CA5362D21F7751806E9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+		EB70B49D0CE6834E6ADB6844 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = WMG5Q625D5;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/include",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.zkgpu.ZkgpuHarnessTests;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "ZkgpuHarness/ZkgpuHarness-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ZkgpuHarness.app/ZkgpuHarness";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6F719DFE4A275052CCB79B26 /* Build configuration list for PBXNativeTarget "ZkgpuHarness" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				14D8281BD8D53B3202B99B98 /* Debug */,
+				5FE17BDC26329F3D1F479BCD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8466A60A53900421FEABA437 /* Build configuration list for PBXProject "ZkgpuHarness" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF610CA5362D21F7751806E9 /* Debug */,
+				61F391DA5D43B64962F5F427 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C80325BBBBE67CA314D50464 /* Build configuration list for PBXNativeTarget "ZkgpuHarnessTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EB70B49D0CE6834E6ADB6844 /* Debug */,
+				9F0FC710D5E6941C398699E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CF4A74E83732422744324153 /* Project object */;
+}

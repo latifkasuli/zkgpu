@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">zkgpu Harness</string>
+    <string name="title">zkgpu Android Harness</string>
+    <string name="subtitle">Thin phone-side shell for smoke, validation, and benchmark suites backed by Rust.</string>
+    <string name="run_smoke">Run Smoke Suite</string>
+    <string name="run_validation">Run Validation Suite</string>
+    <string name="run_benchmark">Run Benchmark Suite</string>
+    <string name="run_crossover">Crossover Benchmark (2^18 - 2^22)</string>
+    <string name="refresh_version">Refresh Rust Version</string>
+    <string name="version_loading">Loading Rust bridge version...</string>
+    <string name="status_idle">Idle. Connect a device, package libzkgpu_ffi.so, then run a suite.</string>
+    <string name="output_path_empty">Report path: none yet</string>
+    <string name="output_path_value">Report path: %1$s</string>
+    <string name="raw_response_placeholder">Latest JSON response will appear here.</string>
+    <string name="family_label">NTT Family:</string>
+    <string-array name="family_options">
+        <item>Auto</item>
+        <item>Stockham</item>
+        <item>Four-Step</item>
+    </string-array>
+</resources>

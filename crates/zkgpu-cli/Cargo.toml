@@ -1,0 +1,25 @@
+[package]
+name = "zkgpu-cli"
+description = "Benchmark and debug utility for zkgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "zkgpu"
+path = "src/main.rs"
+
+[dependencies]
+zkgpu-core = { workspace = true }
+zkgpu-wgpu = { workspace = true }
+zkgpu-babybear = { workspace = true }
+zkgpu-ntt = { workspace = true }
+zkgpu-report = { workspace = true }
+zkgpu-testkit = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"

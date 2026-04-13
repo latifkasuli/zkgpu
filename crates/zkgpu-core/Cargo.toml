@@ -1,0 +1,12 @@
+[package]
+name = "zkgpu-core"
+description = "Backend-agnostic traits and types for GPU-accelerated ZK primitives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+bytemuck = { workspace = true }

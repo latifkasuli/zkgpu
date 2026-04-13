@@ -1,0 +1,32 @@
+[package]
+name = "zkgpu-web"
+description = "WebAssembly bindings for zkgpu browser harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zkgpu-core = { workspace = true }
+zkgpu-wgpu = { workspace = true }
+zkgpu-babybear = { workspace = true }
+zkgpu-ntt = { workspace = true }
+zkgpu-report = { workspace = true }
+wgpu = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+web-time = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+console_error_panic_hook = "0.1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+serde_json = { workspace = true }

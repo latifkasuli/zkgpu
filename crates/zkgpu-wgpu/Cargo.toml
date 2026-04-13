@@ -1,0 +1,32 @@
+[package]
+name = "zkgpu-wgpu"
+description = "wgpu backend for zkgpu (Metal, Vulkan, DX12, WebGPU)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zkgpu-core = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+log = { workspace = true }
+web-time = { workspace = true }
+
+[dependencies.zkgpu-babybear]
+workspace = true
+
+[dependencies.zkgpu-ntt]
+workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = { workspace = true }
+
+[dev-dependencies]
+env_logger = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "ntt_bench"
+harness = false

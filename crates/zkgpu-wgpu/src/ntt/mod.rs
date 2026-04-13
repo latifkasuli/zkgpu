@@ -1,0 +1,219 @@
+mod four_step;
+mod planner;
+pub(crate) mod stockham;
+pub(crate) mod twiddles;
+
+use zkgpu_babybear::BabyBear;
+use zkgpu_core::{NttDirection, NttPlan, ZkGpuError};
+
+use crate::buffer::WgpuBuffer;
+use crate::device::WgpuDevice;
+
+pub use planner::{LocalKernelHint, PlannerPolicy};
+use planner::{plan_ntt, PlannedNtt, MAX_BABYBEAR_LOG_N};
+
+pub use stockham::NttTimings;
+
+/// GPU NTT execution plan for BabyBear fields.
+///
+/// Family selection is driven by `GpuFamily` and `PlatformClass` from
+/// the device's `CapabilityProfile`:
+///
+/// - `Browser`: Stockham only (transpose not validated in browser).
+/// - `Apple` (any platform): Stockham only — benchmarked on M4 Pro,
+///   four-step does not outperform at any tested size.
+/// - Mobile families (`Adreno`, `Mali`, `PowerVrVolcanic`, `Xclipse`) on
+///   `AndroidNative`: four-step for `log_n >= 18` — benchmarked on
+///   Adreno 750, four-step wins from 2^18 through 2^21.
+/// - Mobile families on non-Android platforms: four-step for `log_n >= 20`
+///   (provisional — S24 Ultra data not assumed to generalize beyond Android).
+/// - All other families (Intel, Nvidia, AMD, unknown):
+///   four-step for `log_n >= 20` (provisional, pending discrete GPU benchmarks).
+///
+/// Thresholds are derived from `PlannerPolicy` and revisable with benchmark data.
+pub struct WgpuNttPlan {
+    inner: PlanImpl,
+    direction: NttDirection,
+    log_n: u32,
+}
+
+enum PlanImpl {
+    Stockham(stockham::StockhamPlan),
+    FourStep(four_step::FourStepPlan),
+}
+
+impl WgpuNttPlan {
+    /// Create a new NTT plan for BabyBear transforms of size `2^log_n`.
+    ///
+    /// `log_n` must be in the range `1..=27` (BabyBear 2-adicity bound).
+    /// The planner automatically selects the best family based on device
+    /// capabilities.
+    pub fn new(
+        device: &WgpuDevice,
+        log_n: u32,
+        direction: NttDirection,
+    ) -> Result<Self, ZkGpuError> {
+        let policy = PlannerPolicy::from_caps(device.caps());
+        Self::new_with_policy(device, log_n, direction, &policy)
+    }
+
+    /// Create a plan with an explicit planner policy.
+    ///
+    /// Useful for benchmarks that need to force a specific family, or for
+    /// integration tests that must exercise the four-step path on hardware
+    /// where it would not normally be selected.
+    pub fn new_with_policy(
+        device: &WgpuDevice,
+        log_n: u32,
+        direction: NttDirection,
+        policy: &PlannerPolicy,
+    ) -> Result<Self, ZkGpuError> {
+        if log_n > MAX_BABYBEAR_LOG_N {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "log_n={log_n} exceeds BabyBear 2-adicity (max {MAX_BABYBEAR_LOG_N})"
+            )));
+        }
+
+        // Preflight: verify the device can hold N-element storage buffers.
+        // Both Stockham and Four-Step allocate scratch buffers of size N×4
+        // that are bound as full storage buffers via as_entire_binding().
+        let n_bytes = (1u64 << log_n) * std::mem::size_of::<u32>() as u64;
+        let storage_limit = device.caps.max_storage_buffer_size();
+        if n_bytes > storage_limit {
+            return Err(ZkGpuError::BufferSize {
+                requested: n_bytes,
+                limit: storage_limit,
+            });
+        }
+
+        let planned = plan_ntt(log_n, policy)?;
+
+        // Total-memory preflight: check aggregate N-sized buffer footprint.
+        //
+        // Stockham allocates 1 N-sized scratch buffer; the user provides
+        // 1 N-sized data buffer → 2 × N×4 total.
+        //
+        // Four-Step allocates 2 N-sized scratch buffers + 2 N-sized diagonal
+        // twiddle tables; plus the user's data buffer → 5 × N×4 total.
+        //
+        // We check against max_buffer_size as a proxy for practical device
+        // memory capacity. wgpu does not expose total GPU memory, but
+        // max_buffer_size reflects what the driver considers feasible for
+        // a single allocation and is a reasonable aggregate ceiling on
+        // mobile UMA devices.
+        let n_buffer_count: u64 = match &planned {
+            PlannedNtt::Stockham(_) => 2, // 1 scratch + 1 user data
+            PlannedNtt::FourStep(_) => 5, // 2 scratch + 2 twiddle + 1 user data
+        };
+        let total_n_bytes = n_buffer_count * n_bytes;
+        if total_n_bytes > device.caps.max_buffer_size {
+            return Err(ZkGpuError::BufferSize {
+                requested: total_n_bytes,
+                limit: device.caps.max_buffer_size,
+            });
+        }
+
+        let local_hint = policy.local_kernel_hint();
+        let inner = match planned {
+            PlannedNtt::Stockham(config) => {
+                PlanImpl::Stockham(stockham::StockhamPlan::new(
+                    device, config, direction, local_hint,
+                )?)
+            }
+            PlannedNtt::FourStep(config) => {
+                PlanImpl::FourStep(four_step::FourStepPlan::new(device, config, direction)?)
+            }
+        };
+
+        device.save_pipeline_cache();
+
+        Ok(Self {
+            inner,
+            direction,
+            log_n,
+        })
+    }
+
+    /// Total number of GPU dispatches (NTT stages + optional scaling).
+    pub fn num_dispatches(&self) -> u32 {
+        match &self.inner {
+            PlanImpl::Stockham(p) => p.num_dispatches(),
+            PlanImpl::FourStep(p) => p.num_dispatches(),
+        }
+    }
+
+    /// Execute the full NTT in a single command submission.
+    pub fn execute_kernels(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<BabyBear>,
+    ) -> Result<(), ZkGpuError> {
+        match &mut self.inner {
+            PlanImpl::Stockham(p) => p.execute_kernels(device, buf),
+            PlanImpl::FourStep(p) => p.execute_kernels(device, buf),
+        }
+    }
+
+    /// Execute the full NTT with GPU timestamp profiling.
+    pub fn execute_kernels_profiled(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<BabyBear>,
+    ) -> Result<Option<NttTimings>, ZkGpuError> {
+        match &mut self.inner {
+            PlanImpl::Stockham(p) => p.execute_kernels_profiled(device, buf),
+            PlanImpl::FourStep(p) => p.execute_kernels_profiled(device, buf),
+        }
+    }
+
+    /// Async variant of [`execute_kernels`](Self::execute_kernels). Browser-safe.
+    pub async fn execute_kernels_async(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<BabyBear>,
+    ) -> Result<(), ZkGpuError> {
+        match &mut self.inner {
+            PlanImpl::Stockham(p) => p.execute_kernels_async(device, buf).await,
+            PlanImpl::FourStep(p) => p.execute_kernels_async(device, buf).await,
+        }
+    }
+
+    /// Async variant of [`execute_kernels_profiled`](Self::execute_kernels_profiled).
+    /// Browser-safe. Uses `web_time::Instant` for wall-clock timing.
+    pub async fn execute_kernels_profiled_async(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<BabyBear>,
+    ) -> Result<Option<NttTimings>, ZkGpuError> {
+        match &mut self.inner {
+            PlanImpl::Stockham(p) => p.execute_kernels_profiled_async(device, buf).await,
+            PlanImpl::FourStep(p) => p.execute_kernels_profiled_async(device, buf).await,
+        }
+    }
+
+    /// Human-readable name for the selected kernel family.
+    pub fn family_name(&self) -> &'static str {
+        match &self.inner {
+            PlanImpl::Stockham(_) => "stockham",
+            PlanImpl::FourStep(_) => "four-step",
+        }
+    }
+}
+
+impl NttPlan<BabyBear, WgpuDevice> for WgpuNttPlan {
+    fn execute(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<BabyBear>,
+    ) -> Result<(), ZkGpuError> {
+        self.execute_kernels(device, buf)
+    }
+
+    fn log_n(&self) -> u32 {
+        self.log_n
+    }
+
+    fn direction(&self) -> NttDirection {
+        self.direction
+    }
+}

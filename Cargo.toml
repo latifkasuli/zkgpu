@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/zkgpu-core",
+    "crates/zkgpu-wgpu",
+    "crates/zkgpu-babybear",
+    "crates/zkgpu-ntt",
+    "crates/zkgpu-plonky3",
+    "crates/zkgpu-cli",
+    "crates/zkgpu-testkit",
+    "crates/zkgpu-report",
+    "crates/zkgpu-pacer",
+    "crates/zkgpu-ffi",
+    "crates/zkgpu-web",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/latifkasuli/zkgpu"
+rust-version = "1.85.0"
+
+[workspace.dependencies]
+zkgpu-core = { path = "crates/zkgpu-core" }
+zkgpu-wgpu = { path = "crates/zkgpu-wgpu" }
+zkgpu-babybear = { path = "crates/zkgpu-babybear" }
+zkgpu-ntt = { path = "crates/zkgpu-ntt" }
+zkgpu-plonky3 = { path = "crates/zkgpu-plonky3" }
+zkgpu-testkit = { path = "crates/zkgpu-testkit" }
+zkgpu-report = { path = "crates/zkgpu-report" }
+zkgpu-pacer = { path = "crates/zkgpu-pacer" }
+
+wgpu = "24"
+bytemuck = { version = "1", features = ["derive"] }
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+pollster = "0.4"
+web-time = "1"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+criterion = { version = "0.5", features = ["html_reports"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
+debug = true

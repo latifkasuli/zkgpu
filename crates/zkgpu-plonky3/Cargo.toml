@@ -1,0 +1,14 @@
+[package]
+name = "zkgpu-plonky3"
+description = "Adapter between zkgpu and Plonky3 field/DFT interfaces"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+zkgpu-core = { workspace = true }
+zkgpu-babybear = { workspace = true }
+zkgpu-wgpu = { workspace = true }

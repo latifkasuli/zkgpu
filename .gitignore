@@ -1,0 +1,37 @@
+/target
+Cargo.lock
+*.swp
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/
+*.profraw
+perf.data*
+flamegraph.svg
+
+# Internal planning and research docs
+/plan/
+/research/
+
+# Build artifacts and test results
+/test-results/
+**/build/
+!**/gradle/wrapper/
+
+# Binary artifacts
+*.so
+*.a
+*.dylib
+*.xcuserstate
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+
+# Xcode
+*.xcuserdata/
+*.xcworkspace/
+!*.xcodeproj/project.pbxproj
+
+# Android Gradle
+.gradle/
+local.properties

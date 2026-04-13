@@ -1,0 +1,20 @@
+[package]
+name = "zkgpu-testkit"
+description = "Shared validation and benchmark suite runner for zkgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zkgpu-core = { workspace = true }
+zkgpu-wgpu = { workspace = true }
+zkgpu-babybear = { workspace = true }
+zkgpu-ntt = { workspace = true }
+zkgpu-report = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

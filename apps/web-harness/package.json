@@ -1,0 +1,23 @@
+{
+  "name": "zkgpu-web-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:wasm": "wasm-pack build ../../crates/zkgpu-web --target web --out-dir ../../apps/web-harness/pkg --out-name zkgpu_web",
+    "dev": "npm run build:wasm && vite",
+    "build": "npm run build:wasm && vite build",
+    "preview": "vite preview",
+    "serve": "npm run build && npx serve dist",
+    "test": "npx playwright test",
+    "test:chromium": "npx playwright test --project=chromium",
+    "test:firefox": "npx playwright test --project=firefox",
+    "test:webkit": "npx playwright test --project=webkit",
+    "test:headed": "npx playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "typescript": "^5.4",
+    "vite": "^6.0"
+  }
+}

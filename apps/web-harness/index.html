@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>zkGPU Web Harness</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-dim: #8b949e;
+      --green: #3fb950;
+      --red: #f85149;
+      --blue: #58a6ff;
+      --yellow: #d29922;
+      --mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .subtitle { color: var(--text-dim); font-size: 0.875rem; margin-bottom: 1.5rem; }
+
+    /* Device info panel */
+    #device-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      color: var(--text-dim);
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    button {
+      font-family: inherit;
+      font-size: 0.875rem;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    button:hover { border-color: var(--blue); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.primary { background: #238636; border-color: #2ea043; }
+    button.primary:hover { background: #2ea043; }
+
+    select {
+      font-family: inherit;
+      font-size: 0.875rem;
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    /* Status bar */
+    #status {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+      display: none;
+    }
+    #status.info { display: block; background: #0d419d33; border: 1px solid #1f6feb44; color: var(--blue); }
+    #status.success { display: block; background: #23863633; border: 1px solid #2ea04344; color: var(--green); }
+    #status.error { display: block; background: #f8514933; border: 1px solid #da363244; color: var(--red); }
+
+    /* Summary bar */
+    #summary {
+      display: none;
+      gap: 1rem;
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      margin-bottom: 1rem;
+      font-family: var(--mono);
+      font-size: 0.875rem;
+    }
+    #summary.visible { display: flex; flex-wrap: wrap; }
+    .summary-item { display: flex; gap: 0.25rem; }
+    .summary-label { color: var(--text-dim); }
+
+    /* Results table */
+    #results {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      font-family: var(--mono);
+    }
+    #results th {
+      text-align: left;
+      padding: 0.5rem;
+      border-bottom: 2px solid var(--border);
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+    #results td {
+      padding: 0.5rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .pass { color: var(--green); }
+    .fail { color: var(--red); }
+    .timing { color: var(--yellow); }
+
+    /* JSON export area */
+    #json-output {
+      display: none;
+      margin-top: 1rem;
+    }
+    #json-output textarea {
+      width: 100%;
+      min-height: 200px;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      resize: vertical;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      body { padding: 0.5rem; }
+      h1 { font-size: 1.2rem; }
+      #results { font-size: 0.7rem; }
+      .controls { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <h1>zkGPU Web Harness</h1>
+  <p class="subtitle">Browser WebGPU NTT validation &amp; benchmarking</p>
+
+  <div id="device-panel">Initializing GPU device...</div>
+
+  <div class="controls">
+    <select id="suite-select">
+      <option value="Smoke">Smoke (2 cases)</option>
+      <option value="Validation">Validation (full)</option>
+      <option value="Benchmark">Benchmark (profiled)</option>
+    </select>
+    <select id="family-select">
+      <option value="Auto">Auto family</option>
+      <option value="Stockham">Force Stockham</option>
+      <option value="FourStep">Force Four-Step</option>
+    </select>
+    <button id="run-btn" class="primary" disabled>Run Suite</button>
+    <button id="export-btn" disabled>Export JSON</button>
+    <button id="copy-btn" disabled>Copy JSON</button>
+    <button id="download-btn" disabled>Download JSON</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="summary"></div>
+
+  <table id="results">
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Name</th>
+        <th>log_n</th>
+        <th>Direction</th>
+        <th>Family</th>
+        <th>Wall (ms)</th>
+        <th>GPU (ms)</th>
+        <th>Mismatches</th>
+      </tr>
+    </thead>
+    <tbody id="results-body"></tbody>
+  </table>
+
+  <div id="json-output">
+    <textarea id="json-text" readonly></textarea>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
