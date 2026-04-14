@@ -78,15 +78,37 @@ class ZkgpuInstrumentedTest {
 
     /**
      * Crossover benchmark: forward + inverse NTTs at log_n 18–22,
-     * 5 iterations + 2 warmups with GPU profiling.
-     * This exercises the four-step NTT path on capable hardware.
+     * 5 iterations + 2 warmups with GPU profiling. Auto family:
+     * the planner picks Stockham or FourStep based on log_n + capability.
      */
     @Test
     fun crossoverBenchmarkCompletes() {
-        val requestJson = HarnessJson.crossoverBenchmarkRequestJson(FamilyChoice.Auto)
+        runCrossoverBenchmark(FamilyChoice.Auto, tagPrefix = "CROSSOVER")
+    }
+
+    /**
+     * Crossover benchmark forced onto the Stockham family (all log_n use
+     * Stockham autosort; the planner's four-step threshold is overridden).
+     */
+    @Test
+    fun crossoverBenchmarkStockhamFamily() {
+        runCrossoverBenchmark(FamilyChoice.Stockham, tagPrefix = "CROSSOVER_STOCKHAM")
+    }
+
+    /**
+     * Crossover benchmark forced onto the four-step family at all log_n.
+     * Exercises the large-N decomposition even at small sizes.
+     */
+    @Test
+    fun crossoverBenchmarkFourStepFamily() {
+        runCrossoverBenchmark(FamilyChoice.FourStep, tagPrefix = "CROSSOVER_FOURSTEP")
+    }
+
+    private fun runCrossoverBenchmark(family: FamilyChoice, tagPrefix: String) {
+        val requestJson = HarnessJson.crossoverBenchmarkRequestJson(family)
         val responseJson = ZkgpuBridge.runRequestJson(requestJson)
         val file = HarnessStorage.writeLatestReport(context, responseJson)
-        Log.i(TAG, "crossover benchmark path=${file.absolutePath}")
+        Log.i(TAG, "$tagPrefix path=${file.absolutePath} family_override=${family.name}")
 
         val response = JSONObject(responseJson)
         assertTrue(response.optString("error"), response.optBoolean("ok", false))
@@ -96,17 +118,64 @@ class ZkgpuInstrumentedTest {
         assertEquals(0, summary.getInt("failed_cases"))
         assertTrue("expected 10 crossover cases", summary.getInt("total_cases") == 10)
 
-        // Log per-case timings
+        // Suite-level kernel metadata (field + ntt_variant).
+        val kernel = report.optJSONObject("kernel")
+        val ntt_variant = kernel?.optString("ntt_variant").orEmpty()
+        Log.i(TAG, "$tagPrefix kernel.ntt_variant=$ntt_variant")
+
+        // Device metadata — emitted once per run so artifacts capture the
+        // adapter limits that drive kernel-tuning decisions (shared-memory
+        // budget, workgroup size, etc.).
+        val device = report.optJSONObject("device")
+        if (device != null) {
+            val wgStorage = device.optInt("max_compute_workgroup_storage_size_bytes", -1)
+            Log.i(
+                TAG,
+                "$tagPrefix device name=\"${device.optString("name")}\" " +
+                    "backend=${device.optString("backend")} " +
+                    "tier=${device.optString("tier")} " +
+                    "family=${device.optString("gpu_family")} " +
+                    "driver=\"${device.optString("driver_info")}\" " +
+                    "max_buffer=${device.optLong("max_buffer_size_bytes")} " +
+                    "max_wg_x=${device.optInt("max_workgroup_size_x")} " +
+                    "max_invocations=${device.optInt("max_compute_invocations")} " +
+                    "max_wg_storage_bytes=$wgStorage",
+            )
+        }
+
+        // Per-case: actual kernel_family selected + per-stage GPU timings.
         val cases = report.getJSONArray("cases")
         for (i in 0 until cases.length()) {
             val c = cases.getJSONObject(i)
             val name = c.optString("name")
+            val kernelFamily = c.optString("kernel_family", "unknown")
             val timings = c.optJSONObject("timings")
             val wallNs = timings?.optLong("wall_time_ns", -1) ?: -1L
             val gpuNs = timings?.optLong("gpu_total_ns", -1) ?: -1L
             val wallMs = if (wallNs > 0) wallNs / 1_000_000.0 else -1.0
             val gpuMs = if (gpuNs > 0) gpuNs / 1_000_000.0 else -1.0
-            Log.i(TAG, "CROSSOVER $name: wall=${"%.2f".format(wallMs)}ms gpu=${"%.2f".format(gpuMs)}ms")
+            Log.i(
+                TAG,
+                "$tagPrefix $name: family=$kernelFamily wall=${"%.2f".format(wallMs)}ms gpu=${"%.2f".format(gpuMs)}ms",
+            )
+
+            // Emit per-stage GPU timings (label + duration_ns) so the
+            // Xclipse log22 investigation can attribute time to a specific
+            // stage (r4/r2/local fused/inverse scale for Stockham;
+            // transpose/leaf/twiddle for four-step).
+            val stages = timings?.optJSONArray("gpu_stage_ns")
+            if (stages != null) {
+                for (s in 0 until stages.length()) {
+                    val stage = stages.getJSONObject(s)
+                    val label = stage.optString("label")
+                    val durNs = stage.optLong("duration_ns", 0)
+                    val durMs = durNs / 1_000_000.0
+                    Log.i(
+                        TAG,
+                        "$tagPrefix $name stage[$s] \"$label\" gpu=${"%.3f".format(durMs)}ms",
+                    )
+                }
+            }
         }
     }
 
