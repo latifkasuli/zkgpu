@@ -16,6 +16,47 @@ use crate::profiling::{GpuProfiler, GpuTiming, TimestampSpan};
 use super::planner::FourStepPlanConfig;
 use super::stockham::NttTimings;
 
+/// Which transpose kernel the four-step plan uses.
+///
+/// `Tile16` is the legacy 16x16 kernel with one element per thread
+/// (`babybear_fourstep_transpose.wgsl`). `Tile32` is the tuned 32x32
+/// variant with 4 elements per thread (`babybear_fourstep_transpose_tiled32.wgsl`).
+///
+/// The active variant is selected via the `ZKGPU_TRANSPOSE_VARIANT`
+/// environment variable (`tile16` or `tile32`); unset defaults to `Tile16`.
+/// Selection happens once at `FourStepPlan::new` and is frozen for the
+/// lifetime of the plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransposeVariant {
+    Tile16,
+    Tile32,
+}
+
+impl TransposeVariant {
+    /// Read the variant from `ZKGPU_TRANSPOSE_VARIANT`, defaulting to `Tile16`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn from_env() -> Self {
+        match std::env::var("ZKGPU_TRANSPOSE_VARIANT").as_deref() {
+            Ok("tile32") => Self::Tile32,
+            _ => Self::Tile16,
+        }
+    }
+
+    /// wasm target has no env; always use the legacy variant there.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn from_env() -> Self {
+        Self::Tile16
+    }
+
+    /// Tile edge length (shared-memory tile is `tile_size × (tile_size+1)`).
+    pub(crate) fn tile_size(self) -> u32 {
+        match self {
+            Self::Tile16 => 16,
+            Self::Tile32 => 32,
+        }
+    }
+}
+
 /// GPU four-step NTT plan for BabyBear fields.
 ///
 /// Correct Cooley-Tukey four-step decomposition for N = R × C:
@@ -41,6 +82,8 @@ pub(crate) struct FourStepPlan {
 
     pub(super) transpose_pipeline: Arc<wgpu::ComputePipeline>,
     pub(super) transpose_bgl: Arc<wgpu::BindGroupLayout>,
+    /// Which transpose kernel is active (frozen at plan construction).
+    pub(super) transpose_variant: TransposeVariant,
     /// R×C → C×R transpose params (phases 1 and 6)
     pub(super) transpose_rc_to_cr_params: wgpu::Buffer,
     /// C×R → R×C transpose params (phase 4)

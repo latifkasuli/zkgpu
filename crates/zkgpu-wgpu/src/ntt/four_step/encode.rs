@@ -17,6 +17,14 @@ impl FourStepPlan {
         let buf_size = (self.config.n as u64) * std::mem::size_of::<u32>() as u64;
         let mut dispatch_idx = 0usize;
 
+        // Workgroup counts scale with the selected transpose variant's tile size.
+        // The `FourStepPlanConfig` fields use the legacy Tile16 sizing; when
+        // the tuned Tile32 kernel is active we recompute here so the dispatch
+        // matches the shader's workgroup layout.
+        let tile = self.transpose_variant.tile_size();
+        let (rc_wgx, rc_wgy) = (self.config.cols.div_ceil(tile), self.config.rows.div_ceil(tile));
+        let (cr_wgx, cr_wgy) = (self.config.rows.div_ceil(tile), self.config.cols.div_ceil(tile));
+
         // Phase 1: Transpose R×C → C×R (buf → transpose_scratch → buf)
         dispatch_idx = self.encode_transpose(
             wgpu_device,
@@ -24,8 +32,8 @@ impl FourStepPlan {
             &buf.inner,
             &self.transpose_scratch_buffer,
             &self.transpose_rc_to_cr_params,
-            self.config.transpose_workgroups_x,
-            self.config.transpose_workgroups_y,
+            rc_wgx,
+            rc_wgy,
             ts_writes,
             dispatch_idx,
         );
@@ -94,8 +102,8 @@ impl FourStepPlan {
             &buf.inner,
             &self.transpose_scratch_buffer,
             &self.transpose_cr_to_rc_params,
-            self.config.transpose_workgroups_y, // C×R: x-tiles = R/tile, y-tiles = C/tile
-            self.config.transpose_workgroups_x,
+            cr_wgx, // C×R: x-tiles = R/tile, y-tiles = C/tile
+            cr_wgy,
             ts_writes,
             dispatch_idx,
         );
@@ -126,8 +134,8 @@ impl FourStepPlan {
             &buf.inner,
             &self.transpose_scratch_buffer,
             &self.transpose_rc_to_cr_params,
-            self.config.transpose_workgroups_x,
-            self.config.transpose_workgroups_y,
+            rc_wgx,
+            rc_wgy,
             ts_writes,
             dispatch_idx,
         );

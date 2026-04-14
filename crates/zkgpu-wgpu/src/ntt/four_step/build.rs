@@ -5,7 +5,7 @@ use zkgpu_core::{GpuField, NttDirection, ZkGpuError};
 use crate::device::WgpuDevice;
 use crate::dispatch::plan_linear_dispatch;
 
-use super::FourStepPlan;
+use super::{FourStepPlan, TransposeVariant};
 use super::params::{build_batched_r2_stage_params, build_batched_r4_stage_params};
 
 use super::super::common::{bgl_storage_entry, bgl_uniform_entry};
@@ -21,8 +21,10 @@ const FOURSTEP_LEAF_R4_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_fourstep_leaf_r4.wgsl");
 const FOURSTEP_TWIDDLE_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_fourstep_twiddle.wgsl");
-const FOURSTEP_TRANSPOSE_SOURCE: &str =
+const FOURSTEP_TRANSPOSE_SOURCE_TILE16: &str =
     include_str!("../../kernels/portable/babybear_fourstep_transpose.wgsl");
+const FOURSTEP_TRANSPOSE_SOURCE_TILE32: &str =
+    include_str!("../../kernels/portable/babybear_fourstep_transpose_tiled32.wgsl");
 const SCALE_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_scale.wgsl");
 
@@ -150,14 +152,22 @@ impl FourStepPlan {
                     immediate_size: 0,
                 });
 
-        let transpose_module = reg.get_or_create_module(
-            &device.device,
-            FOURSTEP_TRANSPOSE_SOURCE,
-            "Four-step transpose shader",
-        );
+        let transpose_variant = TransposeVariant::from_env();
+        let (transpose_source, transpose_label) = match transpose_variant {
+            TransposeVariant::Tile16 => (
+                FOURSTEP_TRANSPOSE_SOURCE_TILE16,
+                "Four-step transpose shader (tile16)",
+            ),
+            TransposeVariant::Tile32 => (
+                FOURSTEP_TRANSPOSE_SOURCE_TILE32,
+                "Four-step transpose shader (tile32)",
+            ),
+        };
+        let transpose_module =
+            reg.get_or_create_module(&device.device, transpose_source, transpose_label);
         let transpose_pipeline = reg.get_or_create_pipeline(
             &device.device,
-            FOURSTEP_TRANSPOSE_SOURCE,
+            transpose_source,
             "transpose_tiles",
             TRANSPOSE_BGL_LABEL,
             &transpose_pipeline_layout,
@@ -464,6 +474,7 @@ impl FourStepPlan {
             twiddle_dispatch,
             transpose_pipeline,
             transpose_bgl,
+            transpose_variant,
             transpose_rc_to_cr_params,
             transpose_cr_to_rc_params,
             scale_pipeline,
