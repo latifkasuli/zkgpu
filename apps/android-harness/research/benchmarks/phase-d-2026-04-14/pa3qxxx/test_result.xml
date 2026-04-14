@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuite name='' hostname='localhost' tests='2' failures='0' skipped='0' errors='0' time='2.649' timestamp='2026-04-14T05:04:02'>
+  <properties />
+  <testcase name='crossoverBenchmarkCompletes' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='2.381' />
+  <testcase name='benchmarkSuitePassesWithTimings' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.268' />
+</testsuite>

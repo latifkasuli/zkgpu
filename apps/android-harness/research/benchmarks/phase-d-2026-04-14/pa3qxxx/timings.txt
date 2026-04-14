@@ -1,0 +1,14 @@
+ZkgpuHarnessTest: CROSSOVER forward_log18: wall=1.63ms gpu=0.46ms
+ZkgpuHarnessTest: CROSSOVER inverse_log18: wall=1.53ms gpu=0.51ms
+ZkgpuHarnessTest: CROSSOVER forward_log19: wall=2.13ms gpu=0.95ms
+ZkgpuHarnessTest: CROSSOVER inverse_log19: wall=2.49ms gpu=1.08ms
+ZkgpuHarnessTest: CROSSOVER forward_log20: wall=4.22ms gpu=2.32ms
+ZkgpuHarnessTest: CROSSOVER inverse_log20: wall=4.33ms gpu=2.49ms
+ZkgpuHarnessTest: CROSSOVER forward_log21: wall=8.52ms gpu=5.50ms
+ZkgpuHarnessTest: CROSSOVER inverse_log21: wall=9.05ms gpu=5.84ms
+ZkgpuHarnessTest: CROSSOVER forward_log22: wall=17.12ms gpu=11.82ms
+ZkgpuHarnessTest: CROSSOVER inverse_log22: wall=16.58ms gpu=12.20ms
+ZkgpuHarnessTest: BENCH benchmark_forward_log10: wall=0.46ms gpu=0.01ms
+ZkgpuHarnessTest: BENCH benchmark_forward_log14: wall=0.26ms gpu=0.02ms
+ZkgpuHarnessTest: BENCH benchmark_forward_log18: wall=1.36ms gpu=0.43ms
+ZkgpuHarnessTest: BENCH benchmark_forward_log20: wall=4.70ms gpu=2.36ms
