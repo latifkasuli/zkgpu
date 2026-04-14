@@ -34,6 +34,12 @@ pub(crate) enum TransposeVariant {
 
 impl TransposeVariant {
     /// Read the variant from `ZKGPU_TRANSPOSE_VARIANT`, defaulting to `Tile16`.
+    ///
+    /// FTL A/B on 2026-04-14 (Samsung A56 / Xclipse 540 and Pixel 9 Pro /
+    /// Mali-G715) measured tile32's transpose win at ≤5.2% of four-step total
+    /// GPU time — below the ≥20% keeper threshold. Tile32 stays in-tree behind
+    /// the env var for future experimentation, but `Tile16` remains the
+    /// universal default.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn from_env() -> Self {
         match std::env::var("ZKGPU_TRANSPOSE_VARIANT").as_deref() {
