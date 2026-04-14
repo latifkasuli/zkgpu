@@ -7,14 +7,6 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-[features]
-## Enable the subgroup-accelerated DIT local kernel on Vulkan via
-## pre-compiled SPIR-V. Bypasses Naga's missing `enable subgroups;`
-## support (gfx-rs/wgpu#5555). Requires Vulkan 1.1+, SUBGROUP feature
-## with min_subgroup_size >= 32, and ZKGPU_EXPERIMENTAL_VK_SUBGROUP=1
-## env var for Auto activation. ForceSubgroup bypasses the env gate.
-subgroup-vulkan-spirv = ["wgpu/spirv"]
-
 [dependencies]
 zkgpu-core = { workspace = true }
 wgpu = { workspace = true }

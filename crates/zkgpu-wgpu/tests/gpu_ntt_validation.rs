@@ -1,7 +1,7 @@
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuBuffer, GpuDevice, NttDirection, NttPlan, ZkGpuError};
 use zkgpu_ntt::ntt_cpu_reference;
-use zkgpu_wgpu::{LocalKernelHint, PlannerPolicy, WgpuDevice, WgpuNttPlan};
+use zkgpu_wgpu::{PlannerPolicy, WgpuDevice, WgpuNttPlan};
 
 fn init_device() -> WgpuDevice {
     WgpuDevice::new().expect("GPU device required for integration tests")
@@ -440,7 +440,7 @@ fn profiled_forward_has_no_scale_span() {
 // ---------------------------------------------------------------------------
 
 fn force_portable_local_policy() -> PlannerPolicy {
-    PlannerPolicy::stockham_only().with_local_kernel_hint(LocalKernelHint::ForcePortable)
+    PlannerPolicy::stockham_only()
 }
 
 fn assert_portable_local_matches_cpu(log_n: u32, direction: NttDirection, input: &[BabyBear]) {
@@ -518,107 +518,3 @@ fn portable_local_roundtrip_log13() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Local kernel variant: subgroup-accelerated DIT (forced regardless of caps)
-//
-// These tests require actual SUBGROUP device support. On devices without
-// subgroups, the shader will fail to compile and the test will error out —
-// that is the expected signal that the subgroup kernel cannot run here.
-// ---------------------------------------------------------------------------
-
-fn force_subgroup_local_policy() -> PlannerPolicy {
-    PlannerPolicy::stockham_only().with_local_kernel_hint(LocalKernelHint::ForceSubgroup)
-}
-
-fn assert_subgroup_local_matches_cpu(log_n: u32, direction: NttDirection, input: &[BabyBear]) {
-    let device = init_device();
-
-    if !device.caps().has_subgroup || device.caps().min_subgroup_size < 32 {
-        eprintln!(
-            "skipping subgroup test: device '{}' needs SUBGROUP with min_subgroup_size >= 32",
-            device.caps().device_name
-        );
-        return;
-    }
-
-    let policy = force_subgroup_local_policy();
-    let mut plan = WgpuNttPlan::new_with_policy(&device, log_n, direction, &policy)
-        .expect("failed to create subgroup-local plan");
-
-    let mut buf = device.upload(input).expect("upload failed");
-    plan.execute(&device, &mut buf).expect("GPU NTT failed");
-    let gpu_result = buf.read_to_vec().expect("readback failed");
-
-    let mut cpu_result = input.to_vec();
-    ntt_cpu_reference(&mut cpu_result, direction);
-
-    for (i, (gpu, cpu)) in gpu_result.iter().zip(cpu_result.iter()).enumerate() {
-        assert_eq!(
-            gpu, cpu,
-            "subgroup-local mismatch at idx={i}: gpu={gpu}, cpu={cpu} (log_n={log_n}, dir={direction:?})"
-        );
-    }
-}
-
-#[test]
-fn subgroup_local_forward_log10() {
-    let n = 1u32 << 10;
-    let data: Vec<BabyBear> = (0..n).map(BabyBear::new).collect();
-    assert_subgroup_local_matches_cpu(10, NttDirection::Forward, &data);
-}
-
-#[test]
-fn subgroup_local_inverse_log10() {
-    let n = 1u32 << 10;
-    let data: Vec<BabyBear> = (0..n).map(BabyBear::new).collect();
-    assert_subgroup_local_matches_cpu(10, NttDirection::Inverse, &data);
-}
-
-#[test]
-fn subgroup_local_forward_log11() {
-    let n = 1u32 << 11;
-    let data: Vec<BabyBear> = (0..n).map(BabyBear::new).collect();
-    assert_subgroup_local_matches_cpu(11, NttDirection::Forward, &data);
-}
-
-#[test]
-fn subgroup_local_forward_log14() {
-    let n = 1u32 << 14;
-    let data: Vec<BabyBear> = (0..n).map(BabyBear::new).collect();
-    assert_subgroup_local_matches_cpu(14, NttDirection::Forward, &data);
-}
-
-#[test]
-fn subgroup_local_roundtrip_log13() {
-    let n = 1u32 << 13;
-    let original: Vec<BabyBear> = (0..n).map(BabyBear::new).collect();
-
-    let device = init_device();
-
-    if !device.caps().has_subgroup || device.caps().min_subgroup_size < 32 {
-        eprintln!(
-            "skipping subgroup test: device '{}' needs SUBGROUP with min_subgroup_size >= 32",
-            device.caps().device_name
-        );
-        return;
-    }
-
-    let policy = force_subgroup_local_policy();
-
-    let mut fwd_plan = WgpuNttPlan::new_with_policy(&device, 13, NttDirection::Forward, &policy)
-        .expect("forward plan failed");
-    let mut inv_plan = WgpuNttPlan::new_with_policy(&device, 13, NttDirection::Inverse, &policy)
-        .expect("inverse plan failed");
-
-    let mut buf = device.upload(&original).expect("upload failed");
-    fwd_plan.execute(&device, &mut buf).expect("forward failed");
-    inv_plan.execute(&device, &mut buf).expect("inverse failed");
-
-    let result = buf.read_to_vec().expect("readback failed");
-    for (i, (got, want)) in result.iter().zip(original.iter()).enumerate() {
-        assert_eq!(
-            got, want,
-            "subgroup-local roundtrip mismatch at idx={i}: got={got}, want={want}"
-        );
-    }
-}

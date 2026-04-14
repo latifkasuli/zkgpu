@@ -6,7 +6,7 @@ mod stockham_config;
 mod tests;
 
 pub(crate) use constants::{BLOCK_SIZE, LOG_BLOCK, MAX_BABYBEAR_LOG_N, WORKGROUP_SIZE};
-pub use policy::{LocalKernelHint, PlannerPolicy};
+pub use policy::PlannerPolicy;
 pub(crate) use four_step_config::FourStepPlanConfig;
 pub(crate) use stockham_config::StockhamPlanConfig;
 

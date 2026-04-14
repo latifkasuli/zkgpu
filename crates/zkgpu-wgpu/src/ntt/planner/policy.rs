@@ -6,18 +6,6 @@ use super::constants::{DEFAULT_FOUR_STEP_THRESHOLD, MOBILE_UMA_FOUR_STEP_THRESHO
 // Planner policy — capability-driven family selection
 // ---------------------------------------------------------------------------
 
-/// Hint for which local kernel variant to use in the Stockham tail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum LocalKernelHint {
-    /// Use device capabilities to decide (subgroup if available, else R4).
-    #[default]
-    Auto,
-    /// Force the subgroup-accelerated DIT kernel (requires SUBGROUP feature).
-    ForceSubgroup,
-    /// Force the portable R4 DIF kernel (ignores subgroup capability).
-    ForcePortable,
-}
-
 /// Per-device crossover thresholds that control NTT family selection.
 ///
 /// Derived from `CapabilityProfile` at plan construction time. The policy
@@ -30,7 +18,6 @@ pub enum LocalKernelHint {
 #[non_exhaustive]
 pub struct PlannerPolicy {
     pub(super) four_step_threshold: Option<u32>,
-    pub(super) local_kernel_hint: LocalKernelHint,
 }
 
 impl PlannerPolicy {
@@ -38,7 +25,6 @@ impl PlannerPolicy {
     pub fn stockham_only() -> Self {
         Self {
             four_step_threshold: None,
-            local_kernel_hint: LocalKernelHint::Auto,
         }
     }
 
@@ -46,7 +32,6 @@ impl PlannerPolicy {
     pub fn with_four_step_threshold(threshold: u32) -> Self {
         Self {
             four_step_threshold: Some(threshold),
-            local_kernel_hint: LocalKernelHint::Auto,
         }
     }
 
@@ -54,7 +39,6 @@ impl PlannerPolicy {
     pub fn force_four_step() -> Self {
         Self {
             four_step_threshold: Some(1),
-            local_kernel_hint: LocalKernelHint::Auto,
         }
     }
 
@@ -62,17 +46,6 @@ impl PlannerPolicy {
     /// or `None` if four-step is disabled.
     pub fn four_step_threshold(&self) -> Option<u32> {
         self.four_step_threshold
-    }
-
-    /// Returns the local kernel hint.
-    pub fn local_kernel_hint(&self) -> LocalKernelHint {
-        self.local_kernel_hint
-    }
-
-    /// Return a copy of this policy with the local kernel hint overridden.
-    pub fn with_local_kernel_hint(mut self, hint: LocalKernelHint) -> Self {
-        self.local_kernel_hint = hint;
-        self
     }
 
     /// Derive a planner policy from the device's capability profile.
@@ -86,8 +59,8 @@ impl PlannerPolicy {
     /// Apple's 60 KB threadgroup memory favours Stockham at every size.
     ///
     /// ## BrowserWebGpu (any physical GPU behind the sandbox)
-    /// Stockham only, portable local kernel, no subgroup. The browser caps
-    /// capabilities regardless of physical hardware underneath.
+    /// Stockham only. The browser caps capabilities regardless of
+    /// physical hardware underneath.
     ///
     /// ## Vulkan (family matters — diverse hardware behind one API)
     /// - `Mali/Immortalis`: Stockham only. No dedicated on-chip shared
@@ -114,31 +87,19 @@ impl PlannerPolicy {
     /// ## DX12 (same hardware as Vulkan, Windows only)
     /// Same family-level dispatch as Vulkan.
     pub fn from_caps(caps: &CapabilityProfile) -> Self {
-        let base = match caps.backend {
+        match caps.backend {
             // ----- Metal: always Apple, always stockham -----
             wgpu::Backend::Metal => Self::stockham_only(),
 
             // ----- Browser: portable baseline, no family dispatch -----
-            wgpu::Backend::BrowserWebGpu => Self {
-                four_step_threshold: None,
-                local_kernel_hint: LocalKernelHint::ForcePortable,
-            },
+            wgpu::Backend::BrowserWebGpu => Self::stockham_only(),
 
             // ----- Vulkan / DX12: family dispatch -----
             wgpu::Backend::Vulkan | wgpu::Backend::Dx12 => Self::from_vulkan_family(caps),
 
             // ----- OpenGL / Empty / other: conservative fallback -----
             _ => Self::with_four_step_threshold(DEFAULT_FOUR_STEP_THRESHOLD),
-        };
-
-        // The resolver (`resolve_local_kernel`) now handles all gating:
-        // cargo feature, Vulkan backend check, subgroup caps, env flag.
-        // The SPIR-V path bypasses Naga's broken WGSL subgroups frontend
-        // (gfx-rs/wgpu#5555). Non-Vulkan backends and non-SPIR-V builds
-        // automatically fall back to PortableR4 via the resolver.
-        //
-        // Browser WebGPU already forces ForcePortable above.
-        base
+        }
     }
 
     /// Family-level dispatch for Vulkan and DX12 backends where the same

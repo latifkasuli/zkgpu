@@ -213,17 +213,11 @@ fn four_step_dispatch_count() {
 // --- Policy-driven family selection tests ---
 
 fn native_policy() -> PlannerPolicy {
-    PlannerPolicy {
-        four_step_threshold: Some(DEFAULT_FOUR_STEP_THRESHOLD),
-        local_kernel_hint: LocalKernelHint::Auto,
-    }
+    PlannerPolicy::with_four_step_threshold(DEFAULT_FOUR_STEP_THRESHOLD)
 }
 
 fn web_policy() -> PlannerPolicy {
-    PlannerPolicy {
-        four_step_threshold: None,
-        local_kernel_hint: LocalKernelHint::Auto,
-    }
+    PlannerPolicy::stockham_only()
 }
 
 #[test]
@@ -282,10 +276,7 @@ fn native_tiers_use_stockham_below_threshold() {
 
 #[test]
 fn custom_threshold_overrides_default() {
-    let low_threshold = PlannerPolicy {
-        four_step_threshold: Some(14),
-        local_kernel_hint: LocalKernelHint::Auto,
-    };
+    let low_threshold = PlannerPolicy::with_four_step_threshold(14);
     let p14 = plan_ntt(14, &low_threshold).unwrap();
     assert!(matches!(p14, PlannedNtt::FourStep(_)));
 
@@ -295,10 +286,7 @@ fn custom_threshold_overrides_default() {
 
 #[test]
 fn disabled_four_step_ignores_threshold() {
-    let disabled = PlannerPolicy {
-        four_step_threshold: None,
-        local_kernel_hint: LocalKernelHint::Auto,
-    };
+    let disabled = PlannerPolicy::stockham_only();
     let p = plan_ntt(25, &disabled).unwrap();
     assert!(matches!(p, PlannedNtt::Stockham(_)));
 }
@@ -359,13 +347,6 @@ fn from_caps_browser_disables_four_step() {
     let caps = mock_caps_identity(GpuFamily::Unknown, PlatformClass::Browser);
     let policy = PlannerPolicy::from_caps(&caps);
     assert_eq!(policy.four_step_threshold(), None);
-}
-
-#[test]
-fn from_caps_browser_forces_portable_local() {
-    let caps = mock_caps_identity(GpuFamily::Unknown, PlatformClass::Browser);
-    let policy = PlannerPolicy::from_caps(&caps);
-    assert_eq!(policy.local_kernel_hint(), LocalKernelHint::ForcePortable);
 }
 
 #[test]

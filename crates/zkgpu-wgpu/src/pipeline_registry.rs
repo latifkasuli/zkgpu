@@ -128,97 +128,10 @@ impl PipelineRegistry {
             .clone()
     }
 
-    /// Get or create a shader module from pre-compiled SPIR-V bytes.
-    ///
-    /// The SPIR-V binary is embedded via `include_bytes!` at build time.
-    /// Keyed by the byte slice pointer, analogous to `get_or_create_module`
-    /// keying on `include_str!` source pointers.
-    ///
-    /// Only available when the `subgroup-vulkan-spirv` feature is enabled
-    /// (which activates `wgpu/spirv` for `ShaderSource::SpirV`).
-    #[cfg(feature = "subgroup-vulkan-spirv")]
-    pub(crate) fn get_or_create_module_spirv(
-        &self,
-        device: &wgpu::Device,
-        spirv_bytes: &'static [u8],
-        label: &'static str,
-    ) -> Arc<wgpu::ShaderModule> {
-        let key = ShaderKey {
-            source_ptr: spirv_bytes.as_ptr() as usize,
-        };
-        let mut modules = self.modules.lock().expect("pipeline registry lock");
-        modules
-            .entry(key)
-            .or_insert_with(|| {
-                let spirv_words = spirv_bytes_to_words(spirv_bytes);
-                Arc::new(device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some(label),
-                    source: wgpu::ShaderSource::SpirV(spirv_words.into()),
-                }))
-            })
-            .clone()
-    }
-
-    /// Get or create a compute pipeline, keyed by an arbitrary source
-    /// identifier rather than a WGSL source string pointer.
-    ///
-    /// Used by the SPIR-V path where the key is the `include_bytes!`
-    /// pointer. WGSL callers should continue using `get_or_create_pipeline`.
-    #[allow(clippy::too_many_arguments)]
-    #[allow(dead_code)] // used only with subgroup-vulkan-spirv feature
-    pub(crate) fn get_or_create_pipeline_keyed(
-        &self,
-        device: &wgpu::Device,
-        source_key: usize,
-        entry_point: &'static str,
-        bgl_label: &'static str,
-        layout: &wgpu::PipelineLayout,
-        module: &wgpu::ShaderModule,
-        cache: Option<&wgpu::PipelineCache>,
-    ) -> Arc<wgpu::ComputePipeline> {
-        let key = PipelineKey {
-            source_ptr: source_key,
-            entry_point,
-            layout_key: BglKey { label: bgl_label },
-        };
-        let mut pipelines = self.pipelines.lock().expect("pipeline registry lock");
-        pipelines
-            .entry(key)
-            .or_insert_with(|| {
-                Arc::new(
-                    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                        label: Some(entry_point),
-                        layout: Some(layout),
-                        module,
-                        entry_point: Some(entry_point),
-                        compilation_options: Default::default(),
-                        cache,
-                    }),
-                )
-            })
-            .clone()
-    }
-
     /// Number of cached pipelines (for testing / diagnostics).
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn pipeline_count(&self) -> usize {
         self.pipelines.lock().expect("lock").len()
     }
-}
-
-/// Convert a SPIR-V byte slice to a word slice.
-///
-/// SPIR-V modules are always 4-byte aligned and `include_bytes!` may
-/// not guarantee alignment, so we parse words explicitly.
-#[cfg(feature = "subgroup-vulkan-spirv")]
-pub(crate) fn spirv_bytes_to_words(bytes: &[u8]) -> Vec<u32> {
-    assert!(
-        bytes.len() % 4 == 0,
-        "SPIR-V binary size must be a multiple of 4 bytes"
-    );
-    bytes
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect()
 }

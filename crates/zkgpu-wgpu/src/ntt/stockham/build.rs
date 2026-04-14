@@ -7,11 +7,9 @@ use crate::dispatch::plan_linear_dispatch;
 
 use super::StockhamPlan;
 use super::super::common::{bgl_storage_entry, bgl_uniform_entry};
-use super::super::local_kernel::{resolve_local_kernel, ResolvedLocalKernel};
-use super::super::planner::{LocalKernelHint, StockhamPlanConfig, WORKGROUP_SIZE};
+use super::super::planner::{StockhamPlanConfig, WORKGROUP_SIZE};
 use super::super::twiddles::{
-    precompute_local_r4_twiddles, precompute_stockham_r4_twiddles,
-    precompute_subgroup_local_twiddles, shoup_quotient,
+    precompute_local_r4_twiddles, precompute_stockham_r4_twiddles, shoup_quotient,
 };
 
 const STOCKHAM_R2_SOURCE: &str =
@@ -23,12 +21,6 @@ const STOCKHAM_LOCAL_R4_SOURCE: &str =
 const SCALE_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_scale.wgsl");
 
-/// Pre-compiled SPIR-V for the subgroup-accelerated DIT local kernel.
-/// Only included when the `subgroup-vulkan-spirv` feature is active.
-#[cfg(feature = "subgroup-vulkan-spirv")]
-const STOCKHAM_LOCAL_SUBGROUP_SPIRV: &[u8] =
-    include_bytes!("../../kernels/native/babybear_stockham_local_subgroup.spv");
-
 const NTT_BGL_LABEL: &str = "Stockham NTT bind group layout";
 const SCALE_BGL_LABEL: &str = "Scale bind group layout";
 
@@ -38,7 +30,6 @@ impl StockhamPlan {
         device: &WgpuDevice,
         config: StockhamPlanConfig,
         direction: NttDirection,
-        local_hint: LocalKernelHint,
     ) -> Result<Self, ZkGpuError> {
         let log_n = config.log_n;
 
@@ -101,50 +92,21 @@ impl StockhamPlan {
             device.pipeline_cache.as_ref(),
         );
 
-        // --- Local pipeline (subgroup-accelerated DIT or portable R4 DIF) ---
-        //
-        // The resolver checks cargo features, backend, subgroup caps, and
-        // the experimental env flag. ForceSubgroup errors if unsatisfiable;
-        // Auto silently falls back to PortableR4.
-        let (resolved_local, _reason) = resolve_local_kernel(local_hint, &device.caps)?;
-        let use_subgroup_local = resolved_local == ResolvedLocalKernel::SubgroupSpirV;
-
-        let local_pipeline = if use_subgroup_local {
-            #[cfg(feature = "subgroup-vulkan-spirv")]
-            {
-                let local_module = reg.get_or_create_module_spirv(
-                    &device.device,
-                    STOCKHAM_LOCAL_SUBGROUP_SPIRV,
-                    "Stockham local subgroup shader (SPIR-V)",
-                );
-                reg.get_or_create_pipeline_keyed(
-                    &device.device,
-                    STOCKHAM_LOCAL_SUBGROUP_SPIRV.as_ptr() as usize,
-                    "main",
-                    NTT_BGL_LABEL,
-                    &ntt_pipeline_layout,
-                    &local_module,
-                    device.pipeline_cache.as_ref(),
-                )
-            }
-            #[cfg(not(feature = "subgroup-vulkan-spirv"))]
-            unreachable!("SubgroupSpirV requires the subgroup-vulkan-spirv cargo feature")
-        } else {
-            let local_module = reg.get_or_create_module(
-                &device.device,
-                STOCKHAM_LOCAL_R4_SOURCE,
-                "Stockham local R4 shader",
-            );
-            reg.get_or_create_pipeline(
-                &device.device,
-                STOCKHAM_LOCAL_R4_SOURCE,
-                "stockham_local_r4",
-                NTT_BGL_LABEL,
-                &ntt_pipeline_layout,
-                &local_module,
-                device.pipeline_cache.as_ref(),
-            )
-        };
+        // --- Local pipeline (portable radix-4 DIF) ---
+        let local_module = reg.get_or_create_module(
+            &device.device,
+            STOCKHAM_LOCAL_R4_SOURCE,
+            "Stockham local R4 shader",
+        );
+        let local_pipeline = reg.get_or_create_pipeline(
+            &device.device,
+            STOCKHAM_LOCAL_R4_SOURCE,
+            "stockham_local_r4",
+            NTT_BGL_LABEL,
+            &ntt_pipeline_layout,
+            &local_module,
+            device.pipeline_cache.as_ref(),
+        );
 
         // --- Scale pipeline (in-place element-wise multiply) ---
         let scale_bind_group_layout = reg.get_or_create_bgl(
@@ -306,19 +268,14 @@ impl StockhamPlan {
             r4_stage_param_buffers.push(buf);
         }
 
-        // --- Local twiddles and params (DIT for subgroup, DIF for R4) ---
+        // --- Local twiddles and params (radix-4 DIF) ---
         let (local_twiddles, local_twiddles_prime, local_omega4, local_omega4_prime) =
-            if use_subgroup_local {
-                precompute_subgroup_local_twiddles(direction)
-            } else {
-                precompute_local_r4_twiddles(direction)
-            };
-        let local_label = if use_subgroup_local { "subgroup" } else { "R4" };
+            precompute_local_r4_twiddles(direction);
         let local_twiddle_buffer =
             device
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("Stockham local {local_label} twiddles")),
+                    label: Some("Stockham local R4 twiddles"),
                     contents: bytemuck::cast_slice(&local_twiddles),
                     usage: wgpu::BufferUsages::STORAGE,
                 });
@@ -326,22 +283,17 @@ impl StockhamPlan {
             device
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("Stockham local {local_label} twiddles prime")),
+                    label: Some("Stockham local R4 twiddles prime"),
                     contents: bytemuck::cast_slice(&local_twiddles_prime),
                     usage: wgpu::BufferUsages::STORAGE,
                 });
 
-        let subgroup_log = if use_subgroup_local {
-            device.caps.min_subgroup_size.trailing_zeros()
-        } else {
-            0
-        };
-        let local_params = [config.local_stride, local_omega4, local_omega4_prime, subgroup_log];
+        let local_params = [config.local_stride, local_omega4, local_omega4_prime, 0u32];
         let local_param_buffer =
             device
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("Stockham local {local_label} params")),
+                    label: Some("Stockham local R4 params"),
                     contents: bytemuck::cast_slice(&local_params),
                     usage: wgpu::BufferUsages::UNIFORM,
                 });

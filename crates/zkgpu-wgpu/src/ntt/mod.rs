@@ -1,6 +1,5 @@
 mod common;
 mod four_step;
-pub(crate) mod local_kernel;
 mod planner;
 pub(crate) mod stockham;
 pub(crate) mod twiddles;
@@ -11,10 +10,7 @@ use zkgpu_core::{NttDirection, NttPlan, ZkGpuError};
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 
-// Re-exported for Phase C reporting and downstream diagnostics.
-#[allow(unused_imports)]
-pub use local_kernel::{ResolvedLocalKernel, SubgroupUnavailableReason};
-pub use planner::{LocalKernelHint, PlannerPolicy};
+pub use planner::PlannerPolicy;
 use planner::{plan_ntt, PlannedNtt, MAX_BABYBEAR_LOG_N};
 
 pub use stockham::NttTimings;
@@ -118,11 +114,10 @@ impl WgpuNttPlan {
             });
         }
 
-        let local_hint = policy.local_kernel_hint();
         let inner = match planned {
             PlannedNtt::Stockham(config) => {
                 PlanImpl::Stockham(stockham::StockhamPlan::new(
-                    device, config, direction, local_hint,
+                    device, config, direction,
                 )?)
             }
             PlannedNtt::FourStep(config) => {

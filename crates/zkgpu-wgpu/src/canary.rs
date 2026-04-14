@@ -1,19 +1,9 @@
 //! Canary compute dispatch — verifies the GPU driver can execute
 //! the actual NTT kernel shader and produce correct results.
 //!
-//! The canary runs two validation passes at device init:
-//!
-//! 1. **Default kernel** — the kernel selected by `PlannerPolicy::from_caps`
-//!    (Auto). Dispatched **twice** in separate submissions to catch broken
-//!    Vulkan drivers (e.g. PowerVR Rogue) that crash on the second
-//!    `vkQueueSubmit`.
-//!
-//! 2. **Subgroup SPIR-V kernel** (when hardware supports it but the Auto
-//!    path didn't select it). This covers the `ForceSubgroup` opt-in path
-//!    so callers who explicitly request subgroup acceleration already have
-//!    canary coverage. Dispatched once (double-dispatch is for crash
-//!    detection, not relevant for the subgroup path on healthy Vulkan
-//!    drivers).
+//! The canary runs the portable radix-4 local Stockham kernel **twice**
+//! in separate submissions to catch broken Vulkan drivers (e.g. PowerVR
+//! Rogue) that crash on the second `vkQueueSubmit`.
 //!
 //! After each pass, the GPU output is compared element-by-element against
 //! a CPU reference NTT. This catches silent arithmetic corruption from
@@ -31,35 +21,23 @@ use zkgpu_ntt::ntt_cpu_reference;
 
 use crate::async_util::map_buffer_read;
 use crate::caps::CapabilityProfile;
-use crate::ntt::PlannerPolicy;
-use crate::ntt::local_kernel::{resolve_local_kernel, ResolvedLocalKernel};
-use crate::ntt::twiddles::{precompute_local_r4_twiddles, precompute_subgroup_local_twiddles};
+use crate::ntt::twiddles::precompute_local_r4_twiddles;
 
 /// Portable local radix-4 DIF NTT shader.
 const NTT_LOCAL_R4_WGSL: &str =
     include_str!("kernels/portable/babybear_stockham_local_r4.wgsl");
 
-/// Pre-compiled SPIR-V for the subgroup-accelerated DIT local kernel.
-#[cfg(feature = "subgroup-vulkan-spirv")]
-const NTT_LOCAL_SUBGROUP_SPIRV: &[u8] =
-    include_bytes!("kernels/native/babybear_stockham_local_subgroup.spv");
-
-/// Number of dispatches for the default kernel canary. Two submissions
-/// catch drivers that corrupt state after the first `vkQueueSubmit`.
-const DEFAULT_CANARY_DISPATCHES: usize = 2;
+/// Number of dispatches for the canary. Two submissions catch drivers
+/// that corrupt state after the first `vkQueueSubmit`.
+const CANARY_DISPATCHES: usize = 2;
 
 /// Canary test size: a single 1024-element local NTT block.
 const CANARY_N: u32 = 1024;
 
 /// Run canary compute dispatches at device init.
 ///
-/// Validates **both** the default kernel path (selected by `Auto` policy)
-/// and, when hardware supports it, the subgroup SPIR-V fast path. This
-/// ensures that callers using `ForceSubgroup` later get the same
-/// init-time coverage as the default path.
-///
 /// Returns `Ok(())` on healthy drivers, or
-/// `Err(ZkGpuError::GpuComputeUnsupported)` if either kernel produces
+/// `Err(ZkGpuError::GpuComputeUnsupported)` if the kernel produces
 /// incorrect results. On truly broken drivers (segfault), this crashes
 /// at init time rather than mid-workload.
 pub(crate) async fn canary_dispatch(
@@ -71,7 +49,6 @@ pub(crate) async fn canary_dispatch(
     // --- Pre-flight: refuse to dispatch on known-broken drivers ---
     crate::caps::is_gpu_usable(caps)?;
 
-    // Shared bind group layout — both local kernels use the same 5 bindings.
     let bind_group_layout = create_canary_bgl(device);
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("zkgpu canary layout"),
@@ -79,118 +56,38 @@ pub(crate) async fn canary_dispatch(
         immediate_size: 0,
     });
 
-    // ---- Pass 1: Default (Auto) kernel validation ----
-    //
-    // Uses the same resolver as stockham/build.rs so platform overrides
-    // (e.g. browser ForcePortable) are respected.
-    let policy = PlannerPolicy::from_caps(caps);
-    let (resolved, _reason) = resolve_local_kernel(policy.local_kernel_hint(), caps)
-        .map_err(|e| ZkGpuError::GpuComputeUnsupported(format!(
-            "canary local kernel resolution failed: {e}"
-        )))?;
-    let default_is_subgroup = resolved == ResolvedLocalKernel::SubgroupSpirV;
-
     let shader_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let (default_module, default_entry) = if default_is_subgroup {
-        #[cfg(feature = "subgroup-vulkan-spirv")]
-        {
-            let spirv_words = crate::pipeline_registry::spirv_bytes_to_words(NTT_LOCAL_SUBGROUP_SPIRV);
-            let m = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("zkgpu canary ntt local (SPIR-V)"),
-                source: wgpu::ShaderSource::SpirV(spirv_words.into()),
-            });
-            (m, "main")
-        }
-        #[cfg(not(feature = "subgroup-vulkan-spirv"))]
-        unreachable!("SubgroupSpirV requires the subgroup-vulkan-spirv cargo feature")
-    } else {
-        let m = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("zkgpu canary ntt local"),
-            source: wgpu::ShaderSource::Wgsl(NTT_LOCAL_R4_WGSL.into()),
-        });
-        (m, "stockham_local_r4")
-    };
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("zkgpu canary ntt local"),
+        source: wgpu::ShaderSource::Wgsl(NTT_LOCAL_R4_WGSL.into()),
+    });
     if let Some(err) = shader_scope.pop().await {
         return Err(ZkGpuError::GpuComputeUnsupported(format!(
             "canary NTT shader compilation error: {err}"
         )));
     }
 
-    let default_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("zkgpu canary pipeline"),
         layout: Some(&pipeline_layout),
-        module: &default_module,
-        entry_point: Some(default_entry),
+        module: &module,
+        entry_point: Some("stockham_local_r4"),
         compilation_options: Default::default(),
         cache: pipeline_cache,
     });
 
-    let (tw, tw_p, o4, o4p) = if default_is_subgroup {
-        precompute_subgroup_local_twiddles(NttDirection::Forward)
-    } else {
-        precompute_local_r4_twiddles(NttDirection::Forward)
-    };
-    let subgroup_log = if default_is_subgroup {
-        caps.min_subgroup_size.trailing_zeros()
-    } else {
-        0
-    };
-    let kernel_name = if default_is_subgroup { "subgroup SPIR-V" } else { "portable R4" };
+    let (tw, tw_p, o4, o4p) = precompute_local_r4_twiddles(NttDirection::Forward);
 
     run_canary_dispatches(
-        device, queue, &bind_group_layout, &default_pipeline,
-        &tw, &tw_p, o4, o4p, subgroup_log,
-        DEFAULT_CANARY_DISPATCHES, kernel_name,
+        device, queue, &bind_group_layout, &pipeline,
+        &tw, &tw_p, o4, o4p,
+        CANARY_DISPATCHES, "portable R4",
     ).await?;
-
-    // ---- Pass 2: Subgroup SPIR-V validation (when hw supports but Auto didn't select) ----
-    //
-    // If the Auto policy already selected SubgroupSpirV (Pass 1 just
-    // validated it), skip. Otherwise, when the hardware *could* run
-    // the subgroup shader, validate it here so ForceSubgroup callers
-    // have init-time coverage.
-    #[cfg(feature = "subgroup-vulkan-spirv")]
-    if !default_is_subgroup
-        && caps.backend == wgpu::Backend::Vulkan
-        && caps.has_subgroup
-        && caps.min_subgroup_size >= 32
-    {
-        let spirv_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let spirv_words = crate::pipeline_registry::spirv_bytes_to_words(NTT_LOCAL_SUBGROUP_SPIRV);
-        let spirv_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("zkgpu canary subgroup spirv"),
-            source: wgpu::ShaderSource::SpirV(spirv_words.into()),
-        });
-        if let Some(err) = spirv_scope.pop().await {
-            return Err(ZkGpuError::GpuComputeUnsupported(format!(
-                "canary subgroup SPIR-V shader compilation error: {err}"
-            )));
-        }
-
-        let spirv_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("zkgpu canary subgroup pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &spirv_module,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: pipeline_cache,
-        });
-
-        let (tw_sg, tw_p_sg, o4_sg, o4p_sg) =
-            precompute_subgroup_local_twiddles(NttDirection::Forward);
-        let sg_log = caps.min_subgroup_size.trailing_zeros();
-
-        run_canary_dispatches(
-            device, queue, &bind_group_layout, &spirv_pipeline,
-            &tw_sg, &tw_p_sg, o4_sg, o4p_sg, sg_log,
-            1, "subgroup SPIR-V (pre-validation)",
-        ).await?;
-    }
 
     Ok(())
 }
 
-/// Create the 5-binding bind group layout shared by all local NTT kernels.
+/// Create the 5-binding bind group layout for the local NTT kernel.
 fn create_canary_bgl(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("zkgpu canary bgl"),
@@ -251,9 +148,6 @@ fn create_canary_bgl(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 
 /// Dispatch the given canary pipeline `dispatch_count` times, read back
 /// the final output, and verify against the CPU reference NTT.
-///
-/// This is the shared core of both the default-kernel and subgroup-SPIR-V
-/// canary passes. Each pass provides its own pipeline, twiddles, and params.
 async fn run_canary_dispatches(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -263,7 +157,6 @@ async fn run_canary_dispatches(
     twiddle_prime_data: &[u32],
     omega4: u32,
     omega4_prime: u32,
-    subgroup_log: u32,
     dispatch_count: usize,
     kernel_name: &str,
 ) -> Result<(), ZkGpuError> {
@@ -275,7 +168,7 @@ async fn run_canary_dispatches(
         usage: wgpu::BufferUsages::STORAGE,
     });
 
-    let params_data: [u32; 4] = [1, omega4, omega4_prime, subgroup_log];
+    let params_data: [u32; 4] = [1, omega4, omega4_prime, 0];
     let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("zkgpu canary params"),
         contents: bytemuck::cast_slice(&params_data),
@@ -301,9 +194,7 @@ async fn run_canary_dispatches(
     //
     // Some Vulkan drivers (PowerVR Rogue GE8322) survive one dispatch
     // but crash with SIGSEGV on the second vkQueueSubmit with the same
-    // pipeline. The default kernel pass dispatches twice to catch this.
-    // The subgroup pass dispatches once (crash detection is less relevant
-    // for the SPIR-V path on healthy Vulkan drivers).
+    // pipeline. Dispatching twice catches this.
     for round in 0..dispatch_count {
         let src_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("zkgpu canary src"),

@@ -208,53 +208,6 @@ pub(crate) fn precompute_single_r2_twiddles(
     (twiddles, twiddles_prime)
 }
 
-/// Twiddles for the subgroup-accelerated DIT local kernel.
-///
-/// The DIT kernel processes stages 0..LOG_BLOCK using decimation-in-time.
-/// Stages 0+1 use omega_4 (returned separately, same as R4 kernel).
-/// Stages 2..9 each need their own twiddle set:
-///   stage h has 2^h twiddles: omega_BLOCK^(j * 2^(LOG_BLOCK-h-1)) for j in 0..2^h.
-///
-/// Layout: [stage2: 4] [stage3: 8] [stage4: 16] [stage5: 32]
-///         [stage6: 64] [stage7: 128] [stage8: 256] [stage9: 512] = 1020 total.
-///
-/// Offset for stage h = 2^h - 4.
-///
-/// Returns `(twiddles, twiddles_prime, omega_4, omega4_prime)`.
-pub(crate) fn precompute_subgroup_local_twiddles(
-    direction: NttDirection,
-) -> (Vec<u32>, Vec<u32>, u32, u32) {
-    let omega = BabyBear::root_of_unity(LOG_BLOCK);
-    let omega = match direction {
-        NttDirection::Forward => omega,
-        NttDirection::Inverse => omega.inv().expect("root of unity must be invertible"),
-    };
-
-    let omega4 = omega.pow((BLOCK_SIZE / 4) as u64);
-    let omega4_repr = omega4.to_repr();
-    let omega4_prime = shoup_quotient(omega4_repr);
-
-    let mut twiddles = Vec::with_capacity(1020);
-    let mut twiddles_prime = Vec::with_capacity(1020);
-
-    // DIT twiddle for stage h, position j: omega_BLOCK^(j * 2^(LOG_BLOCK - h - 1))
-    for h in 2..LOG_BLOCK {
-        let d = 1u32 << h;
-        let step_exponent = 1u32 << (LOG_BLOCK - h - 1);
-        let step = omega.pow(step_exponent as u64);
-
-        let mut w = BabyBear::ONE;
-        for _j in 0..d {
-            let repr = w.to_repr();
-            twiddles.push(repr);
-            twiddles_prime.push(shoup_quotient(repr));
-            w = w * step;
-        }
-    }
-
-    (twiddles, twiddles_prime, omega4_repr, omega4_prime)
-}
-
 /// Twiddle factors for the four-step diagonal: omega_N^(k_r * c).
 ///
 /// Stored in C×R layout (the data layout after the initial transpose):
