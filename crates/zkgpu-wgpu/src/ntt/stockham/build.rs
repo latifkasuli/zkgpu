@@ -7,6 +7,7 @@ use crate::dispatch::plan_linear_dispatch;
 
 use super::StockhamPlan;
 use super::super::common::{bgl_storage_entry, bgl_uniform_entry};
+use super::super::local_kernel::{resolve_local_kernel, ResolvedLocalKernel};
 use super::super::planner::{LocalKernelHint, StockhamPlanConfig, WORKGROUP_SIZE};
 use super::super::twiddles::{
     precompute_local_r4_twiddles, precompute_stockham_r4_twiddles,
@@ -19,10 +20,14 @@ const STOCKHAM_R4_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_stockham_r4.wgsl");
 const STOCKHAM_LOCAL_R4_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_stockham_local_r4.wgsl");
-const STOCKHAM_LOCAL_SUBGROUP_SOURCE: &str =
-    include_str!("../../kernels/native/babybear_stockham_local_subgroup.wgsl");
 const SCALE_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_scale.wgsl");
+
+/// Pre-compiled SPIR-V for the subgroup-accelerated DIT local kernel.
+/// Only included when the `subgroup-vulkan-spirv` feature is active.
+#[cfg(feature = "subgroup-vulkan-spirv")]
+const STOCKHAM_LOCAL_SUBGROUP_SPIRV: &[u8] =
+    include_bytes!("../../kernels/native/babybear_stockham_local_subgroup.spv");
 
 const NTT_BGL_LABEL: &str = "Stockham NTT bind group layout";
 const SCALE_BGL_LABEL: &str = "Scale bind group layout";
@@ -97,37 +102,33 @@ impl StockhamPlan {
         );
 
         // --- Local pipeline (subgroup-accelerated DIT or portable R4 DIF) ---
-        let use_subgroup_local = match local_hint {
-            LocalKernelHint::ForceSubgroup => {
-                if !device.caps.has_subgroup || device.caps.min_subgroup_size < 32 {
-                    return Err(ZkGpuError::GpuValidation(
-                        "ForceSubgroup requires SUBGROUP feature with min_subgroup_size >= 32"
-                            .into(),
-                    ));
-                }
-                true
-            }
-            LocalKernelHint::ForcePortable => false,
-            LocalKernelHint::Auto => {
-                device.caps.has_subgroup && device.caps.min_subgroup_size >= 32
-            }
-        };
+        //
+        // The resolver checks cargo features, backend, subgroup caps, and
+        // the experimental env flag. ForceSubgroup errors if unsatisfiable;
+        // Auto silently falls back to PortableR4.
+        let (resolved_local, _reason) = resolve_local_kernel(local_hint, &device.caps)?;
+        let use_subgroup_local = resolved_local == ResolvedLocalKernel::SubgroupSpirV;
 
         let local_pipeline = if use_subgroup_local {
-            let local_module = reg.get_or_create_module(
-                &device.device,
-                STOCKHAM_LOCAL_SUBGROUP_SOURCE,
-                "Stockham local subgroup shader",
-            );
-            reg.get_or_create_pipeline(
-                &device.device,
-                STOCKHAM_LOCAL_SUBGROUP_SOURCE,
-                "stockham_local_subgroup",
-                NTT_BGL_LABEL,
-                &ntt_pipeline_layout,
-                &local_module,
-                device.pipeline_cache.as_ref(),
-            )
+            #[cfg(feature = "subgroup-vulkan-spirv")]
+            {
+                let local_module = reg.get_or_create_module_spirv(
+                    &device.device,
+                    STOCKHAM_LOCAL_SUBGROUP_SPIRV,
+                    "Stockham local subgroup shader (SPIR-V)",
+                );
+                reg.get_or_create_pipeline_keyed(
+                    &device.device,
+                    STOCKHAM_LOCAL_SUBGROUP_SPIRV.as_ptr() as usize,
+                    "main",
+                    NTT_BGL_LABEL,
+                    &ntt_pipeline_layout,
+                    &local_module,
+                    device.pipeline_cache.as_ref(),
+                )
+            }
+            #[cfg(not(feature = "subgroup-vulkan-spirv"))]
+            unreachable!("SubgroupSpirV requires the subgroup-vulkan-spirv cargo feature")
         } else {
             let local_module = reg.get_or_create_module(
                 &device.device,

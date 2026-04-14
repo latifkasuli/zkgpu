@@ -1,0 +1,339 @@
+// BabyBear workgroup-local Stockham NTT kernel (subgroup-accelerated DIT, Vulkan SPIR-V)
+// P = 2^31 - 2^27 + 1 = 2013265921
+//
+// Uses DIT (decimation-in-time) Cooley-Tukey algorithm with three phases:
+//   Phase 1a: Thread-local R4 butterfly for stages 0+1 (no memory, no barriers)
+//   Phase 1b: Subgroup shuffle R2 butterflies for stages 2..2+subgroup_log-1
+//             (register-only, no barriers -- uses subgroupShuffleXor)
+//   Phase 2:  Shared memory R2 butterflies for remaining stages (with barriers)
+//   Phase 3:  Scatter to global memory
+//
+// This is the Vulkan GLSL port of babybear_stockham_local_subgroup.wgsl.
+// Compiled offline to SPIR-V to bypass the Naga WGSL frontend's missing
+// `enable subgroups;` support (gfx-rs/wgpu#5555). Loaded via
+// wgpu::ShaderSource::SpirV when the `subgroup-vulkan-spirv` cargo feature
+// is active and ZKGPU_EXPERIMENTAL_VK_SUBGROUP=1 is set.
+//
+// Requires Vulkan 1.1+ with VK_KHR_shader_subgroup (SubgroupShuffleXor).
+// Minimum subgroup size 32.
+//
+// Regenerate SPIR-V:
+//   cargo xtask shaders
+// or manually:
+//   glslangValidator -V --target-env vulkan1.1
+//       -o babybear_stockham_local_subgroup.spv
+//       babybear_stockham_local_subgroup.comp
+
+#version 450
+#extension GL_KHR_shader_subgroup_shuffle : require
+
+const uint P = 2013265921u;
+const uint BLOCK_SIZE = 1024u;
+const uint LOG_BLOCK = 10u;
+const uint PADDED_SIZE = 1056u;
+
+shared uint shmem_a[1056];
+shared uint shmem_b[1056];
+
+layout(std430, set = 0, binding = 0) readonly buffer SrcBuf {
+    uint data[];
+} src_buf;
+
+layout(std430, set = 0, binding = 1) buffer DstBuf {
+    uint data[];
+} dst_buf;
+
+layout(std430, set = 0, binding = 2) readonly buffer TwiddleBuf {
+    uint data[];
+} tw_buf;
+
+layout(std140, set = 0, binding = 3) uniform Params {
+    uint stride;
+    uint omega4;
+    uint omega4_prime;
+    uint subgroup_log;
+} params;
+
+layout(std430, set = 0, binding = 4) readonly buffer TwiddlePrimeBuf {
+    uint data[];
+} tp_buf;
+
+uint padded_idx(uint i) {
+    return i + (i >> 5u);
+}
+
+// ---------- Modular arithmetic (identical to portable kernel) ----------
+
+uint mulhi_u32(uint a, uint b) {
+    uint a_lo = a & 0xFFFFu;
+    uint a_hi = a >> 16u;
+    uint b_lo = b & 0xFFFFu;
+    uint b_hi = b >> 16u;
+
+    uint ll = a_lo * b_lo;
+    uint lh = a_lo * b_hi;
+    uint hl = a_hi * b_lo;
+    uint hh = a_hi * b_hi;
+
+    uint mid = lh + hl;
+    uint mid_carry = (mid < lh) ? 1u : 0u;
+
+    uint mid_lo_shifted = mid << 16u;
+    uint lo_sum = ll + mid_lo_shifted;
+    uint lo_carry = (lo_sum < ll) ? 1u : 0u;
+
+    return hh + (mid >> 16u) + (mid_carry << 16u) + lo_carry;
+}
+
+uint mod_mul_shoup(uint a, uint w, uint w_prime) {
+    uint q = mulhi_u32(a, w_prime);
+    uint r = a * w - q * P;
+    if (r >= P) { r -= P; }
+    return r;
+}
+
+uint mod_add(uint a, uint b) {
+    uint s = a + b;
+    return (s >= P) ? (s - P) : s;
+}
+
+uint mod_sub(uint a, uint b) {
+    return (a < b) ? (a + P - b) : (a - b);
+}
+
+// ---------- DIT twiddle table offset ----------
+//
+// Twiddle table stores DIT twiddles for stages 2..9 contiguously:
+//   [stage2: 4 vals] [stage3: 8] [stage4: 16] [stage5: 32]
+//   [stage6: 64] [stage7: 128] [stage8: 256] [stage9: 512]  = 1020 total.
+// Offset for stage h (h >= 2) = 2^h - 4.
+
+uint dit_tw_off(uint h) {
+    return (1u << h) - 4u;
+}
+
+// ---------- Subgroup DIT R2 butterfly ----------
+//
+// Performs one DIT radix-2 stage via subgroupShuffleXor.
+// Each thread holds 4 elements at positions [4t, 4t+1, 4t+2, 4t+3].
+// For stage h (h >= 2), all 4 elements have the same is_top value
+// (they differ only in bits 0-1, and h >= 2), so one shuffle + branch
+// handles all 4 elements uniformly.
+//
+// DIT butterfly: top' = top + tw * bottom, bottom' = top - tw * bottom.
+// After shuffle, top thread has (my_val=top, pe=bottom),
+// bottom thread has (my_val=bottom, pe=top).
+
+void subgroup_dit_r2(
+    uint h, uint t,
+    inout uint e0, inout uint e1,
+    inout uint e2, inout uint e3
+) {
+    uint mask_sh = 1u << (h - 2u);
+    uint j_base = (t << 2u) & ((1u << h) - 1u);
+    uint tw_base = dit_tw_off(h) + j_base;
+    bool is_top = (((t << 2u) >> h) & 1u) == 0u;
+
+    uint pe0 = subgroupShuffleXor(e0, mask_sh);
+    uint pe1 = subgroupShuffleXor(e1, mask_sh);
+    uint pe2 = subgroupShuffleXor(e2, mask_sh);
+    uint pe3 = subgroupShuffleXor(e3, mask_sh);
+
+    uint tw0 = tw_buf.data[tw_base];       uint tp0 = tp_buf.data[tw_base];
+    uint tw1 = tw_buf.data[tw_base + 1u];  uint tp1 = tp_buf.data[tw_base + 1u];
+    uint tw2 = tw_buf.data[tw_base + 2u];  uint tp2 = tp_buf.data[tw_base + 2u];
+    uint tw3 = tw_buf.data[tw_base + 3u];  uint tp3 = tp_buf.data[tw_base + 3u];
+
+    if (is_top) {
+        e0 = mod_add(e0, mod_mul_shoup(pe0, tw0, tp0));
+        e1 = mod_add(e1, mod_mul_shoup(pe1, tw1, tp1));
+        e2 = mod_add(e2, mod_mul_shoup(pe2, tw2, tp2));
+        e3 = mod_add(e3, mod_mul_shoup(pe3, tw3, tp3));
+    } else {
+        e0 = mod_sub(pe0, mod_mul_shoup(e0, tw0, tp0));
+        e1 = mod_sub(pe1, mod_mul_shoup(e1, tw1, tp1));
+        e2 = mod_sub(pe2, mod_mul_shoup(e2, tw2, tp2));
+        e3 = mod_sub(pe3, mod_mul_shoup(e3, tw3, tp3));
+    }
+}
+
+// ---------- Shared memory DIT R2 butterflies ----------
+//
+// Each thread handles 2 of the 512 butterflies per stage.
+// For stage h with distance d = 2^h:
+//   butterfly bi -> group = bi >> h, k = bi & (d-1)
+//   p_top = group * 2d + k, p_bot = p_top + d
+//   twiddle index = k
+
+void dit_r2_a_to_b(uint h, uint t) {
+    uint d = 1u << h;
+    uint h_mask = d - 1u;
+    uint tw_off = dit_tw_off(h);
+
+    uint bi0 = t;
+    uint group0 = bi0 >> h;
+    uint k0 = bi0 & h_mask;
+    uint pt0 = (group0 << (h + 1u)) + k0;
+    uint pb0 = pt0 + d;
+
+    uint a0 = shmem_a[padded_idx(pt0)];
+    uint b0 = shmem_a[padded_idx(pb0)];
+    uint tb0 = mod_mul_shoup(b0, tw_buf.data[tw_off + k0], tp_buf.data[tw_off + k0]);
+    shmem_b[padded_idx(pt0)] = mod_add(a0, tb0);
+    shmem_b[padded_idx(pb0)] = mod_sub(a0, tb0);
+
+    uint bi1 = t + 256u;
+    uint group1 = bi1 >> h;
+    uint k1 = bi1 & h_mask;
+    uint pt1 = (group1 << (h + 1u)) + k1;
+    uint pb1 = pt1 + d;
+
+    uint a1 = shmem_a[padded_idx(pt1)];
+    uint b1 = shmem_a[padded_idx(pb1)];
+    uint tb1 = mod_mul_shoup(b1, tw_buf.data[tw_off + k1], tp_buf.data[tw_off + k1]);
+    shmem_b[padded_idx(pt1)] = mod_add(a1, tb1);
+    shmem_b[padded_idx(pb1)] = mod_sub(a1, tb1);
+}
+
+void dit_r2_b_to_a(uint h, uint t) {
+    uint d = 1u << h;
+    uint h_mask = d - 1u;
+    uint tw_off = dit_tw_off(h);
+
+    uint bi0 = t;
+    uint group0 = bi0 >> h;
+    uint k0 = bi0 & h_mask;
+    uint pt0 = (group0 << (h + 1u)) + k0;
+    uint pb0 = pt0 + d;
+
+    uint a0 = shmem_b[padded_idx(pt0)];
+    uint b0 = shmem_b[padded_idx(pb0)];
+    uint tb0 = mod_mul_shoup(b0, tw_buf.data[tw_off + k0], tp_buf.data[tw_off + k0]);
+    shmem_a[padded_idx(pt0)] = mod_add(a0, tb0);
+    shmem_a[padded_idx(pb0)] = mod_sub(a0, tb0);
+
+    uint bi1 = t + 256u;
+    uint group1 = bi1 >> h;
+    uint k1 = bi1 & h_mask;
+    uint pt1 = (group1 << (h + 1u)) + k1;
+    uint pb1 = pt1 + d;
+
+    uint a1 = shmem_b[padded_idx(pt1)];
+    uint b1 = shmem_b[padded_idx(pb1)];
+    uint tb1 = mod_mul_shoup(b1, tw_buf.data[tw_off + k1], tp_buf.data[tw_off + k1]);
+    shmem_a[padded_idx(pt1)] = mod_add(a1, tb1);
+    shmem_a[padded_idx(pb1)] = mod_sub(a1, tb1);
+}
+
+// ---------- Entry point ----------
+
+layout(local_size_x = 256) in;
+
+void main() {
+    uint block_id = gl_WorkGroupID.x;
+    uint t = gl_LocalInvocationID.x;
+    uint stride = params.stride;
+    uint p0 = t * 4u;
+
+    // ================================================================
+    // Bit-reversed gather into registers
+    // ================================================================
+    // DIT requires bit-reversed input to produce natural-order output.
+    // bitfieldReverse gives 32-bit reversal; >> 22 extracts the 10-bit reversal.
+    uint elem0 = src_buf.data[block_id + (bitfieldReverse(p0)      >> 22u) * stride];
+    uint elem1 = src_buf.data[block_id + (bitfieldReverse(p0 + 1u) >> 22u) * stride];
+    uint elem2 = src_buf.data[block_id + (bitfieldReverse(p0 + 2u) >> 22u) * stride];
+    uint elem3 = src_buf.data[block_id + (bitfieldReverse(p0 + 3u) >> 22u) * stride];
+
+    // ================================================================
+    // Phase 1a: Thread-local R4 DIT butterfly (stages 0+1)
+    // ================================================================
+    // Stage 0 (d=1, tw=1): pairs (elem0,elem1) and (elem2,elem3)
+    // Stage 1 (d=2): pairs with tw=1 and tw=omega4
+    //   Combined: standard radix-4 DIT butterfly.
+    {
+        uint s0 = mod_add(elem0, elem1);
+        uint d0 = mod_sub(elem0, elem1);
+        uint s1 = mod_add(elem2, elem3);
+        uint d1 = mod_sub(elem2, elem3);
+        uint tw_d1 = mod_mul_shoup(d1, params.omega4, params.omega4_prime);
+        elem0 = mod_add(s0, s1);
+        elem1 = mod_add(d0, tw_d1);
+        elem2 = mod_sub(s0, s1);
+        elem3 = mod_sub(d0, tw_d1);
+    }
+
+    // ================================================================
+    // Phase 1b: Subgroup shuffle R2 DIT stages
+    // ================================================================
+    // Stages 2-6 always execute (guaranteed by min_subgroup_size >= 32).
+    // Stages 7-8 execute as subgroup stages for larger subgroup sizes.
+    subgroup_dit_r2(2u, t, elem0, elem1, elem2, elem3);
+    subgroup_dit_r2(3u, t, elem0, elem1, elem2, elem3);
+    subgroup_dit_r2(4u, t, elem0, elem1, elem2, elem3);
+    subgroup_dit_r2(5u, t, elem0, elem1, elem2, elem3);
+    subgroup_dit_r2(6u, t, elem0, elem1, elem2, elem3);
+
+    if (params.subgroup_log >= 6u) {
+        subgroup_dit_r2(7u, t, elem0, elem1, elem2, elem3);
+    }
+    if (params.subgroup_log >= 7u) {
+        subgroup_dit_r2(8u, t, elem0, elem1, elem2, elem3);
+    }
+
+    // ================================================================
+    // Phase 2: Write to shared memory + remaining DIT stages
+    // ================================================================
+    shmem_a[padded_idx(p0)]       = elem0;
+    shmem_a[padded_idx(p0 + 1u)]  = elem1;
+    shmem_a[padded_idx(p0 + 2u)]  = elem2;
+    shmem_a[padded_idx(p0 + 3u)]  = elem3;
+    barrier();
+
+    // Shared memory stages: from (2 + subgroup_log) through 9.
+    // Ping-pong: a -> b -> a -> b ...
+    // Number of shmem stages = 8 - subgroup_log.
+    // Scatter from shmem_b if odd count, shmem_a if even.
+    //
+    //   subgroup_log=5: stages 7,8,9 (3 shmem, odd)  -> scatter from shmem_b
+    //   subgroup_log=6: stages 8,9   (2 shmem, even)  -> scatter from shmem_a
+    //   subgroup_log=7: stage 9      (1 shmem, odd)   -> scatter from shmem_b
+
+    if (params.subgroup_log <= 5u) {
+        // 3 shared memory stages: 7, 8, 9
+        dit_r2_a_to_b(7u, t);
+        barrier();
+        dit_r2_b_to_a(8u, t);
+        barrier();
+        dit_r2_a_to_b(9u, t);
+        barrier();
+
+        // Scatter from shmem_b
+        dst_buf.data[block_id + p0 * stride]         = shmem_b[padded_idx(p0)];
+        dst_buf.data[block_id + (p0 + 1u) * stride]  = shmem_b[padded_idx(p0 + 1u)];
+        dst_buf.data[block_id + (p0 + 2u) * stride]  = shmem_b[padded_idx(p0 + 2u)];
+        dst_buf.data[block_id + (p0 + 3u) * stride]  = shmem_b[padded_idx(p0 + 3u)];
+    } else if (params.subgroup_log == 6u) {
+        // 2 shared memory stages: 8, 9
+        dit_r2_a_to_b(8u, t);
+        barrier();
+        dit_r2_b_to_a(9u, t);
+        barrier();
+
+        // Scatter from shmem_a
+        dst_buf.data[block_id + p0 * stride]         = shmem_a[padded_idx(p0)];
+        dst_buf.data[block_id + (p0 + 1u) * stride]  = shmem_a[padded_idx(p0 + 1u)];
+        dst_buf.data[block_id + (p0 + 2u) * stride]  = shmem_a[padded_idx(p0 + 2u)];
+        dst_buf.data[block_id + (p0 + 3u) * stride]  = shmem_a[padded_idx(p0 + 3u)];
+    } else {
+        // 1 shared memory stage: 9
+        dit_r2_a_to_b(9u, t);
+        barrier();
+
+        // Scatter from shmem_b
+        dst_buf.data[block_id + p0 * stride]         = shmem_b[padded_idx(p0)];
+        dst_buf.data[block_id + (p0 + 1u) * stride]  = shmem_b[padded_idx(p0 + 1u)];
+        dst_buf.data[block_id + (p0 + 2u) * stride]  = shmem_b[padded_idx(p0 + 2u)];
+        dst_buf.data[block_id + (p0 + 3u) * stride]  = shmem_b[padded_idx(p0 + 3u)];
+    }
+}

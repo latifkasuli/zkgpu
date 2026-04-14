@@ -131,21 +131,14 @@ impl PlannerPolicy {
             _ => Self::with_four_step_threshold(DEFAULT_FOUR_STEP_THRESHOLD),
         };
 
-        // Force portable local kernel on ALL backends: Naga's WGSL
-        // frontend does not yet support `enable subgroups;`
-        // (gfx-rs/wgpu#5555). Every native backend routes WGSL through
-        // Naga, so the subgroup-accelerated DIT shader cannot compile
-        // on any current wgpu backend. Browser WebGPU already forces
-        // portable above.
+        // The resolver (`resolve_local_kernel`) now handles all gating:
+        // cargo feature, Vulkan backend check, subgroup caps, env flag.
+        // The SPIR-V path bypasses Naga's broken WGSL subgroups frontend
+        // (gfx-rs/wgpu#5555). Non-Vulkan backends and non-SPIR-V builds
+        // automatically fall back to PortableR4 via the resolver.
         //
-        // Metal currently dodges this because Apple reports
-        // min_subgroup_size=4, which fails the >=32 check in Auto
-        // resolution — but that is accidental, not safe.
-        //
-        // Remove this blanket override once Naga lands the subgroups
-        // enable-extension, or when a SPIR-V subgroup path is added
-        // that bypasses the WGSL frontend.
-        base.with_local_kernel_hint(LocalKernelHint::ForcePortable)
+        // Browser WebGPU already forces ForcePortable above.
+        base
     }
 
     /// Family-level dispatch for Vulkan and DX12 backends where the same
