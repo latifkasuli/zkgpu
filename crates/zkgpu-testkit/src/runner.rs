@@ -480,6 +480,7 @@ mod tests {
                 max_buffer_size_bytes: 0,
                 max_workgroup_size_x: 0,
                 max_compute_invocations: 0,
+                max_compute_workgroup_storage_size_bytes: 0,
                 feature_flags: Vec::new(),
             },
             kernel: zkgpu_report::KernelReport {

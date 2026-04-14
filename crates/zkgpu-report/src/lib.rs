@@ -142,6 +142,15 @@ pub struct DeviceReport {
     pub max_buffer_size_bytes: u64,
     pub max_workgroup_size_x: u32,
     pub max_compute_invocations: u32,
+    /// Shared-memory (`var<workgroup>`) budget per workgroup in bytes.
+    ///
+    /// Controls how large a Stockham local-fused block can be on this device:
+    /// the current kernel uses `BLOCK_SIZE * 4` bytes, so a 32 KiB device
+    /// can accommodate 8192-element blocks while a 16 KiB device caps at 4096.
+    /// Reported so benchmark artifacts make the shared-memory ceiling visible
+    /// when comparing kernel-tuning options across GPUs.
+    #[serde(default)]
+    pub max_compute_workgroup_storage_size_bytes: u32,
     pub feature_flags: Vec<String>,
 }
 

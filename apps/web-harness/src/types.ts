@@ -60,6 +60,7 @@ export interface DeviceReport {
   max_buffer_size_bytes: number;
   max_workgroup_size_x: number;
   max_compute_invocations: number;
+  max_compute_workgroup_storage_size_bytes?: number;
   feature_flags: string[];
 }
 

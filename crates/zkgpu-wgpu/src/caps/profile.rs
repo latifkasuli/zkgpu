@@ -57,6 +57,15 @@ pub struct CapabilityProfile {
     pub max_compute_workgroup_size_z: u32,
     pub max_compute_invocations_per_workgroup: u32,
     pub max_compute_workgroups_per_dimension: u32,
+    /// Size in bytes of shared-memory (`var<workgroup>`) budget per workgroup.
+    ///
+    /// On Vulkan this is `maxComputeSharedMemorySize`; on Metal the threadgroup
+    /// memory limit; on DX12 the TGSM limit. Needed to reason about Stockham
+    /// local-stage depth: the kernel uses `BLOCK_SIZE * 4` bytes of workgroup
+    /// storage, so a device reporting ≥32 KiB can hold 8192-element blocks
+    /// while a 16 KiB device caps at 4096. Drives future `LOG_BLOCK` tuning
+    /// and the decision of whether to extend the local-fused stage.
+    pub max_compute_workgroup_storage_size: u32,
 }
 
 /// Policy for creating a render attachment texture.
@@ -126,6 +135,7 @@ impl CapabilityProfile {
             max_compute_workgroup_size_z: 0,
             max_compute_invocations_per_workgroup: 0,
             max_compute_workgroups_per_dimension: 0,
+            max_compute_workgroup_storage_size: 0,
         }
     }
 
@@ -143,6 +153,7 @@ impl CapabilityProfile {
         self.max_compute_workgroup_size_z = limits.max_compute_workgroup_size_z;
         self.max_compute_invocations_per_workgroup = limits.max_compute_invocations_per_workgroup;
         self.max_compute_workgroups_per_dimension = limits.max_compute_workgroups_per_dimension;
+        self.max_compute_workgroup_storage_size = limits.max_compute_workgroup_storage_size;
     }
 
     /// Whether readback should map compute buffers directly (UMA fast path).
@@ -365,6 +376,7 @@ mod tests {
             max_compute_workgroup_size_z: 0,
             max_compute_invocations_per_workgroup: 0,
             max_compute_workgroups_per_dimension: 0,
+            max_compute_workgroup_storage_size: 0,
         }
     }
 

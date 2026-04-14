@@ -75,6 +75,7 @@ fn build_device_report(device: &WgpuDevice) -> DeviceReport {
         max_buffer_size_bytes: caps.max_buffer_size,
         max_workgroup_size_x: caps.max_compute_workgroup_size_x,
         max_compute_invocations: caps.max_compute_invocations_per_workgroup,
+        max_compute_workgroup_storage_size_bytes: caps.max_compute_workgroup_storage_size,
         feature_flags: caps.feature_flags_flat(),
     }
 }

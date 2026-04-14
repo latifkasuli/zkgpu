@@ -129,6 +129,7 @@ mod tests {
             max_compute_workgroup_size_z: 0,
             max_compute_invocations_per_workgroup: 0,
             max_compute_workgroups_per_dimension: 0,
+            max_compute_workgroup_storage_size: 0,
         }
     }
 

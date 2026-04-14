@@ -45,6 +45,7 @@ struct LimitsReport {
     max_compute_workgroup_size_x: u32,
     max_compute_invocations_per_workgroup: u32,
     max_compute_workgroups_per_dimension: u32,
+    max_compute_workgroup_storage_size_bytes: u32,
 }
 
 #[derive(Serialize)]
@@ -143,6 +144,7 @@ fn device_report(caps: &CapabilityProfile) -> DeviceReport {
             max_compute_workgroup_size_x: caps.max_compute_workgroup_size_x,
             max_compute_invocations_per_workgroup: caps.max_compute_invocations_per_workgroup,
             max_compute_workgroups_per_dimension: caps.max_compute_workgroups_per_dimension,
+            max_compute_workgroup_storage_size_bytes: caps.max_compute_workgroup_storage_size,
         },
     }
 }
