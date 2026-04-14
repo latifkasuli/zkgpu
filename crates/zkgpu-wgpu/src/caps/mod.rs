@@ -11,6 +11,7 @@ mod classify;
 mod detect;
 pub mod profile;
 pub mod quirks;
+pub(crate) mod scoring;
 pub mod types;
 
 pub use profile::{CapabilityProfile, RenderAttachmentPolicy};

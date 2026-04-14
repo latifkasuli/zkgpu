@@ -5,6 +5,7 @@ use zkgpu_core::{DeviceInfo, GpuDevice, GpuField, ZkGpuError};
 
 use crate::buffer::WgpuBuffer;
 use crate::canary;
+use crate::caps::scoring::score_adapter;
 use crate::caps::CapabilityProfile;
 use crate::pipeline_cache;
 use crate::pipeline_registry::PipelineRegistry;
@@ -37,24 +38,23 @@ impl WgpuDevice {
 
     /// Request the best available GPU device (async).
     ///
-    /// This is the primary constructor for browser/WebGPU targets and is
-    /// also usable on native. On native, the blocking [`new`](Self::new)
-    /// wrapper calls this internally.
+    /// Enumerates all adapters on `Backends::PRIMARY` (Vulkan, Metal,
+    /// DX12, BrowserWebGPU), scores each for compute suitability, and
+    /// picks the highest-scoring usable adapter. Falls back to wgpu's
+    /// `request_adapter(HighPerformance)` if enumeration yields no
+    /// usable candidates (e.g. on WebGPU where enumeration may return
+    /// an empty list).
+    ///
+    /// On native, the blocking [`new`](Self::new) wrapper calls this
+    /// internally.
     pub async fn new_async() -> Result<Self, ZkGpuError> {
+        let backends = wgpu::Backends::PRIMARY;
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })
-            .await
-            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
-
+        let adapter = Self::select_best_adapter(&instance, backends).await?;
         let mut caps = CapabilityProfile::from_adapter(&adapter);
 
         let (device, queue) = adapter
@@ -103,6 +103,86 @@ impl WgpuDevice {
             caps,
             info,
         })
+    }
+
+    /// Enumerate all adapters, score each for compute suitability, and
+    /// return the highest-scoring usable adapter.
+    ///
+    /// Known-broken adapters (e.g. PowerVR Rogue on Android Vulkan) are
+    /// filtered out by the scoring function before they can be selected.
+    ///
+    /// Falls back to `request_adapter(HighPerformance)` **only** when
+    /// enumeration is unavailable or returns an empty list (the browser
+    /// WebGPU case). If enumeration returned adapters and every one was
+    /// rejected, this returns `GpuComputeUnsupported` — the fallback
+    /// must not silently reselect an adapter the scorer just rejected.
+    async fn select_best_adapter(
+        instance: &wgpu::Instance,
+        backends: wgpu::Backends,
+    ) -> Result<wgpu::Adapter, ZkGpuError> {
+        let adapters = instance.enumerate_adapters(backends).await;
+
+        if adapters.is_empty() {
+            // Enumeration unavailable or empty (browser WebGPU).
+            // Fall back to wgpu's opaque request_adapter heuristic.
+            log::info!(
+                "zkgpu: enumerate_adapters returned empty list, \
+                 falling back to request_adapter"
+            );
+            return instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                })
+                .await
+                .map_err(|e| ZkGpuError::BackendError(Box::new(e)));
+        }
+
+        // Score each adapter and pick the best usable one.
+        let adapter_count = adapters.len();
+        let mut rejected_count = 0usize;
+        let mut best: Option<(wgpu::Adapter, i64)> = None;
+
+        for adapter in adapters {
+            let caps = CapabilityProfile::from_adapter(&adapter);
+            let limits = adapter.limits();
+            if let Some(score) = score_adapter(&caps, &limits) {
+                log::debug!(
+                    "zkgpu adapter candidate: {} ({:?}/{:?}) score={score}",
+                    caps.device_name,
+                    caps.backend,
+                    caps.device_type,
+                );
+                if best.as_ref().map_or(true, |(_, s)| score > *s) {
+                    best = Some((adapter, score));
+                }
+            } else {
+                rejected_count += 1;
+                log::debug!(
+                    "zkgpu adapter rejected (known-broken): {} ({:?})",
+                    caps.device_name,
+                    caps.gpu_family,
+                );
+            }
+        }
+
+        if let Some((adapter, score)) = best {
+            let info = adapter.get_info();
+            log::info!(
+                "zkgpu selected adapter: {} ({:?}/{:?}) score={score}",
+                info.name,
+                info.backend,
+                info.device_type,
+            );
+            return Ok(adapter);
+        }
+
+        // Enumeration found adapters but all were rejected.
+        Err(ZkGpuError::GpuComputeUnsupported(format!(
+            "all {adapter_count} enumerated GPU adapter(s) were rejected \
+             ({rejected_count} known-broken); no usable GPU available"
+        )))
     }
 }
 
@@ -180,21 +260,28 @@ impl GpuDevice for WgpuDevice {
             });
         }
 
+        let mappable = self.caps.use_direct_map_readback();
+        let mut usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
+        if mappable {
+            usage |= wgpu::BufferUsages::MAP_READ;
+        }
+
         let bytes = bytemuck::cast_slice(data);
         let buf = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("zkgpu upload"),
                 contents: bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
+                usage,
             });
         Ok(WgpuBuffer::new(
             buf,
             data.len(),
             self.device.clone(),
             self.queue.clone(),
+            mappable,
         ))
     }
 
@@ -208,12 +295,18 @@ impl GpuDevice for WgpuDevice {
             });
         }
 
+        let mappable = self.caps.use_direct_map_readback();
+        let mut usage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
+        if mappable {
+            usage |= wgpu::BufferUsages::MAP_READ;
+        }
+
         let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("zkgpu zeros"),
             size,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
+            usage,
             mapped_at_creation: false,
         });
         Ok(WgpuBuffer::new(
@@ -221,6 +314,7 @@ impl GpuDevice for WgpuDevice {
             len,
             self.device.clone(),
             self.queue.clone(),
+            mappable,
         ))
     }
 }

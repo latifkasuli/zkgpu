@@ -114,7 +114,7 @@ impl PlannerPolicy {
     /// ## DX12 (same hardware as Vulkan, Windows only)
     /// Same family-level dispatch as Vulkan.
     pub fn from_caps(caps: &CapabilityProfile) -> Self {
-        match caps.backend {
+        let base = match caps.backend {
             // ----- Metal: always Apple, always stockham -----
             wgpu::Backend::Metal => Self::stockham_only(),
 
@@ -125,13 +125,27 @@ impl PlannerPolicy {
             },
 
             // ----- Vulkan / DX12: family dispatch -----
-            wgpu::Backend::Vulkan | wgpu::Backend::Dx12 => {
-                Self::from_vulkan_family(caps)
-            }
+            wgpu::Backend::Vulkan | wgpu::Backend::Dx12 => Self::from_vulkan_family(caps),
 
             // ----- OpenGL / Empty / other: conservative fallback -----
             _ => Self::with_four_step_threshold(DEFAULT_FOUR_STEP_THRESHOLD),
-        }
+        };
+
+        // Force portable local kernel on ALL backends: Naga's WGSL
+        // frontend does not yet support `enable subgroups;`
+        // (gfx-rs/wgpu#5555). Every native backend routes WGSL through
+        // Naga, so the subgroup-accelerated DIT shader cannot compile
+        // on any current wgpu backend. Browser WebGPU already forces
+        // portable above.
+        //
+        // Metal currently dodges this because Apple reports
+        // min_subgroup_size=4, which fails the >=32 check in Auto
+        // resolution — but that is accidental, not safe.
+        //
+        // Remove this blanket override once Naga lands the subgroups
+        // enable-extension, or when a SPIR-V subgroup path is added
+        // that bypasses the WGSL frontend.
+        base.with_local_kernel_hint(LocalKernelHint::ForcePortable)
     }
 
     /// Family-level dispatch for Vulkan and DX12 backends where the same

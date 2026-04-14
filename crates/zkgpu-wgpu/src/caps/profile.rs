@@ -145,6 +145,21 @@ impl CapabilityProfile {
         self.max_compute_workgroups_per_dimension = limits.max_compute_workgroups_per_dimension;
     }
 
+    /// Whether readback should map compute buffers directly (UMA fast path).
+    ///
+    /// Returns `true` only when **both** conditions hold:
+    /// 1. The adapter exposes `MAPPABLE_PRIMARY_BUFFERS`.
+    /// 2. The memory model is `Unified` (CPU and GPU share physical DRAM).
+    ///
+    /// `MAPPABLE_PRIMARY_BUFFERS` on a discrete GPU would silently move
+    /// storage buffers into PCI-visible host memory, severely hurting
+    /// compute throughput. By requiring unified memory we ensure the
+    /// optimization only fires on hardware where it is always beneficial
+    /// (Apple Silicon, Adreno, integrated Intel/AMD).
+    pub fn use_direct_map_readback(&self) -> bool {
+        self.has_mappable_primary_buffers && self.memory_model == MemoryModel::Unified
+    }
+
     /// The set of wgpu features this runtime should request from the adapter.
     ///
     /// Only requests features that the adapter actually supports AND that
@@ -159,8 +174,16 @@ impl CapabilityProfile {
         if self.has_timestamp_query {
             f |= wgpu::Features::TIMESTAMP_QUERY;
         }
-        if self.has_timestamp_query_inside_passes {
-            f |= wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
+        // TIMESTAMP_QUERY_INSIDE_PASSES is intentionally NOT requested.
+        // The profiler only uses begin/end-of-pass timestamps via
+        // ComputePassTimestampWrites, which requires only TIMESTAMP_QUERY.
+        // INSIDE_PASSES enables mid-pass write_timestamp() calls that
+        // zkgpu does not use. Still detected and reported for diagnostics.
+        // Only request MPB when we will actually use it (unified memory).
+        // Requesting it on discrete GPUs would let wgpu place storage
+        // buffers in host-visible VRAM, penalising compute throughput.
+        if self.use_direct_map_readback() {
+            f |= wgpu::Features::MAPPABLE_PRIMARY_BUFFERS;
         }
         if self.has_pipeline_cache {
             f |= wgpu::Features::PIPELINE_CACHE;
@@ -304,5 +327,84 @@ impl std::fmt::Display for CapabilityProfile {
             self.max_buffer_size / (1024 * 1024),
             self.max_compute_workgroup_size_x,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal `CapabilityProfile` with the two knobs that matter for
+    /// readback policy. Everything else is zeroed / defaulted.
+    fn mock_readback_caps(has_mpb: bool, memory: MemoryModel) -> CapabilityProfile {
+        CapabilityProfile {
+            tier: DeviceTier::NativeBasic,
+            backend: wgpu::Backend::Vulkan,
+            device_type: wgpu::DeviceType::IntegratedGpu,
+            vendor_id: 0,
+            device_id: 0,
+            device_name: String::new(),
+            driver: String::new(),
+            driver_info: String::new(),
+            gpu_family: GpuFamily::Unknown,
+            detection_source: DetectionSource::Unknown,
+            platform_class: PlatformClass::UnknownNative,
+            memory_model: memory,
+            has_subgroup: false,
+            min_subgroup_size: 0,
+            max_subgroup_size: 0,
+            has_timestamp_query: false,
+            has_timestamp_query_inside_passes: false,
+            has_mappable_primary_buffers: has_mpb,
+            has_pipeline_cache: false,
+            transient_saves_memory: false,
+            max_buffer_size: 0,
+            max_storage_buffer_binding_size: 0,
+            max_compute_workgroup_size_x: 0,
+            max_compute_workgroup_size_y: 0,
+            max_compute_workgroup_size_z: 0,
+            max_compute_invocations_per_workgroup: 0,
+            max_compute_workgroups_per_dimension: 0,
+        }
+    }
+
+    // --- use_direct_map_readback policy ---
+
+    #[test]
+    fn direct_map_enabled_when_mpb_and_unified() {
+        let caps = mock_readback_caps(true, MemoryModel::Unified);
+        assert!(caps.use_direct_map_readback());
+    }
+
+    #[test]
+    fn direct_map_disabled_when_mpb_but_discrete() {
+        let caps = mock_readback_caps(true, MemoryModel::Discrete);
+        assert!(!caps.use_direct_map_readback());
+    }
+
+    #[test]
+    fn direct_map_disabled_when_mpb_but_unknown_memory() {
+        let caps = mock_readback_caps(true, MemoryModel::Unknown);
+        assert!(!caps.use_direct_map_readback());
+    }
+
+    #[test]
+    fn direct_map_disabled_when_no_mpb_even_unified() {
+        let caps = mock_readback_caps(false, MemoryModel::Unified);
+        assert!(!caps.use_direct_map_readback());
+    }
+
+    // --- required_features respects the same policy ---
+
+    #[test]
+    fn required_features_includes_mpb_when_policy_allows() {
+        let caps = mock_readback_caps(true, MemoryModel::Unified);
+        assert!(caps.required_features().contains(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS));
+    }
+
+    #[test]
+    fn required_features_excludes_mpb_on_discrete() {
+        let caps = mock_readback_caps(true, MemoryModel::Discrete);
+        assert!(!caps.required_features().contains(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS));
     }
 }
