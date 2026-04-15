@@ -10,6 +10,7 @@ use zkgpu_wgpu::{CapabilityProfile, PlannerPolicy, WgpuDevice, WgpuNttPlan};
 struct BenchmarkReport {
     device: DeviceReport,
     family_override: Option<String>,
+    tail_override: Option<String>,
     runs: Vec<RunReport>,
 }
 
@@ -103,6 +104,45 @@ impl FamilyOverride {
     }
 }
 
+/// Forced Stockham-tail strategy. Only meaningful when the plan actually
+/// takes the Stockham path (i.e. `--force-family stockham` or `auto` when
+/// the auto-planner picks Stockham for the given log_n). On a Four-Step
+/// plan the tail override is silently ignored — a four-step plan has no
+/// Stockham tail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TailOverride {
+    Auto,
+    Local,
+    Global,
+}
+
+impl TailOverride {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "auto" => Some(Self::Auto),
+            "local" | "local-fused" | "local-fused-r4" => Some(Self::Local),
+            "global" | "global-only" | "global-only-r4" => Some(Self::Global),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Local => "local",
+            Self::Global => "global",
+        }
+    }
+
+    fn as_public(self) -> zkgpu_wgpu::StockhamTailOverride {
+        match self {
+            Self::Auto => zkgpu_wgpu::StockhamTailOverride::Auto,
+            Self::Local => zkgpu_wgpu::StockhamTailOverride::Local,
+            Self::Global => zkgpu_wgpu::StockhamTailOverride::Global,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliMode {
     Benchmark,
@@ -114,6 +154,7 @@ enum CliMode {
 struct CliArgs {
     json_mode: bool,
     family_override: FamilyOverride,
+    tail_override: TailOverride,
     sizes: Vec<u32>,
     mode: CliMode,
 }
@@ -295,11 +336,26 @@ fn build_plan(
     log_n: u32,
     direction: NttDirection,
     family_override: FamilyOverride,
+    tail_override: TailOverride,
 ) -> WgpuNttPlan {
-    match family_override.planner_policy() {
-        Some(policy) => WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
-            .expect("plan creation failed"),
-        None => WgpuNttPlan::new(device, log_n, direction).expect("plan creation failed"),
+    // Both overrides go into a single PlannerPolicy. If family is Auto we
+    // still need a policy whenever tail is non-Auto, so we bootstrap from
+    // device caps in that case. Mirrors the Android harness pattern.
+    match (family_override.planner_policy(), tail_override) {
+        (Some(policy), tail) => {
+            let policy = policy.with_public_tail_override(tail.as_public());
+            WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
+                .expect("plan creation failed")
+        }
+        (None, TailOverride::Auto) => {
+            WgpuNttPlan::new(device, log_n, direction).expect("plan creation failed")
+        }
+        (None, tail) => {
+            let policy = PlannerPolicy::from_caps(device.caps())
+                .with_public_tail_override(tail.as_public());
+            WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
+                .expect("plan creation failed")
+        }
     }
 }
 
@@ -308,6 +364,7 @@ fn run_benchmark(
     log_n: u32,
     direction: NttDirection,
     family_override: FamilyOverride,
+    tail_override: TailOverride,
 ) -> RunReport {
     let dir_str = match direction {
         NttDirection::Forward => "forward",
@@ -318,7 +375,7 @@ fn run_benchmark(
 
     eprintln!("  {dir_str} 2^{log_n} = {n}");
 
-    let mut plan = build_plan(device, log_n, direction, family_override);
+    let mut plan = build_plan(device, log_n, direction, family_override, tail_override);
     let family = plan.family_name().to_string();
     let dispatches = plan.num_dispatches();
 
@@ -341,6 +398,36 @@ fn run_benchmark(
         &validation,
     );
 
+    // When --force-tail is explicit (non-Auto), emit a line compatible with
+    // the `zkgpu-tail-analyze` logcat parser so the same analyzer works
+    // against desktop/CI runs without going through the Android FFI path.
+    // Format matches `apps/android-harness/.../ZkgpuInstrumentedTest.kt`
+    // `CROSSOVER_STOCKHAM_{LOCAL,GLOBAL}_TAIL` lines.
+    if let Some(tag) = match tail_override {
+        TailOverride::Auto => None,
+        TailOverride::Local => Some("CROSSOVER_STOCKHAM_LOCAL_TAIL"),
+        TailOverride::Global => Some("CROSSOVER_STOCKHAM_GLOBAL_TAIL"),
+    } {
+        let tail_label = plan.stockham_tail_strategy().unwrap_or("none");
+        let reason_label = plan.stockham_tail_reason().unwrap_or("none");
+        let stride_str = match plan.tail_stride_bytes() {
+            Some(s) => s.to_string(),
+            None => "none".to_string(),
+        };
+        eprintln!(
+            "{} {}_log{}: family={} tail={} reason={} stride_bytes={} wall={:.3}ms gpu={:.3}ms",
+            tag,
+            dir_str,
+            log_n,
+            family,
+            tail_label,
+            reason_label,
+            stride_str,
+            gpu_e2e_us / 1_000.0,
+            gpu_kernel_us / 1_000.0,
+        );
+    }
+
     RunReport {
         log_n,
         n,
@@ -357,18 +444,31 @@ fn run_benchmark(
 }
 
 fn usage() -> &'static str {
-    "Usage: zkgpu [--json] [--force-family auto|stockham|four-step] [--soak SECS] [log_n...]
+    "Usage: zkgpu [--json] [--force-family auto|stockham|four-step] \\
+               [--force-tail auto|local|global] [--soak SECS] [log_n...]
 
 Modes:
   (default)      Short benchmark: warmup + 5 measured iterations per size
   --soak SECS    Sustained soak: run each size for SECS seconds, recording
                  per-iteration samples for thermal characterization
 
+Overrides:
+  --force-family   Pin the NTT family (default: auto = device-policy pick).
+                   'stockham' disables four-step; 'four-step' forces it.
+  --force-tail     Pin the Stockham tail strategy (default: auto).
+                   'local'  -> LocalFusedR4 (legacy tail kernel)
+                   'global' -> GlobalOnlyR4 (extends global R4 chain through
+                               the tail; the configuration PR 1 made possible).
+                   Only applies when the plan is Stockham. A Four-Step plan
+                   has no Stockham tail and silently ignores this flag.
+
 Examples:
   zkgpu
   zkgpu 10 20
   zkgpu --force-family four-step 20 24
   zkgpu --json --force-family stockham 18 20
+  zkgpu --force-family stockham --force-tail local --json 18 19 20 21 22
+  zkgpu --force-family stockham --force-tail global --json 18 19 20 21 22
   zkgpu --soak 30 18 20
   zkgpu --soak 60 --json 20"
 }
@@ -379,6 +479,7 @@ where
 {
     let mut json_mode = false;
     let mut family_override = FamilyOverride::Auto;
+    let mut tail_override = TailOverride::Auto;
     let mut sizes = Vec::new();
     let mut soak_secs: Option<u32> = None;
 
@@ -417,6 +518,24 @@ where
                     )
                 })?;
             }
+            "--force-tail" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "--force-tail requires a value".to_string())?;
+                tail_override = TailOverride::from_str(&value).ok_or_else(|| {
+                    format!(
+                        "invalid tail override '{value}' (expected auto, local, or global)"
+                    )
+                })?;
+            }
+            _ if arg.starts_with("--force-tail=") => {
+                let value = &arg["--force-tail=".len()..];
+                tail_override = TailOverride::from_str(value).ok_or_else(|| {
+                    format!(
+                        "invalid tail override '{value}' (expected auto, local, or global)"
+                    )
+                })?;
+            }
             _ if arg.starts_with("--soak=") => {
                 let value = &arg["--soak=".len()..];
                 let secs = value
@@ -451,6 +570,7 @@ where
     Ok(CliArgs {
         json_mode,
         family_override,
+        tail_override,
         sizes,
         mode,
     })
@@ -476,6 +596,7 @@ fn main() {
 
     eprintln!("Device: {caps}");
     eprintln!("Family override: {}", cli.family_override.as_str());
+    eprintln!("Tail override: {}", cli.tail_override.as_str());
 
     match cli.mode {
         CliMode::Benchmark => run_benchmark_mode(&device, &cli),
@@ -499,12 +620,14 @@ fn run_benchmark_mode(device: &WgpuDevice, cli: &CliArgs) {
             log_n,
             NttDirection::Forward,
             cli.family_override,
+            cli.tail_override,
         ));
         runs.push(run_benchmark(
             device,
             log_n,
             NttDirection::Inverse,
             cli.family_override,
+            cli.tail_override,
         ));
     }
 
@@ -513,6 +636,10 @@ fn run_benchmark_mode(device: &WgpuDevice, cli: &CliArgs) {
         family_override: match cli.family_override {
             FamilyOverride::Auto => None,
             mode => Some(mode.as_str().to_string()),
+        },
+        tail_override: match cli.tail_override {
+            TailOverride::Auto => None,
+            tail => Some(tail.as_str().to_string()),
         },
         runs,
     };
@@ -786,6 +913,56 @@ mod tests {
     fn parse_rejects_invalid_family() {
         let err = parse_cli_args(vec!["--force-family=banana".to_string()]).unwrap_err();
         assert!(err.contains("invalid family override"));
+    }
+
+    #[test]
+    fn parse_defaults_tail_to_auto() {
+        let parsed = parse_cli_args(Vec::<String>::new()).unwrap();
+        assert_eq!(parsed.tail_override, TailOverride::Auto);
+    }
+
+    #[test]
+    fn parse_force_tail_equals_form() {
+        let parsed = parse_cli_args(vec![
+            "--force-family=stockham".to_string(),
+            "--force-tail=local".to_string(),
+            "18".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(parsed.family_override, FamilyOverride::Stockham);
+        assert_eq!(parsed.tail_override, TailOverride::Local);
+        assert_eq!(parsed.sizes, vec![18]);
+    }
+
+    #[test]
+    fn parse_force_tail_split_form() {
+        let parsed = parse_cli_args(vec![
+            "--force-family".to_string(),
+            "stockham".to_string(),
+            "--force-tail".to_string(),
+            "global".to_string(),
+            "20".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(parsed.tail_override, TailOverride::Global);
+    }
+
+    #[test]
+    fn parse_force_tail_accepts_aliases() {
+        let local = parse_cli_args(vec!["--force-tail=local-fused".to_string()])
+            .unwrap()
+            .tail_override;
+        assert_eq!(local, TailOverride::Local);
+        let global = parse_cli_args(vec!["--force-tail=global-only-r4".to_string()])
+            .unwrap()
+            .tail_override;
+        assert_eq!(global, TailOverride::Global);
+    }
+
+    #[test]
+    fn parse_rejects_invalid_tail() {
+        let err = parse_cli_args(vec!["--force-tail=sideways".to_string()]).unwrap_err();
+        assert!(err.contains("invalid tail override"));
     }
 
     #[test]
