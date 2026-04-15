@@ -217,13 +217,28 @@ pub fn pair_cases(cases: &[CaseTiming]) -> Vec<PairedCase> {
 
 /// Verdict from applying the §4 decision bar of
 /// `research/stockham-local-fused-rewrite.md` to one device's paired cases.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The `WindowedFlip` variant was added in the PR 2 close-out (2026-04-15)
+/// after phase-e FTL A/B surfaced a Mali small-N advantage at `log_n ∈
+/// [18, 19]` that the original monotone-threshold model was blind to — the
+/// win didn't extend to the largest measured size, so no single
+/// `threshold_log_n` captured it.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Recommendation {
     /// Global wins by ≥20% at the threshold log_n on a majority of paired
     /// cases — apply the flip unconditionally.
     Unconditional { threshold_log_n: u32 },
     /// Global wins by 5–20% — flip per-device at the suggested threshold.
     PerDevice { threshold_log_n: u32 },
+    /// Global wins by ≥20% on a contiguous `log_n` window that does **not**
+    /// extend to the largest measured size. Phase-e A/B (2026-04-15) surfaced
+    /// this shape on Mali at `log_n ∈ [18, 19]` (small-N launch-overhead
+    /// advantage) with subsequent sizes neutral.
+    WindowedFlip {
+        start_log_n: u32,
+        end_log_n: u32,
+        avg_win: f64,
+    },
     /// No clear win; keep the existing heuristic and gather deeper signal
     /// (shmem counters, stride sweep).
     NoChange,
@@ -238,10 +253,20 @@ pub const PER_DEVICE_WIN: f64 = 0.05;
 
 /// Apply the research-doc decision bar to a device's paired cases.
 ///
-/// `candidate_log_ns` controls which sizes are considered the "threshold
-/// regime"; the research doc uses `[21, 22]`. The recommended threshold is
-/// the smallest candidate where the average `global_win_ratio` across
-/// directions clears the bar.
+/// `candidate_log_ns` controls which sizes are considered the "monotone
+/// threshold regime"; the research doc uses `[21, 22]`. The recommended
+/// threshold is the smallest candidate where the average `global_win_ratio`
+/// across directions clears the bar.
+///
+/// Priority order (PR 2 close-out):
+///   1. `WindowedFlip` — a contiguous run of `log_n` buckets with avg win
+///      ≥ `UNCONDITIONAL_WIN` that does **not** reach the largest measured
+///      `log_n`. The original monotone-threshold model missed this because
+///      it only looked at `candidate_log_ns`. Phase-e surfaced this shape on
+///      Mali at `log_n ∈ [18, 19]`.
+///   2. Monotone `Unconditional` / `PerDevice` at the smallest candidate
+///      that clears the respective bar.
+///   3. `NoChange`.
 pub fn recommend(paired: &[PairedCase], candidate_log_ns: &[u32]) -> Recommendation {
     // Group wins by log_n, averaging forward + inverse.
     let mut by_log_n: BTreeMap<u32, Vec<f64>> = BTreeMap::new();
@@ -254,14 +279,23 @@ pub fn recommend(paired: &[PairedCase], candidate_log_ns: &[u32]) -> Recommendat
         return Recommendation::InsufficientData;
     }
 
+    // Collapse to (log_n, avg) entries sorted by log_n.
+    let avgs: Vec<(u32, f64)> = by_log_n
+        .iter()
+        .map(|(k, v)| (*k, v.iter().sum::<f64>() / v.len() as f64))
+        .collect();
+
+    // 1. Windowed-flip detection. Runs ending at `max_log_n` are not windowed
+    //    — those are better captured by the monotone threshold below.
+    if let Some(win) = find_windowed_flip(&avgs) {
+        return win;
+    }
+
+    // 2. Monotone threshold against the research-doc candidates.
     for &log_n in candidate_log_ns {
-        let Some(ratios) = by_log_n.get(&log_n) else {
+        let Some(&(_, avg)) = avgs.iter().find(|(l, _)| *l == log_n) else {
             continue;
         };
-        if ratios.is_empty() {
-            continue;
-        }
-        let avg = ratios.iter().sum::<f64>() / ratios.len() as f64;
         if avg >= UNCONDITIONAL_WIN {
             return Recommendation::Unconditional {
                 threshold_log_n: log_n,
@@ -274,6 +308,71 @@ pub fn recommend(paired: &[PairedCase], candidate_log_ns: &[u32]) -> Recommendat
         }
     }
     Recommendation::NoChange
+}
+
+/// Scan `avgs` (sorted by `log_n`) for contiguous runs whose per-bucket
+/// average global-win ratio is ≥ [`UNCONDITIONAL_WIN`]. Returns the largest
+/// such run that ends strictly before `max_log_n`. Runs that reach
+/// `max_log_n` are ignored — those are already handled by the monotone
+/// threshold logic and would otherwise double-fire.
+fn find_windowed_flip(avgs: &[(u32, f64)]) -> Option<Recommendation> {
+    if avgs.len() < 2 {
+        return None;
+    }
+    let max_log_n = avgs.last().unwrap().0;
+
+    let mut best: Option<(u32, u32, f64)> = None;
+    let mut run: Option<(usize, usize)> = None; // (start_idx, end_idx)
+
+    for i in 0..avgs.len() {
+        let is_win = avgs[i].1 >= UNCONDITIONAL_WIN;
+        let extends = match run {
+            // Contiguous log_n extends an open run.
+            Some((_, end_idx)) => is_win && avgs[end_idx].0 + 1 == avgs[i].0,
+            None => is_win,
+        };
+
+        if extends {
+            run = Some(match run {
+                Some((s, _)) => (s, i),
+                None => (i, i),
+            });
+        } else {
+            if let Some((s, e)) = run.take() {
+                maybe_record(&avgs[s..=e], max_log_n, &mut best);
+            }
+            if is_win {
+                run = Some((i, i));
+            }
+        }
+    }
+    if let Some((s, e)) = run {
+        maybe_record(&avgs[s..=e], max_log_n, &mut best);
+    }
+
+    best.map(|(start_log_n, end_log_n, avg_win)| Recommendation::WindowedFlip {
+        start_log_n,
+        end_log_n,
+        avg_win,
+    })
+}
+
+fn maybe_record(
+    slice: &[(u32, f64)],
+    max_log_n: u32,
+    best: &mut Option<(u32, u32, f64)>,
+) {
+    let (start_log, _) = slice.first().copied().unwrap();
+    let (end_log, _) = slice.last().copied().unwrap();
+    // Runs reaching the largest measured log_n are handled by the monotone
+    // bar — skip so we don't double-report.
+    if end_log >= max_log_n {
+        return;
+    }
+    let avg = slice.iter().map(|(_, v)| *v).sum::<f64>() / slice.len() as f64;
+    if best.map_or(true, |(_, _, b)| avg > b) {
+        *best = Some((start_log, end_log, avg));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -504,5 +603,115 @@ mod tests {
         ];
         let rec = recommend(&paired, &[21, 22]);
         assert_eq!(rec, Recommendation::InsufficientData);
+    }
+
+    // -- WindowedFlip tests (PR 2 close-out, phase-e 2026-04-15) --
+
+    #[test]
+    fn windowed_flip_komodo_shape_single_bucket_at_log18() {
+        // Komodo (Pixel 9 Pro XL, Mali-G715) phase-e shape: big global win
+        // at log18 only, then neutral. The single-bucket run ends at
+        // log18 < max_log_n=22 → WindowedFlip.
+        let paired = vec![
+            synth_pair(18, Direction::Forward, 10.0, 6.0), // 40% win
+            synth_pair(18, Direction::Inverse, 10.5, 6.3), // 40% win
+            synth_pair(19, Direction::Forward, 11.0, 10.5), // ~5%
+            synth_pair(20, Direction::Forward, 12.0, 12.0),
+            synth_pair(21, Direction::Forward, 15.0, 15.3),
+            synth_pair(22, Direction::Forward, 20.0, 20.0),
+        ];
+        let rec = recommend(&paired, &[21, 22]);
+        match rec {
+            Recommendation::WindowedFlip {
+                start_log_n,
+                end_log_n,
+                avg_win,
+            } => {
+                assert_eq!(start_log_n, 18);
+                assert_eq!(end_log_n, 18);
+                assert!((avg_win - 0.40).abs() < 1e-9, "avg_win={avg_win}");
+            }
+            other => panic!("expected WindowedFlip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn windowed_flip_a56xnaeea_shape_two_bucket_log18_19() {
+        // a56xnaeea (Galaxy A56, Mali-G720): both log18 AND log19 clear the
+        // unconditional bar, then the signal decays. Contiguous run [18, 19]
+        // strictly below max_log_n=22 → WindowedFlip spanning both.
+        let paired = vec![
+            synth_pair(18, Direction::Forward, 10.0, 6.0), // 40% win
+            synth_pair(19, Direction::Forward, 11.0, 8.25), // 25% win
+            synth_pair(20, Direction::Forward, 12.0, 11.5),
+            synth_pair(21, Direction::Forward, 14.0, 14.0),
+            synth_pair(22, Direction::Forward, 20.0, 20.2),
+        ];
+        let rec = recommend(&paired, &[21, 22]);
+        match rec {
+            Recommendation::WindowedFlip {
+                start_log_n,
+                end_log_n,
+                avg_win,
+            } => {
+                assert_eq!(start_log_n, 18);
+                assert_eq!(end_log_n, 19);
+                // (0.40 + 0.25) / 2 = 0.325
+                assert!((avg_win - 0.325).abs() < 1e-9, "avg_win={avg_win}");
+            }
+            other => panic!("expected WindowedFlip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn windowed_flip_not_fired_when_run_reaches_max_log_n() {
+        // Research-doc Xclipse-540 shape: big win at log22 = max_log_n.
+        // Run includes max_log_n, so windowed detection skips it and the
+        // monotone threshold at candidate log22 fires Unconditional.
+        let paired = vec![
+            synth_pair(18, Direction::Forward, 5.0, 5.0),
+            synth_pair(22, Direction::Forward, 20.0, 13.0), // 35% win
+            synth_pair(22, Direction::Inverse, 20.0, 13.4),
+        ];
+        let rec = recommend(&paired, &[21, 22]);
+        assert_eq!(
+            rec,
+            Recommendation::Unconditional { threshold_log_n: 22 }
+        );
+    }
+
+    #[test]
+    fn windowed_flip_requires_unconditional_bar_not_per_device() {
+        // Narrow small-N win (8%) at log18 only — below UNCONDITIONAL_WIN
+        // and the window doesn't reach max_log_n so no monotone match
+        // either. Falls through to NoChange: we don't accept a narrow
+        // windowed signal, it needs to be a clear ≥20% effect before the
+        // recommender commits to proposing a new rule.
+        let paired = vec![
+            synth_pair(18, Direction::Forward, 10.0, 9.2), // 8%
+            synth_pair(19, Direction::Forward, 11.0, 11.0),
+            synth_pair(22, Direction::Forward, 20.0, 20.0),
+        ];
+        let rec = recommend(&paired, &[21, 22]);
+        assert_eq!(rec, Recommendation::NoChange);
+    }
+
+    #[test]
+    fn windowed_flip_takes_precedence_over_monotone_per_device() {
+        // Small-N big win at log18 AND a narrow monotone win at log22. The
+        // windowed signal is the one the old recommender missed, so it
+        // should take priority in the output.
+        let paired = vec![
+            synth_pair(18, Direction::Forward, 10.0, 6.0), // 40%
+            synth_pair(19, Direction::Forward, 11.0, 10.5),
+            synth_pair(20, Direction::Forward, 12.0, 11.5),
+            synth_pair(21, Direction::Forward, 15.0, 15.0),
+            synth_pair(22, Direction::Forward, 20.0, 18.4), // 8% (per-device band)
+        ];
+        let rec = recommend(&paired, &[21, 22]);
+        assert!(
+            matches!(rec, Recommendation::WindowedFlip { start_log_n: 18, end_log_n: 18, .. }),
+            "expected WindowedFlip at log18, got {rec:?}",
+        );
     }
 }

@@ -631,43 +631,41 @@ fn stockham_tail_from_plan(
 }
 
 #[test]
-fn xclipse_large_n_picks_global_tail_by_default() {
-    // Xclipse at log_n >= 20 is the canonical case where LocalFusedR4's
-    // strided gather collapses coalescing — the heuristic must choose
-    // GlobalOnlyR4 without the caller having to ask.
+fn xclipse_keeps_local_tail_across_all_sizes() {
+    // PR 2 close-out (2026-04-15): the Xclipse `log_n >= 20 → GlobalOnlyR4`
+    // rule was dropped after phase-e FTL A/B on Xclipse 940 (e1q/Galaxy S24)
+    // failed to reproduce the Xclipse-540 collapse the rule was derived from.
+    // See `apps/android-harness/research/benchmarks/phase-e-tail-ab-2026-04-15/README.md`.
     //
-    // Xclipse's default four_step_threshold happens to coincide with the
-    // tail heuristic's own log_n=20 boundary. We disable four-step in the
-    // policy so this test observes the tail decision in isolation; the
-    // actual four-step-vs-Stockham cutover is covered by sibling tests.
+    // Four-step disabled so we observe the tail decision in isolation;
+    // Xclipse's default four-step threshold would otherwise flip at log_n=20.
     let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
     let mut policy = PlannerPolicy::from_caps(&caps);
     policy.four_step_threshold = None;
-    assert_eq!(
-        stockham_tail_from_plan(20, &policy),
-        Some(StockhamTailStrategy::GlobalOnlyR4),
-        "Xclipse log_n>=20 must fall back to GlobalOnlyR4"
-    );
-    // Below 20 the local tail is still the faster choice.
-    assert_eq!(
-        stockham_tail_from_plan(18, &policy),
-        Some(StockhamTailStrategy::LocalFusedR4),
-    );
+    for log_n in [18, 20, 22] {
+        assert_eq!(
+            stockham_tail_from_plan(log_n, &policy),
+            Some(StockhamTailStrategy::LocalFusedR4),
+            "Xclipse must keep LocalFusedR4 at log_n={log_n} after PR 2",
+        );
+    }
 }
 
 #[test]
-fn mali_large_n_picks_global_tail_by_default() {
-    // Mali-G715 hits the same strided-gather pathology at log_n >= 22.
+fn mali_keeps_local_tail_across_all_sizes() {
+    // PR 2 close-out (2026-04-15): the Mali `log_n >= 22 → GlobalOnlyR4`
+    // rule was dropped — phase-e A/B across G715/G720 measured the log22
+    // delta at ±1% (not the predicted collapse). A small-N opportunity
+    // at log18-19 exists on Mali but is deferred (see phase-e README).
     let caps = mock_caps_identity(GpuFamily::Mali, PlatformClass::AndroidNative);
     let policy = PlannerPolicy::from_caps(&caps);
-    assert_eq!(
-        stockham_tail_from_plan(22, &policy),
-        Some(StockhamTailStrategy::GlobalOnlyR4),
-    );
-    assert_eq!(
-        stockham_tail_from_plan(20, &policy),
-        Some(StockhamTailStrategy::LocalFusedR4),
-    );
+    for log_n in [18, 20, 22] {
+        assert_eq!(
+            stockham_tail_from_plan(log_n, &policy),
+            Some(StockhamTailStrategy::LocalFusedR4),
+            "Mali must keep LocalFusedR4 at log_n={log_n} after PR 2",
+        );
+    }
 }
 
 #[test]
@@ -702,12 +700,12 @@ fn default_apple_picks_local_tail() {
 
 #[test]
 fn explicit_local_override_wins_over_heuristic() {
-    // If the heuristic says GlobalOnlyR4 (Xclipse @ log_n=20) but the caller
-    // passes `Local`, the override wins and the plan uses LocalFusedR4.
+    // If the heuristic says GlobalOnlyR4 (Browser @ log_n>=20 —
+    // HeuristicBrowserConservative) but the caller passes `Local`, the
+    // override must win and the plan uses LocalFusedR4.
     //
-    // Four-step disabled so we exercise the Stockham path; Xclipse's default
-    // threshold would otherwise pick FourStep at exactly log_n=20.
-    let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
+    // Four-step disabled so we exercise the Stockham path in isolation.
+    let caps = mock_caps_identity(GpuFamily::Unknown, PlatformClass::Browser);
     let mut policy =
         PlannerPolicy::from_caps(&caps).with_stockham_tail_override(StockhamTailOverride::Local);
     policy.four_step_threshold = None;
@@ -736,8 +734,13 @@ fn with_four_step_disabled_preserves_caps_tail_heuristic() {
     // `PlannerPolicy::stockham_only()` which dropped the device caps hint
     // and silently fell back to LocalFusedR4 on every device. The fix is
     // `with_four_step_disabled()`, which preserves the caps hint so the
-    // Xclipse/Mali/Browser tail heuristic still triggers.
-    let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
+    // browser tail heuristic still triggers.
+    //
+    // After PR 2 close-out (2026-04-15) the only surviving heuristic flip
+    // is `BrowserWebGpu @ log_n >= 20 → GlobalOnlyR4`, so this test uses
+    // the Browser platform class to distinguish caps-aware from caps-less
+    // policy construction.
+    let caps = mock_caps_identity(GpuFamily::Unknown, PlatformClass::Browser);
     let policy = PlannerPolicy::from_caps(&caps).with_four_step_disabled();
     assert_eq!(policy.four_step_threshold(), None);
     assert_eq!(

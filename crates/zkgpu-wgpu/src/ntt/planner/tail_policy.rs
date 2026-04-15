@@ -5,21 +5,39 @@
 //!   - A "tail" of the final `LOG_BLOCK` stages.
 //!
 //! Historically the tail always ran as a single workgroup-local fused R4
-//! dispatch (`babybear_stockham_local_r4.wgsl`). On Mali-G715 and Xclipse 540
-//! the local kernel's per-thread strided gather (`stride = N / BLOCK_SIZE`)
-//! collapses coalescing once the working set exceeds L2:
+//! dispatch (`babybear_stockham_local_r4.wgsl`). The companion `GlobalOnlyR4`
+//! strategy extends the global R4 dispatch chain through end-of-transform.
 //!
-//! | log N | Xclipse 540 ns/elem | ratio/prev |
-//! |-------|---------------------|-----------|
-//! | 18    |  4.77               |   —       |
-//! | 22    | 19.64               |  4.1×     |
+//! ## Policy origin
 //!
-//! See `research/stockham-local-fused-rewrite.md` for the full diagnosis.
+//! The original Xclipse 540 / Exynos 2200 measurement in
+//! `research/stockham-local-fused-rewrite.md` showed a 4.1× ns/elem
+//! regression for the local kernel by log22 — the working-set / L2 collapse
+//! the strided gather (`stride = N / BLOCK_SIZE`) produces. PR 1 of the
+//! tail-strategy refactor encoded that as
+//! `Mali @ log_n ≥ 22 → GlobalOnlyR4` and `Xclipse @ log_n ≥ 20 → GlobalOnlyR4`.
 //!
-//! This module exposes a small policy that picks one of two tail strategies
-//! per (log_n, device-family, override) and reports *why* — the reason
-//! string is plumbed into `CaseReport.stockham_tail_reason` for after-the-fact
-//! audit when comparing benchmark runs.
+//! Phase-e (2026-04-15, 6-device FTL A/B —
+//! `apps/android-harness/research/benchmarks/phase-e-tail-ab-2026-04-15/`)
+//! falsified both rules:
+//!   - Mali @ log22 across G715/G720 reduced to ±1% noise; the predicted
+//!     collapse did not reproduce on current silicon / drivers.
+//!   - Xclipse 940 (Exynos 2400) showed no collapse; the original
+//!     measurement was Xclipse-540-specific.
+//!
+//! Phase-e *did* surface a separate small-N opportunity on Mali
+//! (LocalFusedR4 launch+shmem-setup overhead dominating at log18-19, where
+//! GlobalOnlyR4 wins by 30-50%) but with one mixed-signal device
+//! (comet/Pixel 9 Pro Fold). Adding a small-N flip is deferred — see the
+//! phase-e README's "Recommended planner change" section for the deferred
+//! work.
+//!
+//! ## Current policy (PR 2 close-out)
+//!
+//! Native Vulkan: keep the legacy `LocalFusedR4` everywhere. The two
+//! large-N flips that PR 1 inherited from the Xclipse 540 measurement are
+//! gone. Browser stays at `log_n ≥ 20 → GlobalOnlyR4` — the sandbox hides
+//! the underlying silicon and we have no field data to drop the rule.
 //!
 //! Pure data only — no GPU calls — so the heuristic is unit-testable.
 
@@ -49,15 +67,14 @@ impl StockhamTailStrategy {
 }
 
 /// Why a tail strategy was chosen. Reported in `CaseReport.stockham_tail_reason`.
+///
+/// `HeuristicXclipseLargeN` and `HeuristicMaliLargeN` were dropped in the
+/// PR 2 close-out (2026-04-15). Phase-e A/B did not reproduce the collapses
+/// those variants flipped on; their absence in current logs is intentional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StockhamTailReason {
-    /// Xclipse at log_n ≥ 20 — local fused collapses (see scaling table).
-    HeuristicXclipseLargeN,
-    /// Mali at log_n ≥ 22 — local fused collapses one stage later than Xclipse.
-    HeuristicMaliLargeN,
     /// BrowserWebGpu at log_n ≥ 20 — conservative; the browser hides the
-    /// underlying silicon and we already know mobile-class devices behind
-    /// the sandbox suffer the same gather pathology.
+    /// underlying silicon and we have no field data to drop this rule.
     HeuristicBrowserConservative,
     /// Default — local fused remains fastest at all tested sizes for this
     /// (backend, family) combination, or no caps were available.
@@ -73,8 +90,6 @@ pub(crate) enum StockhamTailReason {
 impl StockhamTailReason {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::HeuristicXclipseLargeN => "HeuristicXclipseLargeN",
-            Self::HeuristicMaliLargeN => "HeuristicMaliLargeN",
             Self::HeuristicBrowserConservative => "HeuristicBrowserConservative",
             Self::HeuristicDefaultLocal => "HeuristicDefaultLocal",
             Self::ForcedLocal => "ForcedLocal",
@@ -176,27 +191,16 @@ fn heuristic_default(
         );
     }
 
-    // Native Vulkan: family-driven. Other backends (Metal, DX12) keep the
-    // local kernel — Apple shmem is large and we have no Metal regression.
-    if matches!(caps.backend, wgpu::Backend::Vulkan) {
-        match caps.gpu_family {
-            // Xclipse 540: 4.1× ns/elem regression by log22; flips at log20.
-            GpuFamily::Xclipse if log_n >= 20 => {
-                return (
-                    StockhamTailStrategy::GlobalOnlyR4,
-                    StockhamTailReason::HeuristicXclipseLargeN,
-                );
-            }
-            // Mali-G715: holds through log21, collapses at log22.
-            GpuFamily::Mali if log_n >= 22 => {
-                return (
-                    StockhamTailStrategy::GlobalOnlyR4,
-                    StockhamTailReason::HeuristicMaliLargeN,
-                );
-            }
-            _ => {}
-        }
-    }
+    // Native Vulkan: phase-e A/B (2026-04-15) falsified the two family-specific
+    // large-N flips PR 1 inherited from the Xclipse-540 scaling table. Current
+    // silicon (Xclipse 940, Mali-G715/G720) shows no collapse at log22 worth
+    // flipping for. See:
+    // `apps/android-harness/research/benchmarks/phase-e-tail-ab-2026-04-15/README.md`.
+    //
+    // The phase-e data did surface a small-N Mali win (log18-19, GlobalOnlyR4
+    // +30-50%) but with one mixed-signal device (comet). Adding that rule is
+    // deferred until the anomaly is explained.
+    let _ = caps.gpu_family; // reserved for future family-driven rules.
 
     (
         StockhamTailStrategy::LocalFusedR4,
@@ -242,29 +246,39 @@ mod tests {
     // -- Heuristic defaults --
 
     #[test]
-    fn xclipse_flips_at_log20() {
+    fn xclipse_keeps_local_at_all_sizes() {
+        // PR 2 close-out (2026-04-15): the Xclipse log20 flip inherited from
+        // the Xclipse-540 measurement was falsified by phase-e A/B on
+        // Xclipse 940 (e1q/Galaxy S24). Large-N keeps LocalFusedR4.
         let caps = Some(vulkan(GpuFamily::Xclipse));
-        let d19 = choose_stockham_tail(19, caps, StockhamTailOverride::Auto).unwrap();
-        assert_eq!(d19.strategy, StockhamTailStrategy::LocalFusedR4);
-        assert_eq!(d19.reason, StockhamTailReason::HeuristicDefaultLocal);
-
-        let d20 = choose_stockham_tail(20, caps, StockhamTailOverride::Auto).unwrap();
-        assert_eq!(d20.strategy, StockhamTailStrategy::GlobalOnlyR4);
-        assert_eq!(d20.reason, StockhamTailReason::HeuristicXclipseLargeN);
-
-        let d22 = choose_stockham_tail(22, caps, StockhamTailOverride::Auto).unwrap();
-        assert_eq!(d22.strategy, StockhamTailStrategy::GlobalOnlyR4);
+        for log_n in [18, 19, 20, 21, 22, 24] {
+            let d = choose_stockham_tail(log_n, caps, StockhamTailOverride::Auto).unwrap();
+            assert_eq!(
+                d.strategy,
+                StockhamTailStrategy::LocalFusedR4,
+                "Xclipse should keep local at log_n={log_n} after PR 2",
+            );
+            assert_eq!(d.reason, StockhamTailReason::HeuristicDefaultLocal);
+        }
     }
 
     #[test]
-    fn mali_flips_at_log22() {
+    fn mali_keeps_local_at_all_sizes() {
+        // PR 2 close-out (2026-04-15): Mali @ log22 flip was falsified by
+        // phase-e A/B across G715/G720 — the collapse did not reproduce.
+        // A small-N Mali opportunity (log18-19) was surfaced but is deferred
+        // (see phase-e README), so the current heuristic keeps local for all
+        // log_n.
         let caps = Some(vulkan(GpuFamily::Mali));
-        let d21 = choose_stockham_tail(21, caps, StockhamTailOverride::Auto).unwrap();
-        assert_eq!(d21.strategy, StockhamTailStrategy::LocalFusedR4);
-
-        let d22 = choose_stockham_tail(22, caps, StockhamTailOverride::Auto).unwrap();
-        assert_eq!(d22.strategy, StockhamTailStrategy::GlobalOnlyR4);
-        assert_eq!(d22.reason, StockhamTailReason::HeuristicMaliLargeN);
+        for log_n in [18, 19, 20, 21, 22, 24] {
+            let d = choose_stockham_tail(log_n, caps, StockhamTailOverride::Auto).unwrap();
+            assert_eq!(
+                d.strategy,
+                StockhamTailStrategy::LocalFusedR4,
+                "Mali should keep local at log_n={log_n} after PR 2",
+            );
+            assert_eq!(d.reason, StockhamTailReason::HeuristicDefaultLocal);
+        }
     }
 
     #[test]
@@ -314,8 +328,10 @@ mod tests {
     // -- Overrides win over heuristic --
 
     #[test]
-    fn forced_local_overrides_xclipse_heuristic() {
-        let caps = Some(vulkan(GpuFamily::Xclipse));
+    fn forced_local_overrides_browser_heuristic() {
+        // Browser @ log20 would default to GlobalOnlyR4 via
+        // `HeuristicBrowserConservative`; ForcedLocal must win.
+        let caps = Some(browser());
         let d = choose_stockham_tail(22, caps, StockhamTailOverride::Local).unwrap();
         assert_eq!(d.strategy, StockhamTailStrategy::LocalFusedR4);
         assert_eq!(d.reason, StockhamTailReason::ForcedLocal);

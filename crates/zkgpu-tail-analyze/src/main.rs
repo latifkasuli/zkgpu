@@ -45,6 +45,17 @@ struct DeviceReport {
     paired_cases: Vec<PairedCaseOut>,
     recommendation: String,
     recommended_threshold_log_n: Option<u32>,
+    /// Populated only for `WindowedFlip` verdicts: inclusive `log_n` range
+    /// where Global wins by ≥ UNCONDITIONAL_WIN on average.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recommended_window: Option<WindowOut>,
+}
+
+#[derive(Serialize)]
+struct WindowOut {
+    start_log_n: u32,
+    end_log_n: u32,
+    avg_win: f64,
 }
 
 #[derive(Serialize)]
@@ -125,6 +136,18 @@ fn main() -> ExitCode {
             recommended_threshold_log_n: match rec {
                 Recommendation::Unconditional { threshold_log_n }
                 | Recommendation::PerDevice { threshold_log_n } => Some(threshold_log_n),
+                _ => None,
+            },
+            recommended_window: match rec {
+                Recommendation::WindowedFlip {
+                    start_log_n,
+                    end_log_n,
+                    avg_win,
+                } => Some(WindowOut {
+                    start_log_n,
+                    end_log_n,
+                    avg_win,
+                }),
                 _ => None,
             },
         });
@@ -235,11 +258,32 @@ fn classify_win(ratio: f64) -> &'static str {
     }
 }
 
-fn recommendation_label(rec: &Recommendation) -> &'static str {
+fn recommendation_label(rec: &Recommendation) -> String {
     match rec {
-        Recommendation::Unconditional { .. } => "UNCONDITIONAL (global ≥20% win)",
-        Recommendation::PerDevice { .. } => "PER-DEVICE (global 5–20% win)",
-        Recommendation::NoChange => "NO-CHANGE (local still wins)",
-        Recommendation::InsufficientData => "INSUFFICIENT-DATA",
+        Recommendation::Unconditional { threshold_log_n } => {
+            format!("UNCONDITIONAL @ log{threshold_log_n} (global ≥20% win)")
+        }
+        Recommendation::PerDevice { threshold_log_n } => {
+            format!("PER-DEVICE @ log{threshold_log_n} (global 5–20% win)")
+        }
+        Recommendation::WindowedFlip {
+            start_log_n,
+            end_log_n,
+            avg_win,
+        } => {
+            if start_log_n == end_log_n {
+                format!(
+                    "WINDOWED-FLIP @ log{start_log_n} ({:.1}% avg win; does not extend to max log_n)",
+                    avg_win * 100.0,
+                )
+            } else {
+                format!(
+                    "WINDOWED-FLIP @ log{start_log_n}..=log{end_log_n} ({:.1}% avg win)",
+                    avg_win * 100.0,
+                )
+            }
+        }
+        Recommendation::NoChange => "NO-CHANGE (local still wins)".to_string(),
+        Recommendation::InsufficientData => "INSUFFICIENT-DATA".to_string(),
     }
 }

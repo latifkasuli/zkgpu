@@ -111,8 +111,8 @@ export interface CaseReport {
    */
   stockham_tail_strategy?: string;
   /**
-   * Why the planner chose that strategy (e.g. `"HeuristicXclipseLargeN"`,
-   * `"HeuristicDefaultLocal"`, `"ForcedLocal"`). Omitted alongside
+   * Why the planner chose that strategy (e.g. `"HeuristicDefaultLocal"`,
+   * `"HeuristicBrowserConservative"`, `"ForcedLocal"`). Omitted alongside
    * `stockham_tail_strategy` when no tail decision applied.
    */
   stockham_tail_reason?: string;
