@@ -12,6 +12,7 @@ members = [
     "crates/zkgpu-pacer",
     "crates/zkgpu-ffi",
     "crates/zkgpu-web",
+    "crates/zkgpu-tail-analyze",
 ]
 
 [workspace.package]

@@ -1,0 +1,21 @@
+[package]
+name = "zkgpu-tail-analyze"
+description = "Logcat parser + threshold recommender for the Stockham tail A/B"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "zkgpu-tail-analyze"
+path = "src/main.rs"
+
+[lib]
+name = "zkgpu_tail_analyze"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
