@@ -32,12 +32,32 @@
 //! phase-e README's "Recommended planner change" section for the deferred
 //! work.
 //!
-//! ## Current policy (PR 2 close-out)
+//! ## Adreno collapse (PR 3, 2026-04-15)
 //!
-//! Native Vulkan: keep the legacy `LocalFusedR4` everywhere. The two
-//! large-N flips that PR 1 inherited from the Xclipse 540 measurement are
-//! gone. Browser stays at `log_n ≥ 20 → GlobalOnlyR4` — the sandbox hides
-//! the underlying silicon and we have no field data to drop the rule.
+//! The Adreno generation-confirmation A/B
+//! (`apps/android-harness/research/benchmarks/adreno-gen-confirm-2026-04-15/`)
+//! discovered that three successive Adreno generations — 730 (b0q), 740
+//! (dm3q), 750 (e3q) — reproduce the Xclipse-540 strided-gather collapse
+//! pattern at every measured size (log18..=log22, +40% to +72% Global
+//! wins, both directions). The 4th generation measured — Adreno 830
+//! (pa3q) — was flatline in phase-e (±5% noise). The local S24 Ultra
+//! (Adreno 750) run had already shown the production default picking a
+//! ~3× slower path at log22 (23ms LocalFusedR4 vs 8ms GlobalOnlyR4).
+//!
+//! The collapse is wholesale (not log_n-gated) on the three older
+//! generations, so the rule is unconditional on `GpuFamily::Adreno`. The
+//! marginal pa3q regression is within phase-e's measured noise band and
+//! acceptable against 40-70% wins on the older silicon.
+//!
+//! ## Current policy
+//!
+//! * **Browser (any family):** `log_n ≥ 20 → GlobalOnlyR4` — conservative;
+//!   the sandbox hides the silicon and we have no field data to drop it.
+//! * **Native Adreno:** unconditional `GlobalOnlyR4` once a tail phase
+//!   exists (`log_n ≥ LOG_BLOCK`). Reason: `HeuristicAdrenoCollapse`.
+//! * **Native Mali / Xclipse / Apple / everything else:** `LocalFusedR4`.
+//!   The two Mali/Xclipse large-N flips PR 1 inherited from the
+//!   Xclipse-540 table were falsified by phase-e and are gone.
 //!
 //! Pure data only — no GPU calls — so the heuristic is unit-testable.
 
@@ -71,11 +91,19 @@ impl StockhamTailStrategy {
 /// `HeuristicXclipseLargeN` and `HeuristicMaliLargeN` were dropped in the
 /// PR 2 close-out (2026-04-15). Phase-e A/B did not reproduce the collapses
 /// those variants flipped on; their absence in current logs is intentional.
+/// `HeuristicAdrenoCollapse` was added in PR 3 (2026-04-15) after the
+/// generation-confirmation A/B on Adreno 730/740/750 reproduced the
+/// Xclipse-540 pathology.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StockhamTailReason {
     /// BrowserWebGpu at log_n ≥ 20 — conservative; the browser hides the
     /// underlying silicon and we have no field data to drop this rule.
     HeuristicBrowserConservative,
+    /// Native Adreno — unconditional `GlobalOnlyR4` once a tail phase
+    /// exists. Three generations (730/740/750) reproduce the gather
+    /// collapse at every measured size; see the module doc and
+    /// `apps/android-harness/research/benchmarks/adreno-gen-confirm-2026-04-15/`.
+    HeuristicAdrenoCollapse,
     /// Default — local fused remains fastest at all tested sizes for this
     /// (backend, family) combination, or no caps were available.
     HeuristicDefaultLocal,
@@ -91,6 +119,7 @@ impl StockhamTailReason {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::HeuristicBrowserConservative => "HeuristicBrowserConservative",
+            Self::HeuristicAdrenoCollapse => "HeuristicAdrenoCollapse",
             Self::HeuristicDefaultLocal => "HeuristicDefaultLocal",
             Self::ForcedLocal => "ForcedLocal",
             Self::ForcedGlobal => "ForcedGlobal",
@@ -191,17 +220,27 @@ fn heuristic_default(
         );
     }
 
-    // Native Vulkan: phase-e A/B (2026-04-15) falsified the two family-specific
-    // large-N flips PR 1 inherited from the Xclipse-540 scaling table. Current
-    // silicon (Xclipse 940, Mali-G715/G720) shows no collapse at log22 worth
-    // flipping for. See:
+    // Native Vulkan Adreno: three generations (730/740/750) reproduce the
+    // Xclipse-540 strided-gather collapse at every measured size (log18..=log22,
+    // +40-72% GlobalOnlyR4 wins). Adreno 830 is flatline and absorbs a marginal
+    // regression. See:
+    // `apps/android-harness/research/benchmarks/adreno-gen-confirm-2026-04-15/README.md`.
+    if matches!(caps.gpu_family, GpuFamily::Adreno) {
+        return (
+            StockhamTailStrategy::GlobalOnlyR4,
+            StockhamTailReason::HeuristicAdrenoCollapse,
+        );
+    }
+
+    // Native Vulkan (other families): phase-e A/B (2026-04-15) falsified the two
+    // family-specific large-N flips PR 1 inherited from the Xclipse-540 scaling
+    // table. Current silicon (Xclipse 940, Mali-G715/G720) shows no collapse at
+    // log22 worth flipping for. See:
     // `apps/android-harness/research/benchmarks/phase-e-tail-ab-2026-04-15/README.md`.
     //
     // The phase-e data did surface a small-N Mali win (log18-19, GlobalOnlyR4
     // +30-50%) but with one mixed-signal device (comet). Adding that rule is
     // deferred until the anomaly is explained.
-    let _ = caps.gpu_family; // reserved for future family-driven rules.
-
     (
         StockhamTailStrategy::LocalFusedR4,
         StockhamTailReason::HeuristicDefaultLocal,
@@ -307,14 +346,22 @@ mod tests {
     }
 
     #[test]
-    fn adreno_keeps_local_at_all_sizes() {
-        // Adreno's strided gather behaves on Android — four-step kicks in at
-        // mobile threshold instead. Tail policy keeps local for whatever
-        // Stockham work remains.
+    fn adreno_picks_global_tail_at_all_sizes() {
+        // PR 3 (2026-04-15): Adreno 730/740/750 reproduce the Xclipse-540
+        // gather collapse at every measured size (log18..=log22, +40-72%
+        // GlobalOnlyR4 wins). Apply the flip unconditionally once a tail
+        // phase exists — even below the measured range, since the pathology
+        // is a kernel-level issue that the measurements show starts at the
+        // smallest size we can test.
         let caps = Some(vulkan(GpuFamily::Adreno));
-        for log_n in [10, 18, 22] {
+        for log_n in [10, 15, 18, 22, 24] {
             let d = choose_stockham_tail(log_n, caps, StockhamTailOverride::Auto).unwrap();
-            assert_eq!(d.strategy, StockhamTailStrategy::LocalFusedR4);
+            assert_eq!(
+                d.strategy,
+                StockhamTailStrategy::GlobalOnlyR4,
+                "Adreno must pick GlobalOnlyR4 at log_n={log_n}",
+            );
+            assert_eq!(d.reason, StockhamTailReason::HeuristicAdrenoCollapse);
         }
     }
 

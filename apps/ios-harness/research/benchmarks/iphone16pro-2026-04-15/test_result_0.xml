@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuites>
+  <testsuite name='' hostname='localhost' tests='10' failures='0' skipped='0' errors='0' time='4.703' timestamp='2026-04-15T05:31:36'>
+    <properties />
+    <testcase name='testBenchmarkSuiteSucceeds' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='0.573' />
+    <testcase name='testCrossoverBenchmarkSucceeds' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='1.273' />
+    <testcase name='testCrossoverFourStepFamily' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='1.547' />
+    <testcase name='testCrossoverStockhamFamily' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='1.193' />
+    <testcase name='testSmokeSuiteFourStepFamily' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='0.016' />
+    <testcase name='testSmokeSuiteIncludesDeviceMetadata' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='0.013' />
+    <testcase name='testSmokeSuiteStockhamFamily' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='0.013' />
+    <testcase name='testSmokeSuiteSucceeds' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='0.012' />
+    <testcase name='testValidationSuiteSucceeds' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='0.059' />
+    <testcase name='testVersionHandshakeParses' classname='ZkgpuHarnessTests.ZkgpuHarnessTests' time='0.004' />
+  </testsuite>
+</testsuites>

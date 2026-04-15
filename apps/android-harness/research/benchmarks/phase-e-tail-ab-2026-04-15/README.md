@@ -1,5 +1,12 @@
 # Phase E — Stockham tail A/B (2026-04-15)
 
+> **2026-04-15 follow-up:** phase-e's Adreno conclusion ("flatline ±5%")
+> was pa3q-specific, not family-wide. The S24 Ultra local run
+> (`../s24-ultra-local-2026-04-15/`) and the follow-up FTL generation
+> confirmation (`../adreno-gen-confirm-2026-04-15/`) showed Adreno
+> 730/740/750 all collapse at +40-72%. A new `HeuristicAdrenoCollapse`
+> rule was added in PR 3; Adreno 830 (pa3q) remains the outlier.
+
 First forced-tail A/B benchmark using the `crossoverStockhamLocalTail` /
 `crossoverStockhamGlobalTail` instrumented tests landed in PR 1 of the
 Stockham tail-strategy refactor (see `commit 6a09be7`).

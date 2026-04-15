@@ -1,0 +1,188 @@
+Command line invocation:
+    /Volumes/persist/Applications/Xcode_16.4.app/Contents/Developer/usr/bin/xcodebuild test-without-building -xctestrun /usr/local/google/omnilab/mh_lab_tmp/mh_lab_run_files/488a0d67-6151-4709-a6b6-aea027187392/bigstore/central-prod-mhr092hg84po/matrix-uaqhu81hwtf9a/tests/nitro.xctestrun -destination id=00008140-00112D010A90801C -derivedDataPath /var/log/mh_lab_gen_files/488a0d67-6151-4709-a6b6-aea027187392/test_a1478687-1034-4820-bfb4-77be815cb114/mh_utp_runner_output/driver -parallel-testing-enabled NO -collect-test-diagnostics never -enableCodeCoverage YES
+
+2026-04-15 05:31:37.878 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.889 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.889 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.896 xcodebuild[50354:21455021] Error Domain=com.apple.CoreSimulator.SimError Code=400 "Unable to determine SimDeviceSet for subscriptions, set_path=/Users/mtaas/Library/Developer/CoreSimulator/Devices" UserInfo={NSLocalizedDescription=Unable to determine SimDeviceSet for subscriptions, set_path=/Users/mtaas/Library/Developer/CoreSimulator/Devices, NSUnderlyingError=0x600001104b10 {Error Domain=NSPOSIXErrorDomain Code=12 "Cannot allocate memory" UserInfo={NSLocalizedFailureReason=Allocation or initialization failed., NSLocalizedDescription=Failed to initialize simulator device set.}}}
+2026-04-15 05:31:37.897 xcodebuild[50354:21455021]  iOSSimulator: [SimServiceContext defaultDeviceSetWithError:] returned nil (Error Domain=com.apple.CoreSimulator.SimError Code=400 "Failed to initialize simulator device set." UserInfo={NSLocalizedFailureReason=Failed to subscribe to notifications from CoreSimulatorService., NSLocalizedDescription=Failed to initialize simulator device set., NSUnderlyingError=0x6000011050b0 {Error Domain=com.apple.CoreSimulator.SimError Code=400 "Unable to determine SimDeviceSet for subscriptions, set_path=/Users/mtaas/Library/Developer/CoreSimulator/Devices" UserInfo={NSLocalizedDescription=Unable to determine SimDeviceSet for subscriptions, set_path=/Users/mtaas/Library/Developer/CoreSimulator/Devices, NSUnderlyingError=0x600001104b10 {Error Domain=NSPOSIXErrorDomain Code=12 "Cannot allocate memory" UserInfo={NSLocalizedFailureReason=Allocation or initialization failed., NSLocalizedDescription=Failed to initialize simulator device set.}}}}}). Simulator device support disabled.
+2026-04-15 05:31:37.906 xcodebuild[50354:21454993] Error Domain=com.apple.CoreSimulator.SimError Code=400 "Unable to determine SimDeviceSet for subscriptions, set_path=/Users/mtaas/Library/Developer/CoreSimulator/Devices" UserInfo={NSLocalizedDescription=Unable to determine SimDeviceSet for subscriptions, set_path=/Users/mtaas/Library/Developer/CoreSimulator/Devices, NSUnderlyingError=0x600000d44360 {Error Domain=NSPOSIXErrorDomain Code=12 "Cannot allocate memory" UserInfo={NSLocalizedFailureReason=Allocation or initialization failed., NSLocalizedDescription=Failed to initialize simulator device set.}}}
+2026-04-15 05:31:37.906 xcodebuild[50354:21454993]  IDESimulatorAvailability: startObservingSimulatorUpdates() FAILED to register SimDeviceSet observer
+2026-04-15 05:31:37.921 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.930 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.930 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.931 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.932 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.932 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.932 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.932 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.933 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.933 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.933 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.933 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.933 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.933 xcodebuild[50354:21455018]  DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:37.933 xcodebuild[50354:21454992] [MT] DVTDeviceOperation: Encountered a build number "" that is incompatible with DVTBuildVersion.
+2026-04-15 05:31:39.920171-0700 ZkgpuHarness[705:19916] The EDOHostService (0x303a9c360) is created and listening on 11237
+2026-04-15 05:31:40.361510-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Looking up debug dylib relative path
+2026-04-15 05:31:40.361639-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Found debug dylib relative path string `ZkgpuHarness.debug.dylib`
+2026-04-15 05:31:40.361659-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Looking up debug dylib entry point name
+2026-04-15 05:31:40.361668-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] No debug dylib entry point name defined.
+2026-04-15 05:31:40.361682-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Looking up debug dylib install name
+2026-04-15 05:31:40.361692-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Found debug dylib install name string `@rpath/ZkgpuHarness.debug.dylib`
+2026-04-15 05:31:40.361702-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Looking for Previews JIT link entry point.
+2026-04-15 05:31:40.364115-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] No Previews JIT entry point found.
+2026-04-15 05:31:40.364144-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Gave PreviewsInjection a chance to run and it returned, continuing with debug dylib.
+2026-04-15 05:31:40.364149-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Looking for main entry point.
+2026-04-15 05:31:40.364153-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Opening debug dylib with '@rpath/ZkgpuHarness.debug.dylib'
+2026-04-15 05:31:40.364176-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Debug dylib handle: 0x46086420
+2026-04-15 05:31:40.364191-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] No entry point found. Checking for alias.
+2026-04-15 05:31:40.364196-0700 ZkgpuHarness[705:19916] [PreviewsAgentExecutorLibrary] Calling provided entry point.
+zkgpu iOS harness launched
+Test Suite 'All tests' started at 2026-04-15 05:31:40.579.
+Test Suite 'ZkgpuHarnessTests.xctest' started at 2026-04-15 05:31:40.581.
+Test Suite 'ZkgpuHarnessTests' started at 2026-04-15 05:31:40.583.
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testBenchmarkSuiteSucceeds]' started.
+2026-04-15 05:31:40.598254-0700 ZkgpuHarness[705:19916] fopen failed for data file: errno = 2 (No such file or directory)
+2026-04-15 05:31:40.598280-0700 ZkgpuHarness[705:19916] Errors found! Invalidating cache...
+2026-04-15 05:31:40.645873-0700 ZkgpuHarness[705:19916] fopen failed for data file: errno = 2 (No such file or directory)
+2026-04-15 05:31:40.645900-0700 ZkgpuHarness[705:19916] Errors found! Invalidating cache...
+2026-04-15 05:31:40.670463-0700 ZkgpuHarness[705:19916] [Metal Compiler Warning] Warning: Compilation succeeded with: 
+
+program_source:25:15: warning: unused variable 'supports_indirect_first_instance' [-Wunused-const-variable]
+constant bool supports_indirect_first_instance = false;
+              ^
+2026-04-15 05:31:40.717603-0700 ZkgpuHarness[705:19916] [Metal Compiler Warning] Warning: Compilation succeeded with: 
+
+program_source:25:15: warning: unused variable 'BLOCK_SIZE' [-Wunused-const-variable]
+constant uint BLOCK_SIZE = 1024u;
+              ^
+program_source:26:15: warning: unused variable 'LOG_BLOCK' [-Wunused-const-variable]
+constant uint LOG_BLOCK = 10u;
+              ^
+program_source:27:15: warning: unused variable 'PADDED_SIZE' [-Wunused-const-variable]
+constant uint PADDED_SIZE = 1056u;
+              ^
+2026-04-15 05:31:40.870587-0700 ZkgpuHarness[705:19916] [Metal Compiler Warning] Warning: Compilation succeeded with: 
+
+program_source:25:15: warning: unused variable 'BLOCK_SIZE' [-Wunused-const-variable]
+constant uint BLOCK_SIZE = 1024u;
+              ^
+program_source:26:15: warning: unused variable 'LOG_BLOCK' [-Wunused-const-variable]
+constant uint LOG_BLOCK = 10u;
+              ^
+program_source:27:15: warning: unused variable 'PADDED_SIZE' [-Wunused-const-variable]
+constant uint PADDED_SIZE = 1056u;
+              ^
+--- Benchmark Results ---
+Device: Apple A18 Pro GPU [Metal] tier=UnifiedMemoryNative
+Kernel: BabyBear / stockham
+  benchmark_forward_log10: PASS  wall=1.43ms  gpu=0.07ms
+  benchmark_forward_log14: PASS  wall=1.20ms  gpu=0.02ms
+  benchmark_forward_log18: PASS  wall=2.60ms  gpu=1.48ms
+  benchmark_forward_log20: PASS  wall=5.80ms  gpu=3.30ms
+Passed: 4/4
+Report saved: /var/mobile/Containers/Data/Application/D2C28B58-9D2C-4F3E-88EA-C80BBB996742/Documents/zkgpu-benchmark-2026-04-15T12-31-41Z.json
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testBenchmarkSuiteSucceeds]' passed (0.572 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testCrossoverBenchmarkSucceeds]' started.
+--- Crossover Results ---
+Device: Apple A18 Pro GPU [Metal]
+  forward_log18: PASS  wall=1.44ms  gpu=0.27ms
+  inverse_log18: PASS  wall=2.35ms  gpu=1.14ms
+  forward_log19: PASS  wall=3.73ms  gpu=1.53ms
+  inverse_log19: PASS  wall=3.29ms  gpu=1.52ms
+  forward_log20: PASS  wall=5.56ms  gpu=2.50ms
+  inverse_log20: PASS  wall=7.85ms  gpu=5.44ms
+  forward_log21: PASS  wall=6.48ms  gpu=3.75ms
+  inverse_log21: PASS  wall=6.28ms  gpu=3.05ms
+  forward_log22: PASS  wall=12.15ms  gpu=8.94ms
+  inverse_log22: PASS  wall=13.62ms  gpu=6.54ms
+Passed: 10/10
+Report saved: /var/mobile/Containers/Data/Application/D2C28B58-9D2C-4F3E-88EA-C80BBB996742/Documents/zkgpu-benchmark-2026-04-15T12-31-42Z.json
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testCrossoverBenchmarkSucceeds]' passed (1.273 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testCrossoverFourStepFamily]' started.
+--- Crossover FOUR-STEP ---
+Device: Apple A18 Pro GPU [Metal]
+  forward_log18: PASS  wall=1.33ms  gpu=0.38ms
+  inverse_log18: PASS  wall=2.29ms  gpu=0.86ms
+  forward_log19: PASS  wall=3.42ms  gpu=1.82ms
+  inverse_log19: PASS  wall=7.73ms  gpu=5.31ms
+  forward_log20: PASS  wall=6.65ms  gpu=3.75ms
+  inverse_log20: PASS  wall=5.97ms  gpu=3.77ms
+  forward_log21: PASS  wall=10.23ms  gpu=6.44ms
+  inverse_log21: PASS  wall=10.97ms  gpu=5.92ms
+  forward_log22: PASS  wall=18.21ms  gpu=12.44ms
+  inverse_log22: PASS  wall=20.12ms  gpu=12.18ms
+Passed: 10/10
+Report saved: /var/mobile/Containers/Data/Application/D2C28B58-9D2C-4F3E-88EA-C80BBB996742/Documents/zkgpu-benchmark-2026-04-15T12-31-43Z.json
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testCrossoverFourStepFamily]' passed (1.542 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testCrossoverStockhamFamily]' started.
+--- Crossover STOCKHAM ---
+Device: Apple A18 Pro GPU [Metal]
+  forward_log18: PASS  wall=1.69ms  gpu=0.43ms
+  inverse_log18: PASS  wall=1.26ms  gpu=0.19ms
+  forward_log19: PASS  wall=1.45ms  gpu=0.23ms
+  inverse_log19: PASS  wall=1.71ms  gpu=0.49ms
+  forward_log20: PASS  wall=2.62ms  gpu=0.73ms
+  inverse_log20: PASS  wall=4.24ms  gpu=1.98ms
+  forward_log21: PASS  wall=9.50ms  gpu=6.13ms
+  inverse_log21: PASS  wall=6.10ms  gpu=3.06ms
+  forward_log22: PASS  wall=12.22ms  gpu=8.43ms
+  inverse_log22: PASS  wall=13.16ms  gpu=8.92ms
+Passed: 10/10
+Report saved: /var/mobile/Containers/Data/Application/D2C28B58-9D2C-4F3E-88EA-C80BBB996742/Documents/zkgpu-benchmark-2026-04-15T12-31-45Z.json
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testCrossoverStockhamFamily]' passed (1.192 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testSmokeSuiteFourStepFamily]' started.
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testSmokeSuiteFourStepFamily]' passed (0.017 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testSmokeSuiteIncludesDeviceMetadata]' started.
+Device: Apple A18 Pro GPU [Metal] family=Apple tier=UnifiedMemoryNative memory=Unified
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testSmokeSuiteIncludesDeviceMetadata]' passed (0.013 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testSmokeSuiteStockhamFamily]' started.
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testSmokeSuiteStockhamFamily]' passed (0.012 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testSmokeSuiteSucceeds]' started.
+--- Smoke Results ---
+Device: Apple A18 Pro GPU [Metal] tier=UnifiedMemoryNative
+Kernel: BabyBear / stockham
+  forward_log10_sequential: PASS  wall=1.21ms  gpu=n/a
+  inverse_log10_sequential: PASS  wall=1.27ms  gpu=n/a
+Passed: 2/2
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testSmokeSuiteSucceeds]' passed (0.012 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testValidationSuiteSucceeds]' started.
+--- Validation Results ---
+Device: Apple A18 Pro GPU [Metal] tier=UnifiedMemoryNative
+Kernel: BabyBear / mixed
+  forward_log4_sequential: PASS  wall=1.25ms  gpu=n/a
+  forward_log8_sequential: PASS  wall=1.34ms  gpu=n/a
+  forward_log10_sequential: PASS  wall=1.20ms  gpu=n/a
+  forward_log14_sequential: PASS  wall=1.21ms  gpu=n/a
+  forward_log10_all_zeros: PASS  wall=1.20ms  gpu=n/a
+  forward_log8_all_ones: PASS  wall=1.23ms  gpu=n/a
+  forward_log10_large_values: PASS  wall=1.20ms  gpu=n/a
+  forward_log10_pseudorandom: PASS  wall=1.20ms  gpu=n/a
+  inverse_log4_sequential: PASS  wall=1.22ms  gpu=n/a
+  inverse_log10_sequential: PASS  wall=1.21ms  gpu=n/a
+  roundtrip_log8_sequential: PASS  wall=2.53ms  gpu=n/a
+  roundtrip_log12_sequential: PASS  wall=2.42ms  gpu=n/a
+Passed: 12/12
+Report saved: /var/mobile/Containers/Data/Application/D2C28B58-9D2C-4F3E-88EA-C80BBB996742/Documents/zkgpu-validation-2026-04-15T12-31-45Z.json
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testValidationSuiteSucceeds]' passed (0.058 seconds).
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testVersionHandshakeParses]' started.
+FFI: zkgpu-ffi 0.1.0 (api 1)
+Test Case '-[ZkgpuHarnessTests.ZkgpuHarnessTests testVersionHandshakeParses]' passed (0.003 seconds).
+Test Suite 'ZkgpuHarnessTests' passed at 2026-04-15 05:31:45.300.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 4.695 (4.717) seconds
+Test Suite 'ZkgpuHarnessTests.xctest' passed at 2026-04-15 05:31:45.303.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 4.695 (4.722) seconds
+Test Suite 'All tests' passed at 2026-04-15 05:31:45.305.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 4.695 (4.726) seconds
+2026-04-15 05:31:45.308977-0700 ZkgpuHarness[705:19916] The EDOHostService (0x303a9c360) is invalidated on port 11237
+2026-04-15 05:31:45.585 xcodebuild[50354:21454992] [MT] IDETestOperationsObserverDebug: 7.455 elapsed -- Testing started completed.
+2026-04-15 05:31:45.585 xcodebuild[50354:21454992] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-04-15 05:31:45.585 xcodebuild[50354:21454992] [MT] IDETestOperationsObserverDebug: 7.455 sec, +7.455 sec -- end
+
+Test session results, code coverage, and logs:
+	/var/log/mh_lab_gen_files/488a0d67-6151-4709-a6b6-aea027187392/test_a1478687-1034-4820-bfb4-77be815cb114/mh_utp_runner_output/driver/Logs/Test/Test-ZkgpuHarness-2026.04.15_05-31-38--0700.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started

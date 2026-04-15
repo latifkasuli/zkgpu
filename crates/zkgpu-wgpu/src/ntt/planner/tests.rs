@@ -669,6 +669,27 @@ fn mali_keeps_local_tail_across_all_sizes() {
 }
 
 #[test]
+fn adreno_picks_global_tail_at_all_tail_sizes() {
+    // PR 3 (2026-04-15): the Adreno generation-confirmation A/B
+    // (`apps/android-harness/research/benchmarks/adreno-gen-confirm-2026-04-15/`)
+    // measured Adreno 730 (b0q), 740 (dm3q), 750 (e3q) at log_n 18..=22,
+    // both directions, and saw +40-72% GlobalOnlyR4 wins at every cell.
+    //
+    // Four-step disabled so we observe the tail decision in isolation;
+    // Adreno's mobile four-step threshold would otherwise flip at log_n=18.
+    let caps = mock_caps_identity(GpuFamily::Adreno, PlatformClass::AndroidNative);
+    let mut policy = PlannerPolicy::from_caps(&caps);
+    policy.four_step_threshold = None;
+    for log_n in [10, 15, 18, 20, 22] {
+        assert_eq!(
+            stockham_tail_from_plan(log_n, &policy),
+            Some(StockhamTailStrategy::GlobalOnlyR4),
+            "Adreno must pick GlobalOnlyR4 at log_n={log_n}",
+        );
+    }
+}
+
+#[test]
 fn browser_large_n_picks_global_tail_by_default() {
     // Browsers sit behind an unpredictable driver stack; at log_n >= 20
     // the conservative choice is the global-only tail.
