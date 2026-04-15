@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use zkgpu_core::{NttDirection, ZkGpuError};
 use zkgpu_ntt::ntt_cpu_reference;
-use zkgpu_report::{SoakCaseReport, SoakSpec, SoakSuiteReport};
-use zkgpu_wgpu::{PlannerPolicy, WgpuDevice, WgpuNttPlan};
+use zkgpu_report::{SoakCaseReport, SoakSpec, SoakSuiteReport, StockhamTailOverride};
+use zkgpu_wgpu::{PlannerPolicy, StockhamTailOverride as PlanTailOverride, WgpuDevice, WgpuNttPlan};
 
 use crate::benchmark::{measure_plan, measure_plan_soak, sum_timing_reports};
 use crate::case::{CaseSpec, TestDirection};
@@ -13,6 +13,15 @@ use crate::report::{CaseReport, KernelReport, SuiteReport, SuiteSummary, TimingR
 use crate::suite::{benchmark_suite, smoke_suite, validation_suite, FamilyOverride, SuiteSpec};
 use crate::validation::compare_vectors;
 use crate::TestkitError;
+
+/// Translate the report-layer tail override into the planner-layer enum.
+fn to_plan_tail(ov: StockhamTailOverride) -> PlanTailOverride {
+    match ov {
+        StockhamTailOverride::Auto => PlanTailOverride::Auto,
+        StockhamTailOverride::Local => PlanTailOverride::Local,
+        StockhamTailOverride::Global => PlanTailOverride::Global,
+    }
+}
 
 pub fn run_suite(spec: &SuiteSpec) -> Result<SuiteReport, TestkitError> {
     if spec.cases.is_empty() {
@@ -24,7 +33,7 @@ pub fn run_suite(spec: &SuiteSpec) -> Result<SuiteReport, TestkitError> {
     let mut cases = Vec::with_capacity(spec.cases.len());
 
     for case in &spec.cases {
-        let report = run_case(&device, case, spec.family_override);
+        let report = run_case(&device, case, spec.family_override, spec.stockham_tail_override);
         let failed = !report.passed;
         cases.push(report);
         if spec.fail_fast && failed {
@@ -35,6 +44,7 @@ pub fn run_suite(spec: &SuiteSpec) -> Result<SuiteReport, TestkitError> {
     let passed_cases = cases.iter().filter(|c| c.passed).count() as u32;
     let failed_cases = cases.len() as u32 - passed_cases;
     let kernel_variant = derive_kernel_variant(&cases);
+    let tail_variant = derive_tail_variant(&cases);
     let total_cases = cases.len() as u32;
 
     Ok(SuiteReport {
@@ -44,6 +54,7 @@ pub fn run_suite(spec: &SuiteSpec) -> Result<SuiteReport, TestkitError> {
         kernel: KernelReport {
             field: "BabyBear".to_string(),
             ntt_variant: kernel_variant,
+            stockham_tail_strategy: tail_variant,
         },
         cases,
         summary: SuiteSummary {
@@ -83,7 +94,14 @@ pub fn run_soak_suite(spec: &SoakSpec) -> Result<SoakSuiteReport, TestkitError> 
     let mut cases = Vec::with_capacity(spec.cases.len());
 
     for case in &spec.cases {
-        let report = run_soak_case(&device, case, duration, spec.validate, spec.family_override);
+        let report = run_soak_case(
+            &device,
+            case,
+            duration,
+            spec.validate,
+            spec.family_override,
+            spec.stockham_tail_override,
+        );
         cases.push(report);
     }
 
@@ -100,6 +118,7 @@ pub fn run_soak_suite(spec: &SoakSpec) -> Result<SoakSuiteReport, TestkitError> 
             _ => "mixed".to_string(),
         }
     };
+    let tail_variant = derive_soak_tail_variant(&cases);
 
     Ok(SoakSuiteReport {
         schema_version: 1,
@@ -108,9 +127,32 @@ pub fn run_soak_suite(spec: &SoakSpec) -> Result<SoakSuiteReport, TestkitError> 
         kernel: KernelReport {
             field: "BabyBear".to_string(),
             ntt_variant: kernel_variant,
+            stockham_tail_strategy: tail_variant,
         },
         cases,
         requested_duration_secs: spec.duration_secs,
+    })
+}
+
+/// Soak twin of [`derive_tail_variant`]. Inspects per-soak-case tail
+/// strategies so the suite-level `KernelReport.stockham_tail_strategy`
+/// reflects whatever the runner actually planned. Returning `None` would
+/// mean "no Stockham tail anywhere"; `Some("mixed")` flags configuration
+/// drift across cases (e.g. a Local override that only triggered on some
+/// log_n).
+fn derive_soak_tail_variant(cases: &[SoakCaseReport]) -> Option<String> {
+    let mut tails: Vec<&str> = cases
+        .iter()
+        .filter_map(|c| c.stockham_tail_strategy.as_deref())
+        .collect();
+    if tails.is_empty() {
+        return None;
+    }
+    tails.sort_unstable();
+    tails.dedup();
+    Some(match tails.as_slice() {
+        [tail] => (*tail).to_string(),
+        _ => "mixed".to_string(),
     })
 }
 
@@ -118,6 +160,19 @@ fn soak_case_error(
     case: &CaseSpec,
     duration: Duration,
     kernel_family: Option<String>,
+    err: String,
+) -> SoakCaseReport {
+    soak_case_error_with_tail(case, duration, kernel_family, None, None, None, err)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn soak_case_error_with_tail(
+    case: &CaseSpec,
+    duration: Duration,
+    kernel_family: Option<String>,
+    stockham_tail_strategy: Option<String>,
+    stockham_tail_reason: Option<String>,
+    tail_stride_bytes: Option<u64>,
     err: String,
 ) -> SoakCaseReport {
     SoakCaseReport {
@@ -145,6 +200,9 @@ fn soak_case_error(
         samples: Vec::new(),
         validated: false,
         error: Some(err),
+        stockham_tail_strategy,
+        stockham_tail_reason,
+        tail_stride_bytes,
     }
 }
 
@@ -154,6 +212,7 @@ fn run_soak_case(
     duration: Duration,
     validate: bool,
     family: FamilyOverride,
+    tail_override: StockhamTailOverride,
 ) -> SoakCaseReport {
     let direction = match case.direction {
         TestDirection::Forward => NttDirection::Forward,
@@ -170,12 +229,18 @@ fn run_soak_case(
         }
     };
 
-    let mut plan = match make_plan(device, case.log_n, direction, family) {
+    let mut plan = match make_plan(device, case.log_n, direction, family, tail_override) {
         Ok(plan) => plan,
         Err(err) => return soak_case_error(case, duration, None, err.to_string()),
     };
 
     let kernel_family = Some(plan.family_name().to_string());
+    // Capture tail metadata up-front so it survives a `measure_plan_soak`
+    // failure — the operator still wants to know which strategy was about
+    // to run when the soak crashed.
+    let tail_strategy = plan.stockham_tail_strategy().map(str::to_string);
+    let tail_reason = plan.stockham_tail_reason().map(str::to_string);
+    let tail_stride_bytes = plan.tail_stride_bytes();
     let input = make_input(case.log_n, &case.input);
 
     let measurement = match measure_plan_soak(
@@ -188,7 +253,15 @@ fn run_soak_case(
     ) {
         Ok(m) => m,
         Err(err) => {
-            return soak_case_error(case, duration, kernel_family, err.to_string());
+            return soak_case_error_with_tail(
+                case,
+                duration,
+                kernel_family,
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                err.to_string(),
+            );
         }
     };
 
@@ -212,10 +285,18 @@ fn run_soak_case(
         samples: measurement.samples,
         validated,
         error: None,
+        stockham_tail_strategy: tail_strategy,
+        stockham_tail_reason: tail_reason,
+        tail_stride_bytes,
     }
 }
 
-fn run_case(device: &WgpuDevice, case: &CaseSpec, family: FamilyOverride) -> CaseReport {
+fn run_case(
+    device: &WgpuDevice,
+    case: &CaseSpec,
+    family: FamilyOverride,
+    tail_override: StockhamTailOverride,
+) -> CaseReport {
     let input = make_input(case.log_n, &case.input);
 
     match case.direction {
@@ -226,6 +307,7 @@ fn run_case(device: &WgpuDevice, case: &CaseSpec, family: FamilyOverride) -> Cas
             NttDirection::Forward,
             cpu_reference(&input, NttDirection::Forward),
             family,
+            tail_override,
         ),
         TestDirection::Inverse => run_single_direction_case(
             device,
@@ -234,8 +316,9 @@ fn run_case(device: &WgpuDevice, case: &CaseSpec, family: FamilyOverride) -> Cas
             NttDirection::Inverse,
             cpu_reference(&input, NttDirection::Inverse),
             family,
+            tail_override,
         ),
-        TestDirection::Roundtrip => run_roundtrip_case(device, case, &input, family),
+        TestDirection::Roundtrip => run_roundtrip_case(device, case, &input, family, tail_override),
     }
 }
 
@@ -246,12 +329,16 @@ fn run_single_direction_case(
     direction: NttDirection,
     expected: Vec<zkgpu_babybear::BabyBear>,
     family: FamilyOverride,
+    tail_override: StockhamTailOverride,
 ) -> CaseReport {
-    let mut plan = match make_plan(device, case.log_n, direction, family) {
+    let mut plan = match make_plan(device, case.log_n, direction, family, tail_override) {
         Ok(plan) => plan,
         Err(err) => return case_error(case, err),
     };
     let family = Some(plan.family_name().to_string());
+    let tail_strategy = plan.stockham_tail_strategy().map(str::to_string);
+    let tail_reason = plan.stockham_tail_reason().map(str::to_string);
+    let tail_stride_bytes = plan.tail_stride_bytes();
 
     let measurement = match measure_plan(
         device,
@@ -262,7 +349,16 @@ fn run_single_direction_case(
         case.profile_gpu_timestamps,
     ) {
         Ok(t) => t,
-        Err(err) => return case_error_with_family(case, family, err),
+        Err(err) => {
+            return case_error_with_tail(
+                case,
+                family,
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                err,
+            )
+        }
     };
     let outcome = compare_vectors(&measurement.final_output, &expected);
 
@@ -279,6 +375,9 @@ fn run_single_direction_case(
         first_mismatch_cpu: outcome.first_mismatch_cpu,
         timings: measurement.timings,
         error: None,
+        stockham_tail_strategy: tail_strategy,
+        stockham_tail_reason: tail_reason,
+        tail_stride_bytes,
     }
 }
 
@@ -287,18 +386,39 @@ fn run_roundtrip_case(
     case: &CaseSpec,
     input: &[zkgpu_babybear::BabyBear],
     family: FamilyOverride,
+    tail_override: StockhamTailOverride,
 ) -> CaseReport {
-    let mut forward = match make_plan(device, case.log_n, NttDirection::Forward, family) {
-        Ok(plan) => plan,
-        Err(err) => return case_error(case, err),
-    };
-    let mut inverse = match make_plan(device, case.log_n, NttDirection::Inverse, family) {
-        Ok(plan) => plan,
-        Err(err) => return case_error(case, err),
-    };
+    let mut forward =
+        match make_plan(device, case.log_n, NttDirection::Forward, family, tail_override) {
+            Ok(plan) => plan,
+            Err(err) => return case_error(case, err),
+        };
+    // Capture forward-side metadata up-front so it survives a later failure
+    // (inverse make_plan or either measurement). Without this, an inverse
+    // make_plan crash on Xclipse/Mali/Browser drops the very tail strategy
+    // PR 1 was meant to make visible.
+    let forward_family_name = forward.family_name().to_string();
+    let tail_strategy = forward.stockham_tail_strategy().map(str::to_string);
+    let tail_reason = forward.stockham_tail_reason().map(str::to_string);
+    let tail_stride_bytes = forward.tail_stride_bytes();
+
+    let mut inverse =
+        match make_plan(device, case.log_n, NttDirection::Inverse, family, tail_override) {
+            Ok(plan) => plan,
+            Err(err) => {
+                return case_error_with_tail(
+                    case,
+                    Some(forward_family_name),
+                    tail_strategy,
+                    tail_reason,
+                    tail_stride_bytes,
+                    err,
+                )
+            }
+        };
     let kernel_family = Some(format!(
         "{}/{}",
-        forward.family_name(),
+        forward_family_name,
         inverse.family_name()
     ));
 
@@ -311,7 +431,16 @@ fn run_roundtrip_case(
         case.profile_gpu_timestamps,
     ) {
         Ok(t) => t,
-        Err(err) => return case_error_with_family(case, kernel_family, err),
+        Err(err) => {
+            return case_error_with_tail(
+                case,
+                kernel_family,
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                err,
+            )
+        }
     };
     let inverse_measurement = match measure_plan(
         device,
@@ -322,7 +451,16 @@ fn run_roundtrip_case(
         case.profile_gpu_timestamps,
     ) {
         Ok(t) => t,
-        Err(err) => return case_error_with_family(case, kernel_family, err),
+        Err(err) => {
+            return case_error_with_tail(
+                case,
+                kernel_family,
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                err,
+            )
+        }
     };
     let timings = sum_timing_reports(&[forward_measurement.timings, inverse_measurement.timings]);
     let outcome = compare_vectors(&inverse_measurement.final_output, input);
@@ -340,6 +478,9 @@ fn run_roundtrip_case(
         first_mismatch_cpu: outcome.first_mismatch_cpu,
         timings,
         error: None,
+        stockham_tail_strategy: tail_strategy,
+        stockham_tail_reason: tail_reason,
+        tail_stride_bytes,
     }
 }
 
@@ -357,18 +498,21 @@ fn make_plan(
     log_n: u32,
     direction: NttDirection,
     family: FamilyOverride,
+    tail_override: StockhamTailOverride,
 ) -> Result<WgpuNttPlan, ZkGpuError> {
-    match family {
-        FamilyOverride::Auto => WgpuNttPlan::new(device, log_n, direction),
-        FamilyOverride::Stockham => {
-            let policy = PlannerPolicy::stockham_only();
-            WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
-        }
-        FamilyOverride::FourStep => {
-            let policy = PlannerPolicy::force_four_step();
-            WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
-        }
-    }
+    // Always derive from the device caps so the Stockham tail heuristic has
+    // full device context, then narrow the family. The earlier
+    // `stockham_only()` / `force_four_step()` constructors threw the caps
+    // hint away, which silently downgraded forced-Stockham A/B runs on
+    // Xclipse/Mali/Browser to `LocalFusedR4` regardless of the new policy.
+    let plan_tail = to_plan_tail(tail_override);
+    let base = PlannerPolicy::from_caps(device.caps()).with_public_tail_override(plan_tail);
+    let policy = match family {
+        FamilyOverride::Auto => base,
+        FamilyOverride::Stockham => base.with_four_step_disabled(),
+        FamilyOverride::FourStep => base.with_force_four_step(),
+    };
+    WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
 }
 
 fn derive_kernel_variant(cases: &[CaseReport]) -> String {
@@ -385,6 +529,28 @@ fn derive_kernel_variant(cases: &[CaseReport]) -> String {
     }
 }
 
+/// Summarise the per-case tail strategies into a single kernel-level label.
+///
+/// Returns `None` if no case recorded a tail strategy (e.g. all cases were
+/// four-step or all were Stockham below `LOG_BLOCK`). Returns the single
+/// strategy name (e.g. `"LocalFusedR4"`) if every tailed case agreed, or
+/// `"mixed"` if multiple strategies were observed in the same suite.
+fn derive_tail_variant(cases: &[CaseReport]) -> Option<String> {
+    let mut tails = cases
+        .iter()
+        .filter_map(|c| c.stockham_tail_strategy.as_deref())
+        .collect::<Vec<_>>();
+    if tails.is_empty() {
+        return None;
+    }
+    tails.sort_unstable();
+    tails.dedup();
+    Some(match tails.as_slice() {
+        [tail] => (*tail).to_string(),
+        _ => "mixed".to_string(),
+    })
+}
+
 fn case_error(case: &CaseSpec, err: ZkGpuError) -> CaseReport {
     case_error_with_family(case, None, err)
 }
@@ -392,6 +558,26 @@ fn case_error(case: &CaseSpec, err: ZkGpuError) -> CaseReport {
 fn case_error_with_family(
     case: &CaseSpec,
     kernel_family: Option<String>,
+    err: ZkGpuError,
+) -> CaseReport {
+    case_error_with_tail(case, kernel_family, None, None, None, err)
+}
+
+/// Construct a failed `CaseReport` while preserving any tail metadata that
+/// was already captured before the failure.
+///
+/// Operators investigating a measurement crash on Xclipse/Mali/Browser need
+/// to see which Stockham tail strategy was selected and how it was chosen
+/// — exactly the failure modes PR 1 was designed to make visible. The
+/// non-tail variants (`case_error`, `case_error_with_family`) just delegate
+/// here with `None`s for the pre-plan failure paths.
+#[allow(clippy::too_many_arguments)]
+fn case_error_with_tail(
+    case: &CaseSpec,
+    kernel_family: Option<String>,
+    stockham_tail_strategy: Option<String>,
+    stockham_tail_reason: Option<String>,
+    tail_stride_bytes: Option<u64>,
     err: ZkGpuError,
 ) -> CaseReport {
     CaseReport {
@@ -411,6 +597,9 @@ fn case_error_with_family(
             gpu_stage_ns: Vec::new(),
         },
         error: Some(err.to_string()),
+        stockham_tail_strategy,
+        stockham_tail_reason,
+        tail_stride_bytes,
     }
 }
 
@@ -486,6 +675,7 @@ mod tests {
             kernel: zkgpu_report::KernelReport {
                 field: "BabyBear".into(),
                 ntt_variant: "stockham".into(),
+                stockham_tail_strategy: None,
             },
             cases: vec![zkgpu_report::SoakCaseReport {
                 name: "test_case".into(),
@@ -525,6 +715,9 @@ mod tests {
                 ],
                 validated: true,
                 error: None,
+                stockham_tail_strategy: Some("LocalFusedR4".into()),
+                stockham_tail_reason: Some("HeuristicDefaultLocal".into()),
+                tail_stride_bytes: Some(4),
             }],
             requested_duration_secs: 5,
         };
@@ -552,6 +745,176 @@ mod tests {
 
         // Verify validated field
         assert_eq!(case0["validated"], true);
+
+        // Verify the new tail observability fields surface in JSON.
+        assert_eq!(case0["stockham_tail_strategy"], "LocalFusedR4");
+        assert_eq!(case0["stockham_tail_reason"], "HeuristicDefaultLocal");
+        assert_eq!(case0["tail_stride_bytes"], 4u64);
+    }
+
+    // === soak: backwards-compatible deserialization of pre-tail JSON ===
+
+    #[test]
+    fn soak_case_report_accepts_legacy_json_without_tail_fields() {
+        // A SoakCaseReport written before PR 1 lacked the three tail
+        // fields. `#[serde(default)]` should let those legacy reports
+        // round-trip into the new struct without error.
+        let legacy = serde_json::json!({
+            "name": "legacy",
+            "log_n": 18,
+            "direction": "Forward",
+            "kernel_family": "stockham",
+            "requested_duration_secs": 5,
+            "stats": {
+                "total_iterations": 1,
+                "actual_duration_secs": 1.0,
+                "iterations_per_sec": 1.0,
+                "median_wall_ns": 0,
+                "p5_wall_ns": 0,
+                "p95_wall_ns": 0,
+                "min_wall_ns": 0,
+                "max_wall_ns": 0,
+                "wall_cv": 0.0,
+                "thermal_drift_ratio": 1.0,
+                "median_gpu_ns": null,
+                "p5_gpu_ns": null,
+                "p95_gpu_ns": null,
+                "gpu_cv": null,
+            },
+            "samples": [],
+            "validated": false,
+            "error": null,
+        });
+        let parsed: zkgpu_report::SoakCaseReport =
+            serde_json::from_value(legacy).expect("legacy soak JSON should parse");
+        assert_eq!(parsed.stockham_tail_strategy, None);
+        assert_eq!(parsed.stockham_tail_reason, None);
+        assert_eq!(parsed.tail_stride_bytes, None);
+    }
+
+    // === soak: derive_soak_tail_variant ===
+
+    fn soak_case_with_tail(name: &str, tail: Option<&str>) -> SoakCaseReport {
+        SoakCaseReport {
+            name: name.into(),
+            log_n: 20,
+            direction: TestDirection::Forward,
+            kernel_family: Some("stockham".into()),
+            requested_duration_secs: 5,
+            stats: zkgpu_report::SoakStats {
+                total_iterations: 0,
+                actual_duration_secs: 0.0,
+                iterations_per_sec: 0.0,
+                median_wall_ns: 0,
+                p5_wall_ns: 0,
+                p95_wall_ns: 0,
+                min_wall_ns: 0,
+                max_wall_ns: 0,
+                wall_cv: 0.0,
+                thermal_drift_ratio: 1.0,
+                median_gpu_ns: None,
+                p5_gpu_ns: None,
+                p95_gpu_ns: None,
+                gpu_cv: None,
+            },
+            samples: Vec::new(),
+            validated: false,
+            error: None,
+            stockham_tail_strategy: tail.map(str::to_string),
+            stockham_tail_reason: None,
+            tail_stride_bytes: None,
+        }
+    }
+
+    #[test]
+    fn derive_soak_tail_variant_none_when_no_tails() {
+        assert_eq!(
+            derive_soak_tail_variant(&[soak_case_with_tail("a", None)]),
+            None
+        );
+    }
+
+    #[test]
+    fn derive_soak_tail_variant_single_and_mixed() {
+        let single = vec![
+            soak_case_with_tail("a", Some("LocalFusedR4")),
+            soak_case_with_tail("b", Some("LocalFusedR4")),
+        ];
+        assert_eq!(
+            derive_soak_tail_variant(&single),
+            Some("LocalFusedR4".into())
+        );
+
+        let mixed = vec![
+            soak_case_with_tail("a", Some("LocalFusedR4")),
+            soak_case_with_tail("b", Some("GlobalOnlyR4")),
+        ];
+        assert_eq!(derive_soak_tail_variant(&mixed), Some("mixed".into()));
+
+        // Cases with no tail strategy are simply ignored, mirroring the
+        // non-soak helper. So a partial run still surfaces the one strategy
+        // that did get planned.
+        let partial = vec![
+            soak_case_with_tail("a", None),
+            soak_case_with_tail("b", Some("GlobalOnlyR4")),
+        ];
+        assert_eq!(
+            derive_soak_tail_variant(&partial),
+            Some("GlobalOnlyR4".into())
+        );
+    }
+
+    // === non-soak: case_error_with_tail preserves tail fields ===
+
+    #[test]
+    fn case_error_with_tail_preserves_tail_metadata() {
+        // Codex P3: a measurement failure must not silently drop the tail
+        // strategy that was already chosen — those are precisely the
+        // failures where operators most need the diagnostic. Verify the
+        // helper threads every captured field through.
+        let case = CaseSpec::new(
+            "tail_preserved",
+            18,
+            TestDirection::Forward,
+            zkgpu_report::InputPattern::Sequential,
+        );
+        let report = case_error_with_tail(
+            &case,
+            Some("stockham".into()),
+            Some("GlobalOnlyR4".into()),
+            Some("HostileStridedDevice".into()),
+            Some(8),
+            ZkGpuError::DeviceLost("simulated measurement crash".into()),
+        );
+        assert!(!report.passed);
+        assert_eq!(report.kernel_family.as_deref(), Some("stockham"));
+        assert_eq!(report.stockham_tail_strategy.as_deref(), Some("GlobalOnlyR4"));
+        assert_eq!(
+            report.stockham_tail_reason.as_deref(),
+            Some("HostileStridedDevice")
+        );
+        assert_eq!(report.tail_stride_bytes, Some(8));
+        assert!(report.error.is_some());
+    }
+
+    #[test]
+    fn case_error_with_family_keeps_tail_fields_none() {
+        // The slim wrapper used for pre-plan failures still leaves the tail
+        // fields blank — there's nothing yet to report at that stage.
+        let case = CaseSpec::new(
+            "no_tail_yet",
+            10,
+            TestDirection::Forward,
+            zkgpu_report::InputPattern::Sequential,
+        );
+        let report = case_error_with_family(
+            &case,
+            None,
+            ZkGpuError::DeviceLost("plan build failed".into()),
+        );
+        assert!(report.stockham_tail_strategy.is_none());
+        assert!(report.stockham_tail_reason.is_none());
+        assert!(report.tail_stride_bytes.is_none());
     }
 
     #[test]
@@ -574,6 +937,9 @@ mod tests {
                     gpu_stage_ns: Vec::new(),
                 },
                 error: None,
+                stockham_tail_strategy: None,
+                stockham_tail_reason: None,
+                tail_stride_bytes: None,
             },
             CaseReport {
                 name: "b".into(),
@@ -592,8 +958,77 @@ mod tests {
                     gpu_stage_ns: Vec::new(),
                 },
                 error: None,
+                stockham_tail_strategy: None,
+                stockham_tail_reason: None,
+                tail_stride_bytes: None,
             },
         ];
         assert_eq!(derive_kernel_variant(&cases), "mixed");
+    }
+
+    #[test]
+    fn derive_tail_variant_none_when_no_tails_recorded() {
+        let cases = vec![CaseReport {
+            name: "a".into(),
+            log_n: 10,
+            direction: TestDirection::Forward,
+            input: crate::suite::InputPattern::Sequential,
+            kernel_family: Some("stockham".into()),
+            passed: true,
+            mismatch_count: 0,
+            first_mismatch_index: None,
+            first_mismatch_gpu: None,
+            first_mismatch_cpu: None,
+            timings: TimingReport {
+                wall_time_ns: None,
+                gpu_total_ns: None,
+                gpu_stage_ns: Vec::new(),
+            },
+            error: None,
+            stockham_tail_strategy: None,
+            stockham_tail_reason: None,
+            tail_stride_bytes: None,
+        }];
+        assert_eq!(derive_tail_variant(&cases), None);
+    }
+
+    #[test]
+    fn derive_tail_variant_single_and_mixed() {
+        let mk = |name: &str, tail: Option<&str>| CaseReport {
+            name: name.into(),
+            log_n: 20,
+            direction: TestDirection::Forward,
+            input: crate::suite::InputPattern::Sequential,
+            kernel_family: Some("stockham".into()),
+            passed: true,
+            mismatch_count: 0,
+            first_mismatch_index: None,
+            first_mismatch_gpu: None,
+            first_mismatch_cpu: None,
+            timings: TimingReport {
+                wall_time_ns: None,
+                gpu_total_ns: None,
+                gpu_stage_ns: Vec::new(),
+            },
+            error: None,
+            stockham_tail_strategy: tail.map(str::to_string),
+            stockham_tail_reason: None,
+            tail_stride_bytes: None,
+        };
+
+        let single = vec![
+            mk("a", Some("LocalFusedR4")),
+            mk("b", Some("LocalFusedR4")),
+        ];
+        assert_eq!(derive_tail_variant(&single), Some("LocalFusedR4".into()));
+
+        let mixed = vec![
+            mk("a", Some("LocalFusedR4")),
+            mk("b", Some("GlobalOnlyR4")),
+        ];
+        assert_eq!(derive_tail_variant(&mixed), Some("mixed".into()));
+
+        let partial = vec![mk("a", None), mk("b", Some("GlobalOnlyR4"))];
+        assert_eq!(derive_tail_variant(&partial), Some("GlobalOnlyR4".into()));
     }
 }

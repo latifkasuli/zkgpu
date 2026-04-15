@@ -5,10 +5,20 @@
 
 // ---------- Request ----------
 
+/**
+ * Stockham tail-phase override. `Auto` lets the planner heuristic pick
+ * between `LocalFusedR4` (workgroup-local fused tail) and `GlobalOnlyR4`
+ * (extend the global R4 chain to the end). `Local` and `Global` force the
+ * corresponding strategy. Wire format mirrors `zkgpu_report::StockhamTailOverride`.
+ */
+export type StockhamTailOverride = "Auto" | "Local" | "Global";
+
 export interface HarnessRequest {
   suite?: "Smoke" | "Validation" | "Benchmark";
   spec?: SuiteSpec;
   family_override?: "Auto" | "Stockham" | "FourStep";
+  /** Top-level override; if present, overrides any value on `spec`. */
+  stockham_tail_override?: StockhamTailOverride;
 }
 
 export interface SuiteSpec {
@@ -16,6 +26,11 @@ export interface SuiteSpec {
   family_override: string;
   fail_fast: boolean;
   cases: CaseSpec[];
+  /**
+   * Per-spec Stockham tail override. Defaults to `Auto` (heuristic) on the
+   * Rust side via `#[serde(default)]`, so this field is optional in JSON.
+   */
+  stockham_tail_override?: StockhamTailOverride;
 }
 
 export interface CaseSpec {
@@ -67,6 +82,13 @@ export interface DeviceReport {
 export interface KernelReport {
   field: string;
   ntt_variant: string;
+  /**
+   * Suite-level summary of Stockham tail strategy across executed cases.
+   * One of `"LocalFusedR4"`, `"GlobalOnlyR4"`, `"mixed"`, or omitted when
+   * no case in the suite recorded a tail decision (all four-step or all
+   * `log_n < LOG_BLOCK`).
+   */
+  stockham_tail_strategy?: string;
 }
 
 export interface CaseReport {
@@ -82,6 +104,24 @@ export interface CaseReport {
   first_mismatch_cpu?: string;
   timings: TimingReport;
   error?: string;
+  /**
+   * Actual Stockham tail strategy for this case (`"LocalFusedR4"` or
+   * `"GlobalOnlyR4"`). Omitted for non-Stockham families and for Stockham
+   * cases below `LOG_BLOCK` that have no tail phase.
+   */
+  stockham_tail_strategy?: string;
+  /**
+   * Why the planner chose that strategy (e.g. `"HeuristicXclipseLargeN"`,
+   * `"HeuristicDefaultLocal"`, `"ForcedLocal"`). Omitted alongside
+   * `stockham_tail_strategy` when no tail decision applied.
+   */
+  stockham_tail_reason?: string;
+  /**
+   * Per-thread global-memory gather/scatter stride in bytes for the
+   * `LocalFusedR4` tail. Omitted for `GlobalOnlyR4` (no strided gather)
+   * and for plans without a tail phase.
+   */
+  tail_stride_bytes?: number;
 }
 
 export interface TimingReport {

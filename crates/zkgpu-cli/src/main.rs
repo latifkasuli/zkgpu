@@ -561,6 +561,10 @@ fn run_soak_mode(cli: &CliArgs, duration_secs: u32) {
         cases,
         validate: true,
         family_override,
+        // CLI soak doesn't expose a tail override today; default to Auto so
+        // the heuristic picks per-device. Add a flag later if we need to
+        // A/B soak runs under Local vs Global.
+        stockham_tail_override: zkgpu_report::StockhamTailOverride::Auto,
     };
 
     let report = match zkgpu_testkit::run_soak_suite(&spec) {

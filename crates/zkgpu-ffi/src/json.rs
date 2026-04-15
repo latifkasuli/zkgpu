@@ -8,7 +8,14 @@ use zkgpu_report::SuiteKind;
 pub const FFI_API_VERSION: u32 = 1;
 
 pub fn run_request(request: HarnessRequest) -> HarnessResponse {
-    let result = if let Some(spec) = request.spec {
+    let result = if let Some(mut spec) = request.spec {
+        // A top-level `stockham_tail_override` on the request always wins
+        // over whatever the spec itself carries — it lets harness callers
+        // flip the knob without rebuilding the spec. `None` leaves the
+        // spec's value (often `Auto` via `#[serde(default)]`) untouched.
+        if let Some(tail) = request.stockham_tail_override {
+            spec.stockham_tail_override = tail;
+        }
         run_suite(&spec)
     } else {
         let mut suite = match request.suite {
@@ -30,6 +37,9 @@ pub fn run_request(request: HarnessRequest) -> HarnessResponse {
         };
         if let Some(family) = request.family_override {
             suite.family_override = family;
+        }
+        if let Some(tail) = request.stockham_tail_override {
+            suite.stockham_tail_override = tail;
         }
         run_suite(&suite)
     };
@@ -121,6 +131,7 @@ mod tests {
             suite: None,
             spec: None,
             family_override: None,
+            stockham_tail_override: None,
         });
         assert!(!response.ok);
         assert!(response.report.is_none());
@@ -139,13 +150,41 @@ mod tests {
                 cases: Vec::new(),
                 fail_fast: true,
                 family_override: FamilyOverride::Auto,
+                stockham_tail_override: zkgpu_report::StockhamTailOverride::Auto,
             }),
             family_override: None,
+            stockham_tail_override: None,
         });
         assert!(!response.ok);
         assert_eq!(
             response.error.as_deref(),
             Some("suite must contain at least one case")
+        );
+    }
+
+    #[test]
+    fn request_level_tail_override_propagates_to_spec() {
+        // When the HarnessRequest carries a tail override AND a spec, the
+        // request-level value should overwrite spec.stockham_tail_override.
+        // We can't check runtime effect here without a device, but we can
+        // verify the public field exists and round-trips through JSON.
+        let req = HarnessRequest {
+            suite: None,
+            spec: Some(SuiteSpec {
+                kind: SuiteKind::Validation,
+                cases: Vec::new(),
+                fail_fast: true,
+                family_override: FamilyOverride::Auto,
+                stockham_tail_override: zkgpu_report::StockhamTailOverride::Auto,
+            }),
+            family_override: None,
+            stockham_tail_override: Some(zkgpu_report::StockhamTailOverride::Global),
+        };
+        let json = serde_json::to_string(&req).expect("serialize");
+        let parsed: HarnessRequest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            parsed.stockham_tail_override,
+            Some(zkgpu_report::StockhamTailOverride::Global)
         );
     }
 

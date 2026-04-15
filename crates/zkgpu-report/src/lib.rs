@@ -49,6 +49,30 @@ pub enum FamilyOverride {
     FourStep,
 }
 
+/// Override the Stockham tail-phase strategy (the final LOG_BLOCK stages).
+///
+/// - `Auto`: use the planner's device-driven heuristic.
+/// - `Local`: force the workgroup-local fused R4 kernel.
+/// - `Global`: force extension of global R4 dispatches through end-of-transform
+///   (no local dispatch). Wins on devices where the local kernel's strided
+///   gather collapses (Xclipse at log ≥ 20, Mali-G715 at log ≥ 22).
+///
+/// Plumbed through `SuiteSpec.stockham_tail_override` and
+/// `SoakSpec.stockham_tail_override`. Independent of `FamilyOverride` — a
+/// tail override only takes effect when the Stockham family is selected.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StockhamTailOverride {
+    Auto,
+    Local,
+    Global,
+}
+
+impl Default for StockhamTailOverride {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Spec types (inputs to a test run)
 // ---------------------------------------------------------------------------
@@ -110,6 +134,10 @@ pub struct SuiteSpec {
     pub fail_fast: bool,
     #[serde(default = "default_family_override")]
     pub family_override: FamilyOverride,
+    /// Stockham tail-phase override. Ignored when `family_override` resolves
+    /// to Four-Step. Defaults to `Auto` (planner heuristic).
+    #[serde(default)]
+    pub stockham_tail_override: StockhamTailOverride,
 }
 
 fn default_family_override() -> FamilyOverride {
@@ -238,6 +266,20 @@ pub struct SoakCaseReport {
     pub validated: bool,
     /// Error message, if the soak run failed.
     pub error: Option<String>,
+    /// Stockham tail strategy actually used, e.g. `"LocalFusedR4"` or
+    /// `"GlobalOnlyR4"`. `None` for four-step plans and Stockham plans
+    /// below `LOG_BLOCK`. `#[serde(default)]` for backwards compatibility
+    /// with soak reports emitted before this field existed.
+    #[serde(default)]
+    pub stockham_tail_strategy: Option<String>,
+    /// Heuristic name or forced-override label that produced
+    /// `stockham_tail_strategy`. `None` whenever the strategy is `None`.
+    #[serde(default)]
+    pub stockham_tail_reason: Option<String>,
+    /// Per-thread gather stride in bytes for the local-fused tail.
+    /// `None` for `GlobalOnlyR4`, four-step, and tailless plans.
+    #[serde(default)]
+    pub tail_stride_bytes: Option<u64>,
 }
 
 /// Complete soak suite report.
@@ -264,6 +306,9 @@ pub struct SoakSpec {
     pub validate: bool,
     #[serde(default = "default_family_override")]
     pub family_override: FamilyOverride,
+    /// Stockham tail-phase override. Defaults to `Auto`.
+    #[serde(default)]
+    pub stockham_tail_override: StockhamTailOverride,
 }
 
 fn default_true() -> bool {
@@ -285,6 +330,18 @@ pub struct CaseReport {
     pub first_mismatch_cpu: Option<String>,
     pub timings: TimingReport,
     pub error: Option<String>,
+    /// Stockham tail strategy actually used, e.g. `"LocalFusedR4"` or
+    /// `"GlobalOnlyR4"`. `None` for Four-Step cases or when `log_n < LOG_BLOCK`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stockham_tail_strategy: Option<String>,
+    /// Why that tail strategy was chosen (heuristic name or forced override).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stockham_tail_reason: Option<String>,
+    /// For `LocalFusedR4`: the per-thread gather stride in bytes
+    /// (`N / BLOCK_SIZE * sizeof(u32)`). Surfaces the coalescing pressure
+    /// point the tail decision is about. `None` for `GlobalOnlyR4`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail_stride_bytes: Option<u64>,
 }
 
 /// Summary counts for a test suite.
@@ -300,6 +357,11 @@ pub struct SuiteSummary {
 pub struct KernelReport {
     pub field: String,
     pub ntt_variant: String,
+    /// Aggregate tail strategy across this suite's Stockham cases:
+    /// `"LocalFusedR4"`, `"GlobalOnlyR4"`, `"mixed"` when both appeared,
+    /// or `None` when no Stockham case had a tail phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stockham_tail_strategy: Option<String>,
 }
 
 /// Complete test suite report.
@@ -324,6 +386,8 @@ pub struct HarnessRequest {
     pub spec: Option<SuiteSpec>,
     #[serde(default)]
     pub family_override: Option<FamilyOverride>,
+    #[serde(default)]
+    pub stockham_tail_override: Option<StockhamTailOverride>,
 }
 
 /// Response from the test harness.
@@ -408,6 +472,7 @@ pub fn smoke_suite() -> SuiteSpec {
         ],
         fail_fast: true,
         family_override: FamilyOverride::Auto,
+        stockham_tail_override: StockhamTailOverride::Auto,
     }
 }
 
@@ -491,6 +556,7 @@ pub fn validation_suite() -> SuiteSpec {
         ],
         fail_fast: false,
         family_override: FamilyOverride::Auto,
+        stockham_tail_override: StockhamTailOverride::Auto,
     }
 }
 
@@ -517,6 +583,7 @@ pub fn benchmark_suite() -> SuiteSpec {
         ],
         fail_fast: false,
         family_override: FamilyOverride::Auto,
+        stockham_tail_override: StockhamTailOverride::Auto,
     }
 }
 
@@ -556,6 +623,7 @@ fn soak_spec(duration_secs: u32) -> SoakSpec {
         ],
         validate: true,
         family_override: FamilyOverride::Auto,
+        stockham_tail_override: StockhamTailOverride::Auto,
     }
 }
 
@@ -586,6 +654,7 @@ mod tests {
             suite: Some(SuiteKind::Smoke),
             spec: None,
             family_override: None,
+            stockham_tail_override: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let parsed: HarnessRequest = serde_json::from_str(&json).unwrap();

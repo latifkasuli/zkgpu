@@ -1,10 +1,13 @@
 use crate::caps::{CapabilityProfile, GpuFamily, PlatformClass};
 
 use super::constants::{DEFAULT_FOUR_STEP_THRESHOLD, MOBILE_UMA_FOUR_STEP_THRESHOLD};
+use super::tail_policy::{StockhamTailOverride, TailCapsHint};
 
 // ---------------------------------------------------------------------------
 // Planner policy — capability-driven family selection
 // ---------------------------------------------------------------------------
+
+const ENV_STOCKHAM_TAIL: &str = "ZKGPU_STOCKHAM_TAIL";
 
 /// Per-device crossover thresholds that control NTT family selection.
 ///
@@ -18,6 +21,12 @@ use super::constants::{DEFAULT_FOUR_STEP_THRESHOLD, MOBILE_UMA_FOUR_STEP_THRESHO
 #[non_exhaustive]
 pub struct PlannerPolicy {
     pub(super) four_step_threshold: Option<u32>,
+    /// Caps subset used by `choose_stockham_tail` to decide tail strategy.
+    /// `None` for capability-less constructors (`stockham_only`, etc.) —
+    /// those fall back to the heuristic default of `LocalFusedR4`.
+    pub(super) tail_caps_hint: Option<TailCapsHint>,
+    /// Caller-supplied tail override. `Auto` means use the heuristic.
+    pub(super) stockham_tail_override: StockhamTailOverride,
 }
 
 impl PlannerPolicy {
@@ -25,6 +34,8 @@ impl PlannerPolicy {
     pub fn stockham_only() -> Self {
         Self {
             four_step_threshold: None,
+            tail_caps_hint: None,
+            stockham_tail_override: StockhamTailOverride::Auto,
         }
     }
 
@@ -32,6 +43,8 @@ impl PlannerPolicy {
     pub fn with_four_step_threshold(threshold: u32) -> Self {
         Self {
             four_step_threshold: Some(threshold),
+            tail_caps_hint: None,
+            stockham_tail_override: StockhamTailOverride::Auto,
         }
     }
 
@@ -39,6 +52,8 @@ impl PlannerPolicy {
     pub fn force_four_step() -> Self {
         Self {
             four_step_threshold: Some(1),
+            tail_caps_hint: None,
+            stockham_tail_override: StockhamTailOverride::Auto,
         }
     }
 
@@ -46,6 +61,59 @@ impl PlannerPolicy {
     /// or `None` if four-step is disabled.
     pub fn four_step_threshold(&self) -> Option<u32> {
         self.four_step_threshold
+    }
+
+    /// Disable the four-step path while preserving every other policy field.
+    ///
+    /// Use when a benchmark or test needs to force Stockham on a device
+    /// whose natural policy would have selected four-step. Unlike
+    /// [`stockham_only`](Self::stockham_only), this preserves the device's
+    /// `tail_caps_hint`, so the Stockham tail heuristic still runs with
+    /// full device context. Critical for forced-Stockham A/B comparisons
+    /// on Xclipse / Mali / Browser, where the new `GlobalOnlyR4` strategy
+    /// is exactly what we are trying to measure — `stockham_only()` would
+    /// throw the caps hint away and silently fall back to `LocalFusedR4`.
+    pub fn with_four_step_disabled(mut self) -> Self {
+        self.four_step_threshold = None;
+        self
+    }
+
+    /// Force the four-step path at every size while preserving every other
+    /// policy field (notably `tail_caps_hint` and `stockham_tail_override`).
+    ///
+    /// Symmetric counterpart to [`with_four_step_disabled`](Self::with_four_step_disabled).
+    pub fn with_force_four_step(mut self) -> Self {
+        self.four_step_threshold = Some(1);
+        self
+    }
+
+    /// Apply an explicit Stockham tail-phase override.
+    ///
+    /// `Auto` falls back to the heuristic. `Local` and `Global` force the
+    /// corresponding strategy regardless of device or `log_n`. The override
+    /// has no effect when the planner selects four-step.
+    ///
+    /// Visibility is `pub(crate)` because the override type is crate-internal;
+    /// external callers reach this via `WgpuNttPlan`'s public wrapper.
+    pub(crate) fn with_stockham_tail_override(mut self, ov: StockhamTailOverride) -> Self {
+        self.stockham_tail_override = ov;
+        self
+    }
+
+    /// Resolve the tail override from (caller value, env var).
+    ///
+    /// The caller value wins; env is consulted only when the caller passes
+    /// `Auto`. Used by the runners so a benchmark spec's explicit override
+    /// always takes precedence over a stale environment.
+    pub(crate) fn with_stockham_tail_override_resolved(
+        self,
+        explicit: StockhamTailOverride,
+    ) -> Self {
+        let resolved = match explicit {
+            StockhamTailOverride::Auto => parse_env_tail_override(),
+            other => other,
+        };
+        self.with_stockham_tail_override(resolved)
     }
 
     /// Derive a planner policy from the device's capability profile.
@@ -86,8 +154,13 @@ impl PlannerPolicy {
     ///
     /// ## DX12 (same hardware as Vulkan, Windows only)
     /// Same family-level dispatch as Vulkan.
+    ///
+    /// The Stockham tail-phase strategy is also derived from `caps` (see
+    /// [`tail_policy`](super::tail_policy)). Override via
+    /// [`with_stockham_tail_override`](Self::with_stockham_tail_override)
+    /// or the `ZKGPU_STOCKHAM_TAIL` env var.
     pub fn from_caps(caps: &CapabilityProfile) -> Self {
-        match caps.backend {
+        let mut policy = match caps.backend {
             // ----- Metal: always Apple, always stockham -----
             wgpu::Backend::Metal => Self::stockham_only(),
 
@@ -99,7 +172,12 @@ impl PlannerPolicy {
 
             // ----- OpenGL / Empty / other: conservative fallback -----
             _ => Self::with_four_step_threshold(DEFAULT_FOUR_STEP_THRESHOLD),
-        }
+        };
+        policy.tail_caps_hint = Some(TailCapsHint {
+            backend: caps.backend,
+            gpu_family: caps.gpu_family,
+        });
+        policy
     }
 
     /// Family-level dispatch for Vulkan and DX12 backends where the same
@@ -153,6 +231,28 @@ impl PlannerPolicy {
             GpuFamily::Unknown => {
                 Self::with_four_step_threshold(DEFAULT_FOUR_STEP_THRESHOLD)
             }
+        }
+    }
+}
+
+/// Parse `ZKGPU_STOCKHAM_TAIL` into a tail override.
+///
+/// Recognised values: `auto` (default), `local`, `global`. Unrecognised
+/// values log a warning and resolve to `Auto`.
+fn parse_env_tail_override() -> StockhamTailOverride {
+    let Ok(val) = std::env::var(ENV_STOCKHAM_TAIL) else {
+        return StockhamTailOverride::Auto;
+    };
+    match val.trim().to_ascii_lowercase().as_str() {
+        "" | "auto" => StockhamTailOverride::Auto,
+        "local" => StockhamTailOverride::Local,
+        "global" => StockhamTailOverride::Global,
+        other => {
+            log::warn!(
+                "{ENV_STOCKHAM_TAIL}={other:?} not recognised \
+                 (expected auto|local|global); using auto"
+            );
+            StockhamTailOverride::Auto
         }
     }
 }

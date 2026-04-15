@@ -120,7 +120,10 @@ impl StockhamPlan {
         }
 
         // Phase 2: workgroup-local fused dispatch
-        if self.config.use_local_kernel {
+        // Only emitted when tail.strategy == LocalFusedR4. The GlobalOnlyR4
+        // tail strategy fuses these stages into the global R4 chain above,
+        // so this branch is skipped entirely.
+        if self.config.use_local_kernel() {
             let (src_buf, dst_buf) = if dispatch_idx % 2 == 0 {
                 (&buf.inner, &self.scratch_buffer)
             } else {

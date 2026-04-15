@@ -23,6 +23,32 @@ enum class FamilyChoice(val wireValue: String?) {
     }
 }
 
+/**
+ * Caller-side override for the Stockham tail-phase selection. Mirrors
+ * `zkgpu_report::StockhamTailOverride`. `Auto` (the default) lets the
+ * Rust planner heuristic pick `LocalFusedR4` or `GlobalOnlyR4` from
+ * device caps + `log_n`. `Local` and `Global` force the corresponding
+ * strategy regardless of heuristic — used for forced A/B runs on
+ * Xclipse / Mali / Browser, where the new `GlobalOnlyR4` is the
+ * production default we want to measure.
+ *
+ * `wireValue == null` means "omit the field"; `#[serde(default)]` on
+ * the Rust side then applies `Auto`.
+ */
+enum class TailChoice(val wireValue: String?) {
+    Auto(null),
+    Local("Local"),
+    Global("Global");
+
+    companion object {
+        fun fromIntent(value: String?): TailChoice = when (value?.lowercase()) {
+            "local" -> Local
+            "global" -> Global
+            else -> Auto
+        }
+    }
+}
+
 data class HarnessSummary(
     val ok: Boolean,
     val error: String?,
@@ -36,17 +62,30 @@ data class HarnessSummary(
 )
 
 object HarnessJson {
-    fun presetRequestJson(suite: PresetSuite, family: FamilyChoice = FamilyChoice.Auto): String {
+    fun presetRequestJson(
+        suite: PresetSuite,
+        family: FamilyChoice = FamilyChoice.Auto,
+        tail: TailChoice = TailChoice.Auto,
+    ): String {
         val obj = JSONObject()
             .put("suite", suite.wireName)
             .put("spec", JSONObject.NULL)
         if (family.wireValue != null) {
             obj.put("family_override", family.wireValue)
         }
+        // Top-level override; the FFI layer copies it onto the spec it
+        // builds from `suite`, so a forced `Local`/`Global` reaches the
+        // planner regardless of which preset spec is materialized.
+        if (tail.wireValue != null) {
+            obj.put("stockham_tail_override", tail.wireValue)
+        }
         return obj.toString()
     }
 
-    fun crossoverBenchmarkRequestJson(family: FamilyChoice): String {
+    fun crossoverBenchmarkRequestJson(
+        family: FamilyChoice,
+        tail: TailChoice = TailChoice.Auto,
+    ): String {
         val cases = JSONArray()
         for (logN in intArrayOf(18, 19, 20, 21, 22)) {
             for (dir in arrayOf("Forward", "Inverse")) {
@@ -69,9 +108,19 @@ object HarnessJson {
             .put("cases", cases)
             .put("fail_fast", false)
             .put("family_override", family.wireValue ?: "Auto")
+        // Set on the spec directly so harnesses that POST a fully-built
+        // spec (no `suite` shortcut) still carry the override through.
+        if (tail.wireValue != null) {
+            spec.put("stockham_tail_override", tail.wireValue)
+        }
 
         val obj = JSONObject()
             .put("spec", spec)
+        // Also set at the request top level so a future caller can flip
+        // the knob without rebuilding the spec — matches the FFI contract.
+        if (tail.wireValue != null) {
+            obj.put("stockham_tail_override", tail.wireValue)
+        }
         return obj.toString()
     }
 

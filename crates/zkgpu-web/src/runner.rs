@@ -21,9 +21,20 @@ use zkgpu_core::{GpuDevice, NttDirection};
 use zkgpu_ntt::ntt_cpu_reference;
 use zkgpu_report::{
     CaseReport, CaseSpec, DeviceReport, FamilyOverride, KernelReport, StageTimingReport,
-    SuiteReport, SuiteSpec, SuiteSummary, TestDirection, TimingReport,
+    StockhamTailOverride, SuiteReport, SuiteSpec, SuiteSummary, TestDirection, TimingReport,
 };
-use zkgpu_wgpu::{NttTimings, PlannerPolicy, WgpuDevice, WgpuNttPlan};
+use zkgpu_wgpu::{
+    NttTimings, PlannerPolicy, StockhamTailOverride as PlanTailOverride, WgpuDevice, WgpuNttPlan,
+};
+
+/// Translate the report-layer tail override into the planner-layer enum.
+fn to_plan_tail(ov: StockhamTailOverride) -> PlanTailOverride {
+    match ov {
+        StockhamTailOverride::Auto => PlanTailOverride::Auto,
+        StockhamTailOverride::Local => PlanTailOverride::Local,
+        StockhamTailOverride::Global => PlanTailOverride::Global,
+    }
+}
 
 use crate::device;
 use crate::inputs::make_input;
@@ -44,7 +55,13 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
     let mut cases = Vec::with_capacity(spec.cases.len());
 
     for case in &spec.cases {
-        let report = run_case_inner(case, spec.family_override, &dev).await;
+        let report = run_case_inner(
+            case,
+            spec.family_override,
+            spec.stockham_tail_override,
+            &dev,
+        )
+        .await;
         let failed = !report.passed;
         cases.push(report);
         if spec.fail_fast && failed {
@@ -56,6 +73,7 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
     let total_cases = cases.len() as u32;
     let failed_cases = total_cases - passed_cases;
     let kernel_variant = derive_kernel_variant(&cases);
+    let tail_variant = derive_tail_variant(&cases);
 
     Ok(SuiteReport {
         schema_version: 1,
@@ -64,6 +82,7 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
         kernel: KernelReport {
             field: "BabyBear".to_string(),
             ntt_variant: kernel_variant,
+            stockham_tail_strategy: tail_variant,
         },
         cases,
         summary: SuiteSummary {
@@ -77,7 +96,7 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
 /// Run a single case exposed to JS.
 pub(crate) async fn run_single_case_async(case: &CaseSpec) -> Result<CaseReport, String> {
     let dev = device::clone_device()?;
-    Ok(run_case_inner(case, FamilyOverride::Auto, &dev).await)
+    Ok(run_case_inner(case, FamilyOverride::Auto, StockhamTailOverride::Auto, &dev).await)
 }
 
 // ---------------------------------------------------------------------------
@@ -87,14 +106,19 @@ pub(crate) async fn run_single_case_async(case: &CaseSpec) -> Result<CaseReport,
 async fn run_case_inner(
     case: &CaseSpec,
     family: FamilyOverride,
+    tail_override: StockhamTailOverride,
     dev: &Rc<WgpuDevice>,
 ) -> CaseReport {
     let input = make_input(case.log_n, &case.input);
 
     match case.direction {
-        TestDirection::Forward => run_direction(case, &input, NttDirection::Forward, family, dev).await,
-        TestDirection::Inverse => run_direction(case, &input, NttDirection::Inverse, family, dev).await,
-        TestDirection::Roundtrip => run_roundtrip(case, &input, family, dev).await,
+        TestDirection::Forward => {
+            run_direction(case, &input, NttDirection::Forward, family, tail_override, dev).await
+        }
+        TestDirection::Inverse => {
+            run_direction(case, &input, NttDirection::Inverse, family, tail_override, dev).await
+        }
+        TestDirection::Roundtrip => run_roundtrip(case, &input, family, tail_override, dev).await,
     }
 }
 
@@ -107,15 +131,19 @@ async fn run_direction(
     input: &[BabyBear],
     direction: NttDirection,
     family: FamilyOverride,
+    tail_override: StockhamTailOverride,
     dev: &Rc<WgpuDevice>,
 ) -> CaseReport {
     let expected = cpu_reference(input, direction);
 
-    let mut plan = match make_plan(dev, case.log_n, direction, family) {
+    let mut plan = match make_plan(dev, case.log_n, direction, family, tail_override) {
         Ok(p) => p,
         Err(e) => return case_error(case, e.to_string()),
     };
     let family_name = plan.family_name().to_string();
+    let tail_strategy = plan.stockham_tail_strategy().map(str::to_string);
+    let tail_reason = plan.stockham_tail_reason().map(str::to_string);
+    let tail_stride_bytes = plan.tail_stride_bytes();
 
     let measurement = match measure_plan_async(
         dev,
@@ -128,7 +156,16 @@ async fn run_direction(
     .await
     {
         Ok(m) => m,
-        Err(e) => return case_error_family(case, Some(family_name), e),
+        Err(e) => {
+            return case_error_with_tail(
+                case,
+                Some(family_name),
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                e,
+            )
+        }
     };
 
     let outcome = compare_vectors(&measurement.final_output, &expected);
@@ -146,6 +183,9 @@ async fn run_direction(
         first_mismatch_cpu: outcome.first_mismatch_cpu,
         timings: measurement.timings,
         error: None,
+        stockham_tail_strategy: tail_strategy,
+        stockham_tail_reason: tail_reason,
+        tail_stride_bytes,
     }
 }
 
@@ -157,20 +197,41 @@ async fn run_roundtrip(
     case: &CaseSpec,
     input: &[BabyBear],
     family: FamilyOverride,
+    tail_override: StockhamTailOverride,
     dev: &Rc<WgpuDevice>,
 ) -> CaseReport {
     // Create both plans up-front.
-    let mut forward_plan = match make_plan(dev, case.log_n, NttDirection::Forward, family) {
-        Ok(p) => p,
-        Err(e) => return case_error(case, e.to_string()),
-    };
-    let mut inverse_plan = match make_plan(dev, case.log_n, NttDirection::Inverse, family) {
-        Ok(p) => p,
-        Err(e) => return case_error(case, e.to_string()),
-    };
+    let mut forward_plan =
+        match make_plan(dev, case.log_n, NttDirection::Forward, family, tail_override) {
+            Ok(p) => p,
+            Err(e) => return case_error(case, e.to_string()),
+        };
+    // Capture forward-side metadata up-front so it survives a later failure
+    // (inverse make_plan or either measurement). Mirrors the testkit twin
+    // — without this an inverse make_plan crash drops the very tail strategy
+    // PR 1 was meant to make visible.
+    let forward_family_name = forward_plan.family_name().to_string();
+    let tail_strategy = forward_plan.stockham_tail_strategy().map(str::to_string);
+    let tail_reason = forward_plan.stockham_tail_reason().map(str::to_string);
+    let tail_stride_bytes = forward_plan.tail_stride_bytes();
+
+    let mut inverse_plan =
+        match make_plan(dev, case.log_n, NttDirection::Inverse, family, tail_override) {
+            Ok(p) => p,
+            Err(e) => {
+                return case_error_with_tail(
+                    case,
+                    Some(forward_family_name),
+                    tail_strategy,
+                    tail_reason,
+                    tail_stride_bytes,
+                    e.to_string(),
+                )
+            }
+        };
     let kernel_family = Some(format!(
         "{}/{}",
-        forward_plan.family_name(),
+        forward_family_name,
         inverse_plan.family_name(),
     ));
 
@@ -186,7 +247,16 @@ async fn run_roundtrip(
     .await
     {
         Ok(m) => m,
-        Err(e) => return case_error_family(case, kernel_family, e),
+        Err(e) => {
+            return case_error_with_tail(
+                case,
+                kernel_family,
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                e,
+            )
+        }
     };
 
     // Measure inverse pass using forward's final output as input,
@@ -202,7 +272,16 @@ async fn run_roundtrip(
     .await
     {
         Ok(m) => m,
-        Err(e) => return case_error_family(case, kernel_family, e),
+        Err(e) => {
+            return case_error_with_tail(
+                case,
+                kernel_family,
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                e,
+            )
+        }
     };
 
     // Sum timing reports (same as native sum_timing_reports).
@@ -224,6 +303,9 @@ async fn run_roundtrip(
         first_mismatch_cpu: outcome.first_mismatch_cpu,
         timings,
         error: None,
+        stockham_tail_strategy: tail_strategy,
+        stockham_tail_reason: tail_reason,
+        tail_stride_bytes,
     }
 }
 
@@ -409,18 +491,20 @@ fn make_plan(
     log_n: u32,
     direction: NttDirection,
     family: FamilyOverride,
+    tail_override: StockhamTailOverride,
 ) -> Result<WgpuNttPlan, zkgpu_core::ZkGpuError> {
-    match family {
-        FamilyOverride::Auto => WgpuNttPlan::new(device, log_n, direction),
-        FamilyOverride::Stockham => {
-            let policy = PlannerPolicy::stockham_only();
-            WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
-        }
-        FamilyOverride::FourStep => {
-            let policy = PlannerPolicy::force_four_step();
-            WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
-        }
-    }
+    // Always derive from the device caps so the Stockham tail heuristic has
+    // full device context, then narrow the family. See the testkit twin for
+    // the rationale — `stockham_only()` would drop the caps hint and force
+    // `LocalFusedR4` on every device, defeating the new policy.
+    let plan_tail = to_plan_tail(tail_override);
+    let base = PlannerPolicy::from_caps(device.caps()).with_public_tail_override(plan_tail);
+    let policy = match family {
+        FamilyOverride::Auto => base,
+        FamilyOverride::Stockham => base.with_four_step_disabled(),
+        FamilyOverride::FourStep => base.with_force_four_step(),
+    };
+    WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
 }
 
 fn build_device_report_from(device: &WgpuDevice) -> DeviceReport {
@@ -457,6 +541,25 @@ fn derive_kernel_variant(cases: &[CaseReport]) -> String {
     }
 }
 
+/// Summarise the per-case Stockham tail strategies into a single label.
+/// Returns `None` if no case recorded a tail strategy; returns the strategy
+/// name if every tailed case agreed, or `"mixed"` otherwise.
+fn derive_tail_variant(cases: &[CaseReport]) -> Option<String> {
+    let mut tails: Vec<&str> = cases
+        .iter()
+        .filter_map(|c| c.stockham_tail_strategy.as_deref())
+        .collect();
+    if tails.is_empty() {
+        return None;
+    }
+    tails.sort_unstable();
+    tails.dedup();
+    Some(match tails.as_slice() {
+        [tail] => (*tail).to_string(),
+        _ => "mixed".to_string(),
+    })
+}
+
 fn case_error(case: &CaseSpec, error: String) -> CaseReport {
     case_error_family(case, None, error)
 }
@@ -464,6 +567,21 @@ fn case_error(case: &CaseSpec, error: String) -> CaseReport {
 fn case_error_family(
     case: &CaseSpec,
     kernel_family: Option<String>,
+    error: String,
+) -> CaseReport {
+    case_error_with_tail(case, kernel_family, None, None, None, error)
+}
+
+/// Failed `CaseReport` that preserves any tail metadata captured before the
+/// failure. Mirrors the testkit twin so browser-side measurement crashes on
+/// Xclipse/Mali still surface the planned Stockham tail strategy.
+#[allow(clippy::too_many_arguments)]
+fn case_error_with_tail(
+    case: &CaseSpec,
+    kernel_family: Option<String>,
+    stockham_tail_strategy: Option<String>,
+    stockham_tail_reason: Option<String>,
+    tail_stride_bytes: Option<u64>,
     error: String,
 ) -> CaseReport {
     CaseReport {
@@ -483,5 +601,75 @@ fn case_error_family(
             gpu_stage_ns: Vec::new(),
         },
         error: Some(error),
+        stockham_tail_strategy,
+        stockham_tail_reason,
+        tail_stride_bytes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Native-target tests for the failure-helper plumbing.
+    //!
+    //! These do not need a GPU, do not need wasm, and run with the
+    //! ordinary `cargo test -p zkgpu-web` invocation. The browser-side
+    //! companion test in `tests/browser_smoke.rs` covers the success-path
+    //! end-to-end through the wasm boundary; together they close Codex's
+    //! residual structural-parity gap.
+    use super::*;
+    use zkgpu_report::InputPattern;
+
+    #[test]
+    fn case_error_with_tail_preserves_tail_metadata() {
+        // PR 1's whole point is that operators can see *which* tail
+        // strategy fired even when measurement crashed. Mirror of the
+        // testkit twin — verifies the helper threads every captured field
+        // through to the report.
+        let case = CaseSpec {
+            name: "tail_preserved".into(),
+            log_n: 18,
+            direction: TestDirection::Forward,
+            input: InputPattern::Sequential,
+            iterations: 1,
+            warmup_iterations: 0,
+            profile_gpu_timestamps: false,
+        };
+        let report = case_error_with_tail(
+            &case,
+            Some("stockham".into()),
+            Some("GlobalOnlyR4".into()),
+            Some("HostileStridedDevice".into()),
+            Some(8),
+            "simulated measurement crash".into(),
+        );
+        assert!(!report.passed);
+        assert_eq!(report.kernel_family.as_deref(), Some("stockham"));
+        assert_eq!(report.stockham_tail_strategy.as_deref(), Some("GlobalOnlyR4"));
+        assert_eq!(
+            report.stockham_tail_reason.as_deref(),
+            Some("HostileStridedDevice")
+        );
+        assert_eq!(report.tail_stride_bytes, Some(8));
+        assert!(report.error.is_some());
+    }
+
+    #[test]
+    fn case_error_family_keeps_tail_fields_none() {
+        // Pre-plan failures (e.g. an invalid log_n caught by make_plan)
+        // have no tail metadata to surface — the slim wrapper still
+        // leaves the three fields blank.
+        let case = CaseSpec {
+            name: "no_tail_yet".into(),
+            log_n: 10,
+            direction: TestDirection::Forward,
+            input: InputPattern::Sequential,
+            iterations: 1,
+            warmup_iterations: 0,
+            profile_gpu_timestamps: false,
+        };
+        let report = case_error_family(&case, None, "plan build failed".into());
+        assert!(report.stockham_tail_strategy.is_none());
+        assert!(report.stockham_tail_reason.is_none());
+        assert!(report.tail_stride_bytes.is_none());
     }
 }

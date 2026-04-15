@@ -1,17 +1,41 @@
 use super::*;
-use super::constants::{BLOCK_SIZE, DEFAULT_FOUR_STEP_THRESHOLD, MOBILE_UMA_FOUR_STEP_THRESHOLD};
+use super::constants::{BLOCK_SIZE, DEFAULT_FOUR_STEP_THRESHOLD, MOBILE_UMA_FOUR_STEP_THRESHOLD, LOG_BLOCK};
 use super::stockham_config::R4StageParams;
+use super::tail_policy::{
+    StockhamTailOverride, StockhamTailReason, StockhamTailStrategy, TailDecision,
+};
 use crate::caps::{DetectionSource, DeviceTier, GpuFamily, MemoryModel, PlatformClass};
 
+/// Test helper: plan a Stockham config with the canonical LocalFusedR4 tail
+/// above `LOG_BLOCK`, and no tail below. Mirrors what the planner chooses
+/// by default when no override is present and the caps hint is unknown.
 fn stockham(log_n: u32) -> StockhamPlanConfig {
-    StockhamPlanConfig::new(log_n).expect("valid log_n")
+    let tail = (log_n >= LOG_BLOCK).then_some(TailDecision {
+        strategy: StockhamTailStrategy::LocalFusedR4,
+        reason: StockhamTailReason::HeuristicDefaultLocal,
+    });
+    StockhamPlanConfig::new(log_n, tail).expect("valid log_n")
+}
+
+/// Test helper: plan a Stockham config that explicitly takes the
+/// `GlobalOnlyR4` tail strategy for log_n >= LOG_BLOCK.
+fn stockham_global_tail(log_n: u32) -> StockhamPlanConfig {
+    StockhamPlanConfig::new(
+        log_n,
+        Some(TailDecision {
+            strategy: StockhamTailStrategy::GlobalOnlyR4,
+            reason: StockhamTailReason::ForcedGlobal,
+        }),
+    )
+    .expect("valid log_n")
 }
 
 #[test]
 fn planner_log1_global_only() {
     let c = stockham(1);
     assert_eq!(c.n, 2);
-    assert!(!c.use_local_kernel);
+    assert!(!c.use_local_kernel());
+    assert!(c.tail.is_none(), "log_n < LOG_BLOCK should have no tail");
     assert_eq!(c.num_global_stages, 1);
     assert_eq!(c.ntt_dispatches(), 1);
     assert_eq!(c.global_workgroups, 1);
@@ -23,7 +47,7 @@ fn planner_log1_global_only() {
 fn planner_log4_global_only_even() {
     let c = stockham(4);
     assert_eq!(c.n, 16);
-    assert!(!c.use_local_kernel);
+    assert!(!c.use_local_kernel());
     assert_eq!(c.num_global_stages, 4);
     assert_eq!(c.r4_stage_params.len(), 2);
     assert!(c.global_stage_params.is_empty());
@@ -35,7 +59,7 @@ fn planner_log4_global_only_even() {
 fn planner_log5_global_only_odd() {
     let c = stockham(5);
     assert_eq!(c.n, 32);
-    assert!(!c.use_local_kernel);
+    assert!(!c.use_local_kernel());
     assert_eq!(c.num_global_stages, 5);
     assert_eq!(c.r4_stage_params.len(), 2);
     assert_eq!(c.global_stage_params.len(), 1);
@@ -46,7 +70,7 @@ fn planner_log5_global_only_odd() {
 #[test]
 fn planner_log8_global_only() {
     let c = stockham(8);
-    assert!(!c.use_local_kernel);
+    assert!(!c.use_local_kernel());
     assert_eq!(c.num_global_stages, 8);
     assert_eq!(c.r4_stage_params.len(), 4);
     assert!(c.global_stage_params.is_empty());
@@ -59,7 +83,7 @@ fn planner_log9_global_only_boundary() {
     // log_n=9 < LOG_BLOCK=10, so entirely global stages
     let c = stockham(9);
     assert_eq!(c.n, 512);
-    assert!(!c.use_local_kernel);
+    assert!(!c.use_local_kernel());
     assert_eq!(c.num_global_stages, 9);
     assert_eq!(c.r4_stage_params.len(), 4);
     assert_eq!(c.global_stage_params.len(), 1);
@@ -72,7 +96,7 @@ fn planner_log10_local_only() {
     // log_n=10 = LOG_BLOCK, so 0 global stages + 1 local dispatch
     let c = stockham(10);
     assert_eq!(c.n, 1024);
-    assert!(c.use_local_kernel);
+    assert!(c.use_local_kernel());
     assert_eq!(c.num_global_stages, 0);
     assert!(c.r4_stage_params.is_empty());
     assert!(c.global_stage_params.is_empty());
@@ -86,7 +110,7 @@ fn planner_log10_local_only() {
 fn planner_log11_hybrid_odd() {
     let c = stockham(11);
     assert_eq!(c.n, 2048);
-    assert!(c.use_local_kernel);
+    assert!(c.use_local_kernel());
     assert_eq!(c.num_global_stages, 1);
     assert!(c.r4_stage_params.is_empty());
     assert_eq!(c.global_stage_params.len(), 1);
@@ -100,7 +124,7 @@ fn planner_log11_hybrid_odd() {
 fn planner_log20_large() {
     let c = stockham(20);
     assert_eq!(c.n, 1 << 20);
-    assert!(c.use_local_kernel);
+    assert!(c.use_local_kernel());
     assert_eq!(c.num_global_stages, 10);
     assert_eq!(c.r4_stage_params.len(), 5);
     assert!(c.global_stage_params.is_empty());
@@ -166,17 +190,74 @@ fn planner_result_in_scratch_pattern() {
 
 #[test]
 fn planner_rejects_log0() {
-    assert!(StockhamPlanConfig::new(0).is_err());
+    assert!(StockhamPlanConfig::new(0, None).is_err());
 }
 
 #[test]
 fn planner_rejects_log32() {
-    assert!(StockhamPlanConfig::new(32).is_err());
+    assert!(StockhamPlanConfig::new(32, None).is_err());
 }
 
 #[test]
 fn planner_accepts_log31() {
-    assert!(StockhamPlanConfig::new(31).is_ok());
+    // log_n=31 with the canonical tail, matching how the real planner builds it.
+    let tail = Some(TailDecision {
+        strategy: StockhamTailStrategy::LocalFusedR4,
+        reason: StockhamTailReason::HeuristicDefaultLocal,
+    });
+    assert!(StockhamPlanConfig::new(31, tail).is_ok());
+}
+
+#[test]
+fn planner_rejects_tail_below_log_block() {
+    // Asking for a tail phase below LOG_BLOCK is nonsensical — the constructor
+    // must reject rather than silently ignore the decision.
+    let tail = Some(TailDecision {
+        strategy: StockhamTailStrategy::LocalFusedR4,
+        reason: StockhamTailReason::HeuristicDefaultLocal,
+    });
+    assert!(StockhamPlanConfig::new(LOG_BLOCK - 1, tail).is_err());
+}
+
+#[test]
+fn planner_global_only_tail_matches_global_only_shape() {
+    // The whole point of the GlobalOnlyR4 tail strategy is that it produces
+    // the same dispatch shape as new_global_only — the difference is purely
+    // metadata (the `tail` field is populated so reporting can tell them apart).
+    for log_n in [LOG_BLOCK, 12, 15, 20, 22] {
+        let global_only = StockhamPlanConfig::new_global_only(log_n).unwrap();
+        let global_tail = stockham_global_tail(log_n);
+        assert_eq!(global_only.num_global_stages, global_tail.num_global_stages);
+        assert_eq!(global_only.r4_stage_params, global_tail.r4_stage_params);
+        assert_eq!(global_only.global_stage_params, global_tail.global_stage_params);
+        assert_eq!(global_only.ntt_dispatches(), global_tail.ntt_dispatches());
+        assert!(!global_tail.use_local_kernel());
+        assert!(global_tail.tail.is_some(), "GlobalOnlyR4 must record a tail decision");
+        assert!(global_only.tail.is_none(), "new_global_only leaves tail unset");
+    }
+}
+
+#[test]
+fn planner_tail_stride_bytes_only_set_for_local_fused() {
+    // tail_stride_bytes is the coalescing-pressure signal: it must be Some
+    // iff the plan actually performs the strided gather in the local kernel.
+    let local = stockham(20);
+    assert!(local.use_local_kernel());
+    let stride = local.tail_stride_bytes();
+    let expected_stride = ((1u64 << 20) / BLOCK_SIZE as u64) * std::mem::size_of::<u32>() as u64;
+    assert_eq!(stride, Some(expected_stride));
+
+    let global_tail = stockham_global_tail(20);
+    assert!(!global_tail.use_local_kernel());
+    assert_eq!(
+        global_tail.tail_stride_bytes(),
+        None,
+        "GlobalOnlyR4 has no strided gather, so no stride to report"
+    );
+
+    let tiny = stockham(8);
+    assert!(!tiny.use_local_kernel());
+    assert_eq!(tiny.tail_stride_bytes(), None);
 }
 
 // --- Four-step planner tests ---
@@ -533,4 +614,191 @@ fn force_four_step_sets_threshold_to_1() {
 fn with_four_step_threshold_sets_value() {
 let policy = PlannerPolicy::with_four_step_threshold(14);
 assert_eq!(policy.four_step_threshold(), Some(14));
+}
+
+// --- Tail-strategy integration tests (policy + plan_ntt) ---
+
+/// Plan a Stockham config via `plan_ntt` and return its tail strategy.
+/// Panics if the planner selected four-step.
+fn stockham_tail_from_plan(
+    log_n: u32,
+    policy: &PlannerPolicy,
+) -> Option<StockhamTailStrategy> {
+    match plan_ntt(log_n, policy).unwrap() {
+        PlannedNtt::Stockham(cfg) => cfg.tail.map(|t| t.strategy),
+        PlannedNtt::FourStep(_) => panic!("plan_ntt selected four-step, expected Stockham"),
+    }
+}
+
+#[test]
+fn xclipse_large_n_picks_global_tail_by_default() {
+    // Xclipse at log_n >= 20 is the canonical case where LocalFusedR4's
+    // strided gather collapses coalescing — the heuristic must choose
+    // GlobalOnlyR4 without the caller having to ask.
+    //
+    // Xclipse's default four_step_threshold happens to coincide with the
+    // tail heuristic's own log_n=20 boundary. We disable four-step in the
+    // policy so this test observes the tail decision in isolation; the
+    // actual four-step-vs-Stockham cutover is covered by sibling tests.
+    let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
+    let mut policy = PlannerPolicy::from_caps(&caps);
+    policy.four_step_threshold = None;
+    assert_eq!(
+        stockham_tail_from_plan(20, &policy),
+        Some(StockhamTailStrategy::GlobalOnlyR4),
+        "Xclipse log_n>=20 must fall back to GlobalOnlyR4"
+    );
+    // Below 20 the local tail is still the faster choice.
+    assert_eq!(
+        stockham_tail_from_plan(18, &policy),
+        Some(StockhamTailStrategy::LocalFusedR4),
+    );
+}
+
+#[test]
+fn mali_large_n_picks_global_tail_by_default() {
+    // Mali-G715 hits the same strided-gather pathology at log_n >= 22.
+    let caps = mock_caps_identity(GpuFamily::Mali, PlatformClass::AndroidNative);
+    let policy = PlannerPolicy::from_caps(&caps);
+    assert_eq!(
+        stockham_tail_from_plan(22, &policy),
+        Some(StockhamTailStrategy::GlobalOnlyR4),
+    );
+    assert_eq!(
+        stockham_tail_from_plan(20, &policy),
+        Some(StockhamTailStrategy::LocalFusedR4),
+    );
+}
+
+#[test]
+fn browser_large_n_picks_global_tail_by_default() {
+    // Browsers sit behind an unpredictable driver stack; at log_n >= 20
+    // the conservative choice is the global-only tail.
+    let caps = mock_caps_identity(GpuFamily::Unknown, PlatformClass::Browser);
+    let policy = PlannerPolicy::from_caps(&caps);
+    assert_eq!(
+        stockham_tail_from_plan(20, &policy),
+        Some(StockhamTailStrategy::GlobalOnlyR4),
+    );
+    assert_eq!(
+        stockham_tail_from_plan(18, &policy),
+        Some(StockhamTailStrategy::LocalFusedR4),
+    );
+}
+
+#[test]
+fn default_apple_picks_local_tail() {
+    // Apple's big shared memory makes LocalFusedR4 the right default.
+    let caps = mock_caps_identity(GpuFamily::Apple, PlatformClass::AppleNative);
+    let policy = PlannerPolicy::from_caps(&caps);
+    for log_n in [10, 15, 20, 22] {
+        assert_eq!(
+            stockham_tail_from_plan(log_n, &policy),
+            Some(StockhamTailStrategy::LocalFusedR4),
+            "Apple should choose LocalFusedR4 at log_n={log_n}"
+        );
+    }
+}
+
+#[test]
+fn explicit_local_override_wins_over_heuristic() {
+    // If the heuristic says GlobalOnlyR4 (Xclipse @ log_n=20) but the caller
+    // passes `Local`, the override wins and the plan uses LocalFusedR4.
+    //
+    // Four-step disabled so we exercise the Stockham path; Xclipse's default
+    // threshold would otherwise pick FourStep at exactly log_n=20.
+    let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
+    let mut policy =
+        PlannerPolicy::from_caps(&caps).with_stockham_tail_override(StockhamTailOverride::Local);
+    policy.four_step_threshold = None;
+    assert_eq!(
+        stockham_tail_from_plan(20, &policy),
+        Some(StockhamTailStrategy::LocalFusedR4),
+    );
+}
+
+#[test]
+fn explicit_global_override_wins_over_heuristic() {
+    // Conversely, an Apple device would default to LocalFusedR4, but a
+    // caller investigating the global-only path should be able to force it.
+    let caps = mock_caps_identity(GpuFamily::Apple, PlatformClass::AppleNative);
+    let policy =
+        PlannerPolicy::from_caps(&caps).with_stockham_tail_override(StockhamTailOverride::Global);
+    assert_eq!(
+        stockham_tail_from_plan(20, &policy),
+        Some(StockhamTailStrategy::GlobalOnlyR4),
+    );
+}
+
+#[test]
+fn with_four_step_disabled_preserves_caps_tail_heuristic() {
+    // Regression for Codex review P2#1: forced-Stockham runs were calling
+    // `PlannerPolicy::stockham_only()` which dropped the device caps hint
+    // and silently fell back to LocalFusedR4 on every device. The fix is
+    // `with_four_step_disabled()`, which preserves the caps hint so the
+    // Xclipse/Mali/Browser tail heuristic still triggers.
+    let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
+    let policy = PlannerPolicy::from_caps(&caps).with_four_step_disabled();
+    assert_eq!(policy.four_step_threshold(), None);
+    assert_eq!(
+        stockham_tail_from_plan(20, &policy),
+        Some(StockhamTailStrategy::GlobalOnlyR4),
+        "with_four_step_disabled must keep the caps-driven tail decision"
+    );
+
+    // Counter-test: the legacy `stockham_only()` constructor explicitly
+    // throws caps away, so it falls back to the default local heuristic.
+    // We keep this assertion to document the difference.
+    let legacy = PlannerPolicy::stockham_only();
+    assert_eq!(
+        stockham_tail_from_plan(20, &legacy),
+        Some(StockhamTailStrategy::LocalFusedR4),
+    );
+}
+
+#[test]
+fn with_force_four_step_preserves_caps_and_overrides() {
+    // Symmetric regression: forcing four-step must also preserve the caps
+    // hint and tail override so that, if the four-step plan is later
+    // swapped back to Stockham (e.g. the threshold is undone via a
+    // different code path), the tail strategy still reflects the device.
+    let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
+    let policy = PlannerPolicy::from_caps(&caps)
+        .with_stockham_tail_override(StockhamTailOverride::Local)
+        .with_force_four_step();
+    assert_eq!(policy.four_step_threshold(), Some(1));
+    // Force-four-step always returns four-step, so we don't go through
+    // stockham_tail_from_plan; assert directly that the override survived.
+    assert!(matches!(
+        plan_ntt(20, &policy).unwrap(),
+        PlannedNtt::FourStep(_)
+    ));
+    // And: undo the four-step force, observe the tail override still wins.
+    let policy = policy.with_four_step_disabled();
+    assert_eq!(
+        stockham_tail_from_plan(20, &policy),
+        Some(StockhamTailStrategy::LocalFusedR4),
+        "tail override must survive the four-step → Stockham toggle"
+    );
+}
+
+#[test]
+fn tail_strategy_below_log_block_is_none() {
+    // Below LOG_BLOCK there is no tail phase at all — neither heuristic
+    // nor override should synthesise one.
+    let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
+    let base = PlannerPolicy::from_caps(&caps);
+    let forced_local = base
+        .clone()
+        .with_stockham_tail_override(StockhamTailOverride::Local);
+    let forced_global = base
+        .clone()
+        .with_stockham_tail_override(StockhamTailOverride::Global);
+    for policy in [&base, &forced_local, &forced_global] {
+        assert_eq!(
+            stockham_tail_from_plan(LOG_BLOCK - 1, policy),
+            None,
+            "no tail should be planned below LOG_BLOCK"
+        );
+    }
 }

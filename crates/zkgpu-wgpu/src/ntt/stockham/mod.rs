@@ -71,6 +71,21 @@ impl StockhamPlan {
         self.config.ntt_dispatches() + u32::from(self.scale_param_buffer.is_some())
     }
 
+    /// Tail strategy label for reporting; `None` when the plan has no tail.
+    pub(crate) fn tail_strategy_label(&self) -> Option<&'static str> {
+        self.config.tail.as_ref().map(|t| t.strategy.as_str())
+    }
+
+    /// Tail reason label for reporting; `None` when the plan has no tail.
+    pub(crate) fn tail_reason_label(&self) -> Option<&'static str> {
+        self.config.tail.as_ref().map(|t| t.reason.as_str())
+    }
+
+    /// Per-thread gather stride in bytes for the local-fused tail.
+    pub(crate) fn tail_stride_bytes(&self) -> Option<u64> {
+        self.config.tail_stride_bytes()
+    }
+
     /// Execute the full NTT (stages + inverse scaling if applicable) in a
     /// single command submission. Entirely GPU-side — no host round-trips.
     pub(crate) fn execute_kernels(

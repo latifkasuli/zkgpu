@@ -104,11 +104,48 @@ class ZkgpuInstrumentedTest {
         runCrossoverBenchmark(FamilyChoice.FourStep, tagPrefix = "CROSSOVER_FOURSTEP")
     }
 
-    private fun runCrossoverBenchmark(family: FamilyChoice, tagPrefix: String) {
-        val requestJson = HarnessJson.crossoverBenchmarkRequestJson(family)
+    /**
+     * Crossover under forced Stockham family + forced `LocalFusedR4` tail.
+     * Pinpoints the legacy local-fused tail behavior so the all-global
+     * variant below has a baseline to A/B against on Xclipse / Mali.
+     */
+    @Test
+    fun crossoverStockhamLocalTail() {
+        runCrossoverBenchmark(
+            FamilyChoice.Stockham,
+            tagPrefix = "CROSSOVER_STOCKHAM_LOCAL_TAIL",
+            tail = TailChoice.Local,
+        )
+    }
+
+    /**
+     * Crossover under forced Stockham family + forced `GlobalOnlyR4` tail.
+     * This is the production direction PR 1 made possible — extending the
+     * global R4 chain through the tail. Compare per-stage timings against
+     * `crossoverStockhamLocalTail` to validate the heuristic threshold.
+     */
+    @Test
+    fun crossoverStockhamGlobalTail() {
+        runCrossoverBenchmark(
+            FamilyChoice.Stockham,
+            tagPrefix = "CROSSOVER_STOCKHAM_GLOBAL_TAIL",
+            tail = TailChoice.Global,
+        )
+    }
+
+    private fun runCrossoverBenchmark(
+        family: FamilyChoice,
+        tagPrefix: String,
+        tail: TailChoice = TailChoice.Auto,
+    ) {
+        val requestJson = HarnessJson.crossoverBenchmarkRequestJson(family, tail)
         val responseJson = ZkgpuBridge.runRequestJson(requestJson)
         val file = HarnessStorage.writeLatestReport(context, responseJson)
-        Log.i(TAG, "$tagPrefix path=${file.absolutePath} family_override=${family.name}")
+        Log.i(
+            TAG,
+            "$tagPrefix path=${file.absolutePath} " +
+                "family_override=${family.name} tail_override=${tail.name}",
+        )
 
         val response = JSONObject(responseJson)
         assertTrue(response.optString("error"), response.optBoolean("ok", false))
@@ -118,10 +155,19 @@ class ZkgpuInstrumentedTest {
         assertEquals(0, summary.getInt("failed_cases"))
         assertTrue("expected 10 crossover cases", summary.getInt("total_cases") == 10)
 
-        // Suite-level kernel metadata (field + ntt_variant).
+        // Suite-level kernel metadata (field + ntt_variant + tail summary).
         val kernel = report.optJSONObject("kernel")
         val ntt_variant = kernel?.optString("ntt_variant").orEmpty()
-        Log.i(TAG, "$tagPrefix kernel.ntt_variant=$ntt_variant")
+        // Suite-level tail summary: one of "LocalFusedR4", "GlobalOnlyR4",
+        // "mixed", or omitted. Emitting it here means a single grep over
+        // logcat tells you which tail strategy a forced run actually
+        // exercised, without parsing per-case JSON.
+        val tailVariant = kernel?.optStringOrNull("stockham_tail_strategy")
+        Log.i(
+            TAG,
+            "$tagPrefix kernel.ntt_variant=$ntt_variant " +
+                "kernel.stockham_tail_strategy=${tailVariant ?: "none"}",
+        )
 
         // Device metadata — emitted once per run so artifacts capture the
         // adapter limits that drive kernel-tuning decisions (shared-memory
@@ -143,12 +189,24 @@ class ZkgpuInstrumentedTest {
             )
         }
 
-        // Per-case: actual kernel_family selected + per-stage GPU timings.
+        // Per-case: actual kernel_family selected + tail metadata + per-stage GPU timings.
         val cases = report.getJSONArray("cases")
         for (i in 0 until cases.length()) {
             val c = cases.getJSONObject(i)
             val name = c.optString("name")
             val kernelFamily = c.optString("kernel_family", "unknown")
+            // PR 1 tail observability: `stockham_tail_strategy`,
+            // `stockham_tail_reason`, and `tail_stride_bytes` are the
+            // three fields that tell you *which* Stockham tail ran and
+            // *why*. Logged on every case so the Xclipse / Mali / Browser
+            // A/B work doesn't have to re-parse JSON to attribute timing.
+            val tailStrategy = c.optStringOrNull("stockham_tail_strategy")
+            val tailReason = c.optStringOrNull("stockham_tail_reason")
+            val tailStrideBytes = if (c.has("tail_stride_bytes") && !c.isNull("tail_stride_bytes")) {
+                c.optLong("tail_stride_bytes", -1L)
+            } else {
+                -1L
+            }
             val timings = c.optJSONObject("timings")
             val wallNs = timings?.optLong("wall_time_ns", -1) ?: -1L
             val gpuNs = timings?.optLong("gpu_total_ns", -1) ?: -1L
@@ -156,7 +214,11 @@ class ZkgpuInstrumentedTest {
             val gpuMs = if (gpuNs > 0) gpuNs / 1_000_000.0 else -1.0
             Log.i(
                 TAG,
-                "$tagPrefix $name: family=$kernelFamily wall=${"%.2f".format(wallMs)}ms gpu=${"%.2f".format(gpuMs)}ms",
+                "$tagPrefix $name: family=$kernelFamily " +
+                    "tail=${tailStrategy ?: "none"} " +
+                    "reason=${tailReason ?: "none"} " +
+                    "stride_bytes=${if (tailStrideBytes >= 0) tailStrideBytes.toString() else "none"} " +
+                    "wall=${"%.2f".format(wallMs)}ms gpu=${"%.2f".format(gpuMs)}ms",
             )
 
             // Emit per-stage GPU timings (label + duration_ns) so the
@@ -189,4 +251,16 @@ class ZkgpuInstrumentedTest {
     companion object {
         private const val TAG = "ZkgpuHarnessTest"
     }
+}
+
+/**
+ * Read a string field that may be missing or JSON null, returning `null`
+ * in either case. `JSONObject.optString(key)` returns the literal string
+ * `"null"` for JSON-null values, which would silently misreport a missing
+ * `stockham_tail_strategy` as the string `"null"` in logcat.
+ */
+private fun JSONObject.optStringOrNull(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    val value = optString(key)
+    return value.takeIf { it.isNotBlank() }
 }

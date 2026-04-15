@@ -66,12 +66,15 @@ class MainActivity : Activity() {
             "four-step", "fourstep", "four_step" -> FamilyChoice.FourStep
             else -> FamilyChoice.Auto
         }
+        // PR 1 tail override surfaced via intent so a forced A/B can be
+        // launched from `adb shell am start -e tail local|global`.
+        val tail = TailChoice.fromIntent(intent.getStringExtra("tail"))
 
         when (action.lowercase()) {
-            "smoke" -> runSuiteWithFamily(PresetSuite.Smoke, family)
-            "validation" -> runSuiteWithFamily(PresetSuite.Validation, family)
-            "benchmark" -> runSuiteWithFamily(PresetSuite.Benchmark, family)
-            "crossover" -> runCrossoverWithFamily(family)
+            "smoke" -> runSuiteWithFamily(PresetSuite.Smoke, family, tail)
+            "validation" -> runSuiteWithFamily(PresetSuite.Validation, family, tail)
+            "benchmark" -> runSuiteWithFamily(PresetSuite.Benchmark, family, tail)
+            "crossover" -> runCrossoverWithFamily(family, tail)
         }
     }
 
@@ -147,13 +150,18 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun runSuiteWithFamily(suite: PresetSuite, family: FamilyChoice) {
+    private fun runSuiteWithFamily(
+        suite: PresetSuite,
+        family: FamilyChoice,
+        tail: TailChoice = TailChoice.Auto,
+    ) {
         val familyLabel = if (family == FamilyChoice.Auto) "" else " [${family.wireValue}]"
+        val tailLabel = if (tail == TailChoice.Auto) "" else " tail=${tail.wireValue}"
         setButtonsEnabled(false)
-        statusText.text = "Running ${suite.wireName}$familyLabel suite (intent)..."
+        statusText.text = "Running ${suite.wireName}$familyLabel$tailLabel suite (intent)..."
         worker.execute {
             val responseJson = try {
-                ZkgpuBridge.runRequestJson(HarnessJson.presetRequestJson(suite, family))
+                ZkgpuBridge.runRequestJson(HarnessJson.presetRequestJson(suite, family, tail))
             } catch (t: Throwable) {
                 HarnessJson.syntheticErrorJson(
                     "JNI bridge failure: ${t.message ?: t::class.java.simpleName}"
@@ -161,7 +169,7 @@ class MainActivity : Activity() {
             }
             val summary = HarnessJson.parseSummary(responseJson)
             val reportFile = HarnessStorage.writeLatestReport(this, responseJson)
-            logResult("${suite.wireName}$familyLabel", summary, reportFile)
+            logResult("${suite.wireName}$familyLabel$tailLabel", summary, reportFile)
             runOnUiThread {
                 statusText.text = HarnessJson.summaryLine(summary)
                 outputPathText.text = getString(R.string.output_path_value, reportFile.absolutePath)
@@ -171,13 +179,14 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun runCrossoverWithFamily(family: FamilyChoice) {
+    private fun runCrossoverWithFamily(family: FamilyChoice, tail: TailChoice = TailChoice.Auto) {
         val familyLabel = if (family == FamilyChoice.Auto) "auto" else family.wireValue ?: "auto"
+        val tailLabel = if (tail == TailChoice.Auto) "" else " tail=${tail.wireValue}"
         setButtonsEnabled(false)
-        statusText.text = "Running crossover benchmark [$familyLabel] (intent)..."
+        statusText.text = "Running crossover benchmark [$familyLabel]$tailLabel (intent)..."
         worker.execute {
             val responseJson = try {
-                ZkgpuBridge.runRequestJson(HarnessJson.crossoverBenchmarkRequestJson(family))
+                ZkgpuBridge.runRequestJson(HarnessJson.crossoverBenchmarkRequestJson(family, tail))
             } catch (t: Throwable) {
                 HarnessJson.syntheticErrorJson(
                     "JNI bridge failure: ${t.message ?: t::class.java.simpleName}"
@@ -185,7 +194,7 @@ class MainActivity : Activity() {
             }
             val summary = HarnessJson.parseSummary(responseJson)
             val reportFile = HarnessStorage.writeLatestReport(this, responseJson)
-            logResult("crossover[$familyLabel]", summary, reportFile)
+            logResult("crossover[$familyLabel]$tailLabel", summary, reportFile)
             runOnUiThread {
                 statusText.text = HarnessJson.summaryLine(summary)
                 outputPathText.text = getString(R.string.output_path_value, reportFile.absolutePath)

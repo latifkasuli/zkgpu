@@ -82,6 +82,9 @@ impl StockhamPlan {
                     let stage_h = r4_count * 2 + r2_idx;
                     format!("r2 stage {stage_h}")
                 } else if i < ntt_dispatches {
+                    // Only reached when the tail strategy is LocalFusedR4.
+                    // GlobalOnlyR4 fuses the tail into the global R4 chain
+                    // above, so its dispatches keep the "r4 stages X+Y" label.
                     "local fused".to_string()
                 } else {
                     "inverse scale".to_string()
@@ -173,6 +176,9 @@ impl StockhamPlan {
                     let stage_h = r4_count * 2 + r2_idx;
                     format!("r2 stage {stage_h}")
                 } else if i < ntt_dispatches {
+                    // Only reached when the tail strategy is LocalFusedR4.
+                    // GlobalOnlyR4 fuses the tail into the global R4 chain
+                    // above, so its dispatches keep the "r4 stages X+Y" label.
                     "local fused".to_string()
                 } else {
                     "inverse scale".to_string()

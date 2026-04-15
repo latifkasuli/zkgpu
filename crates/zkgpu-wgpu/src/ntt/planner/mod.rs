@@ -2,6 +2,7 @@ mod constants;
 mod four_step_config;
 mod policy;
 mod stockham_config;
+mod tail_policy;
 #[cfg(test)]
 mod tests;
 
@@ -9,6 +10,7 @@ pub(crate) use constants::{BLOCK_SIZE, LOG_BLOCK, MAX_BABYBEAR_LOG_N, WORKGROUP_
 pub use policy::PlannerPolicy;
 pub(crate) use four_step_config::FourStepPlanConfig;
 pub(crate) use stockham_config::StockhamPlanConfig;
+pub(crate) use tail_policy::{choose_stockham_tail, StockhamTailOverride};
 
 
 use constants::MAX_LOG_N;
@@ -39,5 +41,6 @@ pub(crate) fn plan_ntt(log_n: u32, policy: &PlannerPolicy) -> Result<PlannedNtt,
         }
     }
 
-    Ok(PlannedNtt::Stockham(StockhamPlanConfig::new(log_n)?))
+    let tail = choose_stockham_tail(log_n, policy.tail_caps_hint, policy.stockham_tail_override);
+    Ok(PlannedNtt::Stockham(StockhamPlanConfig::new(log_n, tail)?))
 }

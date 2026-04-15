@@ -11,9 +11,48 @@ use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 
 pub use planner::PlannerPolicy;
-use planner::{plan_ntt, PlannedNtt, MAX_BABYBEAR_LOG_N};
+use planner::{plan_ntt, PlannedNtt, StockhamTailOverride as PlannerTailOverride, MAX_BABYBEAR_LOG_N};
 
 pub use stockham::NttTimings;
+
+/// Public mirror of the planner's tail override, re-exported for callers
+/// that construct `PlannerPolicy` directly (testkit, web, ffi runners).
+///
+/// Kept distinct from `zkgpu_report::StockhamTailOverride` so the runner
+/// crates don't have to depend on `zkgpu-report` just to set this knob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StockhamTailOverride {
+    Auto,
+    Local,
+    Global,
+}
+
+impl Default for StockhamTailOverride {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl StockhamTailOverride {
+    fn into_planner(self) -> PlannerTailOverride {
+        match self {
+            Self::Auto => PlannerTailOverride::Auto,
+            Self::Local => PlannerTailOverride::Local,
+            Self::Global => PlannerTailOverride::Global,
+        }
+    }
+}
+
+impl PlannerPolicy {
+    /// Apply a public `StockhamTailOverride` to this policy.
+    ///
+    /// Convenience wrapper so runners don't have to import the planner-internal
+    /// override type. `Auto` resolves the env var `ZKGPU_STOCKHAM_TAIL`; an
+    /// explicit `Local`/`Global` always wins.
+    pub fn with_public_tail_override(self, ov: StockhamTailOverride) -> Self {
+        self.with_stockham_tail_override_resolved(ov.into_planner())
+    }
+}
 
 /// GPU NTT execution plan for BabyBear fields.
 ///
@@ -54,7 +93,11 @@ impl WgpuNttPlan {
         log_n: u32,
         direction: NttDirection,
     ) -> Result<Self, ZkGpuError> {
-        let policy = PlannerPolicy::from_caps(device.caps());
+        // The convenience constructor honours the `ZKGPU_STOCKHAM_TAIL` env
+        // var. `new_with_policy` does not — callers passing an explicit
+        // policy are presumed to have already resolved their override.
+        let policy = PlannerPolicy::from_caps(device.caps())
+            .with_public_tail_override(StockhamTailOverride::Auto);
         Self::new_with_policy(device, log_n, direction, &policy)
     }
 
@@ -196,6 +239,34 @@ impl WgpuNttPlan {
         match &self.inner {
             PlanImpl::Stockham(_) => "stockham",
             PlanImpl::FourStep(_) => "four-step",
+        }
+    }
+
+    /// Tail strategy chosen for this Stockham plan, e.g. `"LocalFusedR4"` or
+    /// `"GlobalOnlyR4"`. Returns `None` for Four-Step plans and for Stockham
+    /// plans below `LOG_BLOCK` where there is no tail phase.
+    pub fn stockham_tail_strategy(&self) -> Option<&'static str> {
+        match &self.inner {
+            PlanImpl::Stockham(p) => p.tail_strategy_label(),
+            PlanImpl::FourStep(_) => None,
+        }
+    }
+
+    /// Reason that tail strategy was chosen — heuristic name or forced override.
+    pub fn stockham_tail_reason(&self) -> Option<&'static str> {
+        match &self.inner {
+            PlanImpl::Stockham(p) => p.tail_reason_label(),
+            PlanImpl::FourStep(_) => None,
+        }
+    }
+
+    /// Per-thread gather stride in bytes for the local-fused tail.
+    /// `None` for Four-Step, for `GlobalOnlyR4` tails, and for plans
+    /// without a tail phase.
+    pub fn tail_stride_bytes(&self) -> Option<u64> {
+        match &self.inner {
+            PlanImpl::Stockham(p) => p.tail_stride_bytes(),
+            PlanImpl::FourStep(_) => None,
         }
     }
 }
