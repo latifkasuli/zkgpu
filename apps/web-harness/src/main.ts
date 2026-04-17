@@ -42,6 +42,12 @@ const worker = new Worker(new URL("./worker.ts", import.meta.url), {
   type: "module",
 });
 
+// Expose on window so Playwright (G.0.2 tail-A/B test suite) can post
+// arbitrary HarnessRequest payloads that aren't in the UI's preset list
+// — notably `stockham_tail_override: Local|Global` for forced-A/B.
+// Harmless for production users; scoped to the browser harness.
+(globalThis as unknown as { __zkgpuWorker: Worker }).__zkgpuWorker = worker;
+
 worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
   handleWorkerMessage(event.data);
 };
