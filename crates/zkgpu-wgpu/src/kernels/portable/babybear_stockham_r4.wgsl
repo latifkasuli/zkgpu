@@ -29,7 +29,9 @@ struct R4Params {
     twiddle_offset: u32,
     omega4: u32,
     omega4_prime: u32,
-    _pad0: u32,
+    // NVIDIA scale-up Tier 1 Fix 2 (2026-04-16): 2D-folded dispatch.
+    // See babybear_stockham_r2.wgsl for the full rationale.
+    groups_per_row: u32,
     _pad1: u32,
 }
 
@@ -76,7 +78,8 @@ fn mod_sub(a: u32, b: u32) -> u32 {
 
 @compute @workgroup_size(256)
 fn stockham_r4_butterfly(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let tid = gid.x;
+    // 2D-folded dispatch index (see struct comment).
+    let tid = gid.x + gid.y * params.groups_per_row * 256u;
     let s = params.s;
     let m4 = params.m4;
 

@@ -7,6 +7,21 @@
 //
 // In-place: reads and writes the same storage buffer.
 // Each thread processes 4 consecutive elements for better ILP.
+//
+// NVIDIA scale-up Tier 2A Option A (2026-04-16): the companion
+// `twiddle_table_prime` buffer was dropped from this pass. Shoup's
+// Barrett reduction (`mod_mul_shoup`) saves a few cycles per call but
+// required a parallel `w_prime` buffer the same size as `twiddle_table`.
+// At log 22 the combined 32 MiB twiddle working set was the second-
+// biggest contributor to the RTX 4090 L2 partial-fit cache-thrashing
+// cliff (see `research/benchmarks/nvidia-scale-up-2026-04-16/tier-2a-
+// log22-cliff-investigation.md`). Using the 10-iteration `mod_mul`
+// reducer here costs ~60 µs of compute at log 22 but saves ~450 µs
+// of twiddle-buffer memory traffic — net ~390 µs win, plus knock-on
+// effects from shrinking the working set back under L2 capacity.
+// Leaf kernels keep Shoup's optimization because their twiddle
+// buffers are O(√N), cache-friendly, and don't participate in the
+// cliff.
 
 const P: u32 = 2013265921u;
 const WORKGROUP_SIZE_X: u32 = 256u;
@@ -23,35 +38,6 @@ struct TwiddleParams {
 }
 
 @group(0) @binding(2) var<uniform> params: TwiddleParams;
-@group(0) @binding(3) var<storage, read> twiddle_table_prime: array<u32>;
-
-fn mulhi(a: u32, b: u32) -> u32 {
-    let a_lo = a & 0xFFFFu;
-    let a_hi = a >> 16u;
-    let b_lo = b & 0xFFFFu;
-    let b_hi = b >> 16u;
-
-    let ll = a_lo * b_lo;
-    let lh = a_lo * b_hi;
-    let hl = a_hi * b_lo;
-    let hh = a_hi * b_hi;
-
-    let mid = lh + hl;
-    let mid_carry = select(0u, 1u, mid < lh);
-
-    let mid_lo_shifted = mid << 16u;
-    let lo_sum = ll + mid_lo_shifted;
-    let lo_carry = select(0u, 1u, lo_sum < ll);
-
-    return hh + (mid >> 16u) + (mid_carry << 16u) + lo_carry;
-}
-
-fn mod_mul_shoup(a: u32, w: u32, w_prime: u32) -> u32 {
-    let q = mulhi(a, w_prime);
-    var r = a * w - q * P;
-    if r >= P { r -= P; }
-    return r;
-}
 
 fn mod_mul(a: u32, b: u32) -> u32 {
     let a_lo = a & 0xFFFFu;
@@ -109,25 +95,21 @@ fn fourstep_twiddle(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let d0 = data[base];
     let t0 = twiddle_table[base];
-    let tp0 = twiddle_table_prime[base];
-    data[base] = mod_mul_shoup(d0, t0, tp0);
+    data[base] = mod_mul(d0, t0);
 
     if base + 1u < total {
         let d1 = data[base + 1u];
         let t1 = twiddle_table[base + 1u];
-        let tp1 = twiddle_table_prime[base + 1u];
-        data[base + 1u] = mod_mul_shoup(d1, t1, tp1);
+        data[base + 1u] = mod_mul(d1, t1);
     }
     if base + 2u < total {
         let d2 = data[base + 2u];
         let t2 = twiddle_table[base + 2u];
-        let tp2 = twiddle_table_prime[base + 2u];
-        data[base + 2u] = mod_mul_shoup(d2, t2, tp2);
+        data[base + 2u] = mod_mul(d2, t2);
     }
     if base + 3u < total {
         let d3 = data[base + 3u];
         let t3 = twiddle_table[base + 3u];
-        let tp3 = twiddle_table_prime[base + 3u];
-        data[base + 3u] = mod_mul_shoup(d3, t3, tp3);
+        data[base + 3u] = mod_mul(d3, t3);
     }
 }

@@ -99,6 +99,83 @@ pub(crate) fn precompute_stockham_r4_twiddles(
     (twiddles, twiddles_prime, omega4_repr, omega4_prime)
 }
 
+/// Twiddles for radix-8 global DIF Stockham stages (NVIDIA scale-up T3.A, 2026-04-17).
+///
+/// Each R8 stage combines three logical Stockham stages (h, h+1, h+2).
+/// For butterfly position p, stores 7 outer twiddle factors
+/// (w^1, w^2, w^3, w^4, w^5, w^6, w^7) where w = omega_N^(s*p), as 7
+/// consecutive values so the shader can apply `mod_mul_shoup` to each
+/// of outputs 1..7. Output 0 is untwiddled (w^0 = 1).
+///
+/// Also computes and returns the inner R8 constants: omega_8 = omega_N^(N/8)
+/// (primitive 8th root), omega_4 = omega_N^(N/4), and omega_8_cubed
+/// (= omega_8 * omega_4), each with its Shoup quotient. These are passed
+/// as uniform constants to the shader.
+///
+/// Returns `(twiddles, twiddles_prime, omega8, omega8_prime, omega4,
+///           omega4_prime, omega8_cubed, omega8_cubed_prime)`.
+#[allow(clippy::type_complexity)]
+pub(crate) fn precompute_stockham_r8_twiddles(
+    log_n: u32,
+    direction: NttDirection,
+    r8_stages: &[(u32, u32)], // (h, m8) pairs for each R8 dispatch
+) -> (Vec<u32>, Vec<u32>, u32, u32, u32, u32, u32, u32) {
+    let omega = BabyBear::root_of_unity(log_n);
+    let omega = match direction {
+        NttDirection::Forward => omega,
+        NttDirection::Inverse => omega.inv().expect("root of unity must be invertible"),
+    };
+
+    let n = 1u32 << log_n;
+    let omega8 = omega.pow((n / 8) as u64);
+    let omega4 = omega.pow((n / 4) as u64);
+    let omega8_cubed = omega8 * omega4; // omega8^3 = omega8 * omega8^2 = omega8 * omega4
+
+    let omega8_repr = omega8.to_repr();
+    let omega8_prime = shoup_quotient(omega8_repr);
+    let omega4_repr = omega4.to_repr();
+    let omega4_prime = shoup_quotient(omega4_repr);
+    let omega8_cubed_repr = omega8_cubed.to_repr();
+    let omega8_cubed_prime = shoup_quotient(omega8_cubed_repr);
+
+    let mut twiddles = Vec::new();
+    let mut twiddles_prime = Vec::new();
+
+    for &(h, m8) in r8_stages {
+        let s = 1u32 << h;
+        let step = omega.pow(s as u64);
+
+        // For each butterfly position p, emit w^1..w^7.
+        let mut w1 = BabyBear::ONE;
+        for _p in 0..m8 {
+            // w_k = w^k = (omega_N^(s*p))^k for k=1..7
+            let w2 = w1 * w1;
+            let w3 = w2 * w1;
+            let w4 = w3 * w1;
+            let w5 = w4 * w1;
+            let w6 = w5 * w1;
+            let w7 = w6 * w1;
+            for w in [w1, w2, w3, w4, w5, w6, w7] {
+                let r = w.to_repr();
+                twiddles.push(r);
+                twiddles_prime.push(shoup_quotient(r));
+            }
+            w1 = w1 * step; // advance to next p: ω^(s*(p+1)) = ω^(s*p) * ω^s
+        }
+    }
+
+    (
+        twiddles,
+        twiddles_prime,
+        omega8_repr,
+        omega8_prime,
+        omega4_repr,
+        omega4_prime,
+        omega8_cubed_repr,
+        omega8_cubed_prime,
+    )
+}
+
 /// Twiddles for the workgroup-local kernel: a BLOCK_SIZE-point DIF Stockham.
 ///
 /// Independent of N — the local sub-problems always use the BLOCK_SIZE-th
@@ -213,6 +290,22 @@ pub(crate) fn precompute_single_r2_twiddles(
 /// Stored in C×R layout (the data layout after the initial transpose):
 /// table[c * rows + k_r] = omega_N^(k_r * c).
 ///
+/// NVIDIA scale-up Tier 2B Option A (2026-04-16): on the inverse
+/// direction the table is pre-multiplied by `1/N` so that Phase 3's
+/// diagonal-multiply pass ALSO applies the inverse-NTT normalization
+/// `*= 1/N`. This makes Phase 7 (the separate scale-by-1/N dispatch)
+/// unnecessary. Mathematically sound because:
+/// 1. Phase 7 is `data[i] *= 1/N` for all i.
+/// 2. Phase 3 is `data[i] *= twiddle[i]` for all i.
+/// 3. Storing `twiddle[i] * (1/N)` makes Phase 3 produce
+///    `data[i] * twiddle[i] * (1/N)` — the exact composed result.
+/// 4. Phases 4–6 (transpose, leaf NTT, transpose) are linear, so the
+///    `1/N` factor propagates unchanged through.
+/// At log 22 on RTX 4090 this eliminates ~193 µs of per-inverse-call
+/// dispatch. Works on all backends — no kernel, shader, or binding
+/// change required. See:
+/// `research/benchmarks/nvidia-scale-up-2026-04-16/tier-2b-inverse-pathology-hypothesis.md`.
+///
 /// Returns `(twiddles, twiddles_prime)`.
 pub(crate) fn precompute_fourstep_twiddles(
     config: &FourStepPlanConfig,
@@ -224,6 +317,16 @@ pub(crate) fn precompute_fourstep_twiddles(
         NttDirection::Inverse => omega.inv().expect("root of unity must be invertible"),
     };
 
+    // For inverse NTT, fold the `1/N` normalization into the diagonal
+    // twiddle so Phase 7 (separate scale pass) can be skipped. For
+    // forward NTT, use the identity — no normalization required.
+    let normalize = match direction {
+        NttDirection::Forward => BabyBear::ONE,
+        NttDirection::Inverse => BabyBear::new(config.n)
+            .inv()
+            .expect("N must be invertible in BabyBear"),
+    };
+
     let rows = config.rows;
     let cols = config.cols;
     let cap = (rows * cols) as usize;
@@ -232,7 +335,7 @@ pub(crate) fn precompute_fourstep_twiddles(
 
     for c in 0..cols {
         let omega_c = omega.pow(c as u64);
-        let mut w = BabyBear::ONE;
+        let mut w = normalize;
         for _k_r in 0..rows {
             let repr = w.to_repr();
             table.push(repr);

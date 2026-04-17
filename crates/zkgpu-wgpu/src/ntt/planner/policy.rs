@@ -139,8 +139,11 @@ impl PlannerPolicy {
     ///   S24 Ultra (Adreno 750): four-step wins 2^18–2^21. Real 32 KB
     ///   GMEM scratchpad makes transpose viable.
     /// - `Adreno` off Android (Snapdragon X Elite): default threshold.
-    /// - `Nvidia`: four-step at `log_n >= 24`. 48–100 KB shared memory
-    ///   per SM; dispatch overhead penalises four-step's extra passes.
+    /// - `Nvidia`: four-step at `log_n >= 21`. 48–100 KB shared memory
+    ///   per SM; dispatch overhead penalises four-step's extra passes at
+    ///   small N. Threshold dropped from 24 to 21 in the NVIDIA scale-up
+    ///   Tier 1 work (2026-04-16) after G.0.4 ICICLE A/B on RTX 4090
+    ///   showed zkgpu Four-Step beats ICICLE-Radix-2 at log 21.
     /// - `Amd`: four-step at `log_n >= 22`. 128 KB LDS per WGP.
     /// - `Intel`: four-step at `log_n >= 22`. Up to 128 KB SLM per Xe-core.
     /// - `PowerVrRogue` (old GE/GM/GX): blocked by `is_gpu_usable()` —
@@ -200,7 +203,21 @@ impl PlannerPolicy {
             }
 
             // Nvidia: large shared mem (48–100 KB), high dispatch cost.
-            GpuFamily::Nvidia => Self::with_four_step_threshold(24),
+            //
+            // NVIDIA scale-up Tier 1 (2026-04-16, from G.0.4 ICICLE A/B on
+            // RTX 4090 at `research/benchmarks/foundation-audit-2026-04-15/
+            // g04-icicle-comparison/rtx4090_vastai/README.md`): the old
+            // log_n >= 24 threshold was pathological. At log 21, zkgpu
+            // Four-Step *beats* ICICLE Radix-2 (0.75×); at log 22 forward
+            // it's still within 3.35× of ICICLE-Radix-2 on its own family.
+            // Staying Stockham through log 23 surrendered the 17–21×
+            // DEFAULT gap the G.0.4 doc credits as the single biggest
+            // pathological default-pick regression. Drop the threshold
+            // to 21 — the lowest log_n where Four-Step wins on measured
+            // hardware. Projected geomean: DEFAULT 21.0× → ORACLE 10.5×
+            // per `research/benchmarks/foundation-audit-2026-04-15/
+            // nvidia-scale-up-roadmap.md` Tier 1 table.
+            GpuFamily::Nvidia => Self::with_four_step_threshold(21),
 
             // AMD: 128 KB LDS per WGP.
             GpuFamily::Amd => Self::with_four_step_threshold(22),

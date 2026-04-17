@@ -54,6 +54,16 @@ pub(crate) struct StockhamPlan {
     pub(super) scale_param_buffer: Option<wgpu::Buffer>,
     pub(super) scale_dispatch: LinearDispatch,
 
+    // NVIDIA scale-up Tier 1 Fix 2 (2026-04-16): 2D-folded dispatch
+    // grids for the three Stockham dispatch sites. All three compute
+    // the same-sized workgroup grid because Stockham stages all cover
+    // `n/2` butterflies for R2, `n/4` for R4, and `n/BLOCK_SIZE`
+    // local workgroups. Using 2D grids lets log_n ≥ 25 workloads
+    // dispatch without exceeding the wgpu per-dimension limit.
+    pub(super) r2_dispatch: LinearDispatch,
+    pub(super) r4_dispatch: LinearDispatch,
+    pub(super) local_dispatch: LinearDispatch,
+
     pub(super) config: StockhamPlanConfig,
 }
 

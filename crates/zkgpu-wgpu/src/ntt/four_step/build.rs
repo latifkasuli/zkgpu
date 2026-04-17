@@ -1,24 +1,28 @@
 use wgpu::util::DeviceExt;
-use zkgpu_babybear::BabyBear;
-use zkgpu_core::{GpuField, NttDirection, ZkGpuError};
+use zkgpu_core::{NttDirection, ZkGpuError};
 
 use crate::device::WgpuDevice;
 use crate::dispatch::plan_linear_dispatch;
 
 use super::{FourStepPlan, TransposeVariant};
-use super::params::{build_batched_r2_stage_params, build_batched_r4_stage_params};
+use super::params::{
+    build_batched_r2_stage_params, build_batched_r4_stage_params,
+    build_batched_r8_stage_params,
+};
 
 use super::super::common::{bgl_storage_entry, bgl_uniform_entry};
 use super::super::planner::{FourStepPlanConfig, WORKGROUP_SIZE};
 use super::super::twiddles::{
     precompute_fourstep_twiddles, precompute_single_r2_twiddles,
-    precompute_stockham_r4_twiddles,
+    precompute_stockham_r4_twiddles, precompute_stockham_r8_twiddles,
 };
 
 const FOURSTEP_LEAF_R2_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_fourstep_leaf_r2.wgsl");
 const FOURSTEP_LEAF_R4_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_fourstep_leaf_r4.wgsl");
+const FOURSTEP_LEAF_R8_SOURCE: &str =
+    include_str!("../../kernels/portable/babybear_fourstep_leaf_r8.wgsl");
 const FOURSTEP_TWIDDLE_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_fourstep_twiddle.wgsl");
 const FOURSTEP_TRANSPOSE_SOURCE_TILE16: &str =
@@ -96,7 +100,36 @@ impl FourStepPlan {
             device.pipeline_cache.as_ref(),
         );
 
+        // NVIDIA scale-up Tier 3 Option A (T3.A, 2026-04-17): R8 leaf
+        // pipeline. Shares the leaf BGL because the R8 kernel uses the
+        // same 5 bindings (src, dst, twiddles, params, twiddles_prime) as
+        // the R4 kernel. R8 stages consume 3 logical Stockham stages per
+        // dispatch, halving memory round-trips vs R4's 2 stages/dispatch.
+        let leaf_r8_module = reg.get_or_create_module(
+            &device.device,
+            FOURSTEP_LEAF_R8_SOURCE,
+            "Four-step batched R8 leaf shader",
+        );
+        let leaf_r8_pipeline = reg.get_or_create_pipeline(
+            &device.device,
+            FOURSTEP_LEAF_R8_SOURCE,
+            "batched_stockham_r8_butterfly",
+            LEAF_BGL_LABEL,
+            &leaf_pipeline_layout,
+            &leaf_r8_module,
+            device.pipeline_cache.as_ref(),
+        );
+
         // --- Twiddle multiply pipeline ---
+        //
+        // NVIDIA scale-up Tier 2A Option A (2026-04-16): dropped the
+        // binding-3 `twiddle_prime` storage buffer. The diagonal twiddle
+        // pass now uses `mod_mul` (10-iteration reducer) instead of
+        // `mod_mul_shoup`. Rationale: at log 22 the 16 MiB prime buffer
+        // was half of the twiddle working set that caused partial-fit L2
+        // cache-thrashing on RTX 4090. See
+        // `research/benchmarks/nvidia-scale-up-2026-04-16/tier-2a-
+        // log22-cliff-investigation.md` §Option A.
         let twiddle_bgl = reg.get_or_create_bgl(
             &device.device,
             TWIDDLE_BGL_LABEL,
@@ -104,7 +137,6 @@ impl FourStepPlan {
                 bgl_storage_entry(0, false),
                 bgl_storage_entry(1, true),
                 bgl_uniform_entry(2),
-                bgl_storage_entry(3, true), // twiddle_prime (read-only)
             ],
         );
 
@@ -214,45 +246,46 @@ impl FourStepPlan {
             WORKGROUP_SIZE,
             device.caps.max_compute_workgroups_per_dimension,
         )?;
-        let scale_param_buffer = if direction == NttDirection::Inverse {
-            let n_field = BabyBear::new(config.n);
-            let n_inv = n_field.inv().expect("n must be invertible in BabyBear");
-            let params = [
-                config.n,
-                n_inv.to_repr(),
-                scale_dispatch.groups_per_row,
-                0u32,
-            ];
-            Some(
-                device
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Four-step inverse scale params"),
-                        contents: bytemuck::cast_slice(&params),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    }),
-            )
-        } else {
-            None
-        };
+        // NVIDIA scale-up Tier 2B Option A (2026-04-16): the Phase-7
+        // scale-by-1/N pass is now unconditionally skipped because the
+        // `1/N` normalization is folded into the Phase-3 diagonal
+        // twiddle table by `precompute_fourstep_twiddles`. Saves
+        // ~193 µs per inverse call at log 22. `scale_param_buffer`
+        // is therefore always `None`; `encode.rs`'s Phase-7 block
+        // guards on `scale_param_buffer.is_some()` so Phase 7 simply
+        // doesn't fire. `scale_dispatch`, `scale_pipeline`, and
+        // `scale_bgl` are still plumbed through the struct so a
+        // future revert (e.g. for numerical-stability reasons) is
+        // a one-line change.
+        let scale_param_buffer: Option<wgpu::Buffer> = None;
+
+        // NVIDIA scale-up Tier 1 Fix 2b (2026-04-16): 2D-folded leaf
+        // dispatch grids. Phase 2 R4 + Phase 5 R4 each cover `n/4`
+        // butterflies; Phase 2 R2 + Phase 5 R2 each cover `n/2`.
+        // Constant across all stages within a phase, and across
+        // phases (Phase 2 and Phase 5 have the same dispatch shape).
+        let max_dim = device.caps.max_compute_workgroups_per_dimension;
+        // T3.A (2026-04-17): R8 leaf dispatches cover n/8 butterflies.
+        let leaf_r8_dispatch = plan_linear_dispatch(config.n / 8, WORKGROUP_SIZE, max_dim)?;
+        let leaf_r4_dispatch = plan_linear_dispatch(config.n / 4, WORKGROUP_SIZE, max_dim)?;
+        let leaf_r2_dispatch = plan_linear_dispatch(config.n / 2, WORKGROUP_SIZE, max_dim)?;
 
         // --- Precompute diagonal twiddle table in C×R layout ---
         // After Phase 1 transpose, data is C×R. Twiddle at position (c, k_r)
         // is omega_N^(k_r * c), stored at flat index c*R + k_r.
-        let (fourstep_twiddles, fourstep_twiddles_prime) =
+        // NVIDIA scale-up Tier 2A Option A (2026-04-16): we still call
+        // `precompute_fourstep_twiddles` for the `twiddle` buffer but
+        // drop the `fourstep_twiddles_prime` allocation. The shader no
+        // longer uses Shoup reduction for the diagonal twiddle pass;
+        // shrinking this buffer from 2 × 16 MiB → 16 MiB at log 22
+        // moves the working set back under RTX 4090 L2 capacity.
+        let (fourstep_twiddles, _fourstep_twiddles_prime) =
             precompute_fourstep_twiddles(&config, direction);
         let twiddle_buffer = device
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Four-step diagonal twiddles"),
                 contents: bytemuck::cast_slice(&fourstep_twiddles),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-        let twiddle_prime_buffer = device
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Four-step diagonal twiddles prime"),
-                contents: bytemuck::cast_slice(&fourstep_twiddles_prime),
                 usage: wgpu::BufferUsages::STORAGE,
             });
 
@@ -272,7 +305,62 @@ impl FourStepPlan {
                 });
 
         // --- Phase 2: R-point NTTs (col_leaf), C batches ---
-        // R4 twiddles
+        //
+        // T3.A (2026-04-17): R8 twiddles + stage params come first in the
+        // leaf chain (smallest `s`), then R4, then R2 residue. The chain's
+        // parity of dispatches determines src/dst ping-pong in encode.rs.
+        let (
+            phase2_r8_tw,
+            phase2_r8_tw_prime,
+            phase2_omega8,
+            phase2_omega8_prime,
+            phase2_omega4_from_r8,
+            phase2_omega4_prime_from_r8,
+            phase2_omega8_cubed,
+            phase2_omega8_cubed_prime,
+        ) = precompute_stockham_r8_twiddles(
+            config.row_log_n,
+            direction,
+            &config.col_leaf.r8_twiddle_spec,
+        );
+        let phase2_r8_twiddle_buffer =
+            device
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Four-step phase2 R8 twiddles"),
+                    contents: bytemuck::cast_slice(if phase2_r8_tw.is_empty() {
+                        &[0u32]
+                    } else {
+                        &phase2_r8_tw
+                    }),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+        let phase2_r8_twiddle_prime_buffer =
+            device
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Four-step phase2 R8 twiddles prime"),
+                    contents: bytemuck::cast_slice(if phase2_r8_tw_prime.is_empty() {
+                        &[0u32]
+                    } else {
+                        &phase2_r8_tw_prime
+                    }),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+        let phase2_r8_stage_param_buffers = build_batched_r8_stage_params(
+            &device.device,
+            &config.col_leaf,
+            config.cols,
+            phase2_omega8,
+            phase2_omega8_prime,
+            phase2_omega4_from_r8,
+            phase2_omega4_prime_from_r8,
+            phase2_omega8_cubed,
+            phase2_omega8_cubed_prime,
+            leaf_r8_dispatch.groups_per_row,
+        );
+
+        // R4 twiddles (after R8 in the leaf stage chain)
         let (phase2_r4_tw, phase2_r4_tw_prime, phase2_omega4, phase2_omega4_prime) =
             precompute_stockham_r4_twiddles(
                 config.row_log_n,
@@ -309,12 +397,15 @@ impl FourStepPlan {
             config.cols,
             phase2_omega4,
             phase2_omega4_prime,
+            leaf_r4_dispatch.groups_per_row,
         );
 
-        // R2 remainder twiddles
+        // R2 remainder twiddles — T3.A (2026-04-17): the R2 residue stage now
+        // starts after the R8 stages plus the R4 stages. Recover `h` from the
+        // R2 stage's `s` (= 2^h) stored in global_stage_params.
         let (phase2_r2_tw, phase2_r2_tw_prime) =
-            if !config.col_leaf.global_stage_params.is_empty() {
-                let h = config.col_leaf.r4_stage_params.len() as u32 * 2;
+            if let Some(sp) = config.col_leaf.global_stage_params.first() {
+                let h = sp.s.trailing_zeros();
                 precompute_single_r2_twiddles(config.row_log_n, direction, h)
             } else {
                 (Vec::new(), Vec::new())
@@ -343,11 +434,68 @@ impl FourStepPlan {
                     }),
                     usage: wgpu::BufferUsages::STORAGE,
                 });
-        let phase2_r2_stage_param_buffers =
-            build_batched_r2_stage_params(&device.device, &config.col_leaf, config.cols);
+        let phase2_r2_stage_param_buffers = build_batched_r2_stage_params(
+            &device.device,
+            &config.col_leaf,
+            config.cols,
+            leaf_r2_dispatch.groups_per_row,
+        );
 
         // --- Phase 5: C-point NTTs (row_leaf), R batches ---
-        // R4 twiddles
+        //
+        // T3.A (2026-04-17): R8 + R4 + R2 leaf chain, same pattern as Phase 2.
+        let (
+            phase5_r8_tw,
+            phase5_r8_tw_prime,
+            phase5_omega8,
+            phase5_omega8_prime,
+            phase5_omega4_from_r8,
+            phase5_omega4_prime_from_r8,
+            phase5_omega8_cubed,
+            phase5_omega8_cubed_prime,
+        ) = precompute_stockham_r8_twiddles(
+            config.col_log_n,
+            direction,
+            &config.row_leaf.r8_twiddle_spec,
+        );
+        let phase5_r8_twiddle_buffer =
+            device
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Four-step phase5 R8 twiddles"),
+                    contents: bytemuck::cast_slice(if phase5_r8_tw.is_empty() {
+                        &[0u32]
+                    } else {
+                        &phase5_r8_tw
+                    }),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+        let phase5_r8_twiddle_prime_buffer =
+            device
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Four-step phase5 R8 twiddles prime"),
+                    contents: bytemuck::cast_slice(if phase5_r8_tw_prime.is_empty() {
+                        &[0u32]
+                    } else {
+                        &phase5_r8_tw_prime
+                    }),
+                    usage: wgpu::BufferUsages::STORAGE,
+                });
+        let phase5_r8_stage_param_buffers = build_batched_r8_stage_params(
+            &device.device,
+            &config.row_leaf,
+            config.rows,
+            phase5_omega8,
+            phase5_omega8_prime,
+            phase5_omega4_from_r8,
+            phase5_omega4_prime_from_r8,
+            phase5_omega8_cubed,
+            phase5_omega8_cubed_prime,
+            leaf_r8_dispatch.groups_per_row,
+        );
+
+        // R4 twiddles (after R8 in the leaf stage chain)
         let (phase5_r4_tw, phase5_r4_tw_prime, phase5_omega4, phase5_omega4_prime) =
             precompute_stockham_r4_twiddles(
                 config.col_log_n,
@@ -384,12 +532,15 @@ impl FourStepPlan {
             config.rows,
             phase5_omega4,
             phase5_omega4_prime,
+            leaf_r4_dispatch.groups_per_row,
         );
 
-        // R2 remainder twiddles
+        // R2 remainder twiddles — T3.A (2026-04-17): recover `h` from the R2
+        // stage's `s` (= 2^h) stored in global_stage_params (now starts after
+        // both R8 and R4 stages).
         let (phase5_r2_tw, phase5_r2_tw_prime) =
-            if !config.row_leaf.global_stage_params.is_empty() {
-                let h = config.row_leaf.r4_stage_params.len() as u32 * 2;
+            if let Some(sp) = config.row_leaf.global_stage_params.first() {
+                let h = sp.s.trailing_zeros();
                 precompute_single_r2_twiddles(config.col_log_n, direction, h)
             } else {
                 (Vec::new(), Vec::new())
@@ -418,8 +569,12 @@ impl FourStepPlan {
                     }),
                     usage: wgpu::BufferUsages::STORAGE,
                 });
-        let phase5_r2_stage_param_buffers =
-            build_batched_r2_stage_params(&device.device, &config.row_leaf, config.rows);
+        let phase5_r2_stage_param_buffers = build_batched_r2_stage_params(
+            &device.device,
+            &config.row_leaf,
+            config.rows,
+            leaf_r2_dispatch.groups_per_row,
+        );
 
         // --- Scratch buffers ---
         let buf_size = (config.n as u64) * std::mem::size_of::<u32>() as u64;
@@ -465,11 +620,11 @@ impl FourStepPlan {
         Ok(Self {
             leaf_global_pipeline,
             leaf_r4_pipeline,
+            leaf_r8_pipeline,
             leaf_bgl,
             twiddle_pipeline,
             twiddle_bgl,
             twiddle_buffer,
-            twiddle_prime_buffer,
             twiddle_param_buffer,
             twiddle_dispatch,
             transpose_pipeline,
@@ -481,18 +636,27 @@ impl FourStepPlan {
             scale_bgl,
             scale_param_buffer,
             scale_dispatch,
+            phase2_r8_twiddle_buffer,
+            phase2_r8_twiddle_prime_buffer,
+            phase2_r8_stage_param_buffers,
             phase2_r4_twiddle_buffer,
             phase2_r4_twiddle_prime_buffer,
             phase2_r4_stage_param_buffers,
             phase2_r2_twiddle_buffer,
             phase2_r2_twiddle_prime_buffer,
             phase2_r2_stage_param_buffers,
+            phase5_r8_twiddle_buffer,
+            phase5_r8_twiddle_prime_buffer,
+            phase5_r8_stage_param_buffers,
             phase5_r4_twiddle_buffer,
             phase5_r4_twiddle_prime_buffer,
             phase5_r4_stage_param_buffers,
             phase5_r2_twiddle_buffer,
             phase5_r2_twiddle_prime_buffer,
             phase5_r2_stage_param_buffers,
+            leaf_r8_dispatch,
+            leaf_r4_dispatch,
+            leaf_r2_dispatch,
             scratch_buffer,
             transpose_scratch_buffer,
             config,

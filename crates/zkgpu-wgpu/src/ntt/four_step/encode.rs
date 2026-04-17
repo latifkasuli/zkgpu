@@ -3,7 +3,7 @@ use zkgpu_babybear::BabyBear;
 use crate::buffer::WgpuBuffer;
 
 use super::FourStepPlan;
-use super::super::planner::{StockhamPlanConfig, WORKGROUP_SIZE};
+use super::super::planner::StockhamPlanConfig;
 
 impl FourStepPlan {
     /// Encode all six phases of the four-step NTT.
@@ -47,6 +47,9 @@ impl FourStepPlan {
             buf,
             &self.config.col_leaf,
             self.config.cols,
+            &self.phase2_r8_twiddle_buffer,
+            &self.phase2_r8_twiddle_prime_buffer,
+            &self.phase2_r8_stage_param_buffers,
             &self.phase2_r4_twiddle_buffer,
             &self.phase2_r4_twiddle_prime_buffer,
             &self.phase2_r4_stage_param_buffers,
@@ -58,6 +61,10 @@ impl FourStepPlan {
         );
 
         // Phase 3: Twiddle multiply on C×R data (in-place on buf)
+        //
+        // NVIDIA scale-up Tier 2A Option A (2026-04-16): binding 3
+        // (twiddle_prime) dropped — see `babybear_fourstep_twiddle.wgsl`
+        // comment header for rationale.
         {
             let bind_group = wgpu_device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
@@ -74,10 +81,6 @@ impl FourStepPlan {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: self.twiddle_param_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: self.twiddle_prime_buffer.as_entire_binding(),
                     },
                 ],
             });
@@ -117,6 +120,9 @@ impl FourStepPlan {
             buf,
             &self.config.row_leaf,
             self.config.rows,
+            &self.phase5_r8_twiddle_buffer,
+            &self.phase5_r8_twiddle_prime_buffer,
+            &self.phase5_r8_stage_param_buffers,
             &self.phase5_r4_twiddle_buffer,
             &self.phase5_r4_twiddle_prime_buffer,
             &self.phase5_r4_stage_param_buffers,
@@ -217,11 +223,12 @@ impl FourStepPlan {
         dispatch_idx + 1
     }
 
-    /// Encode batched R4 + R2 global Stockham stages for leaf NTTs.
+    /// Encode batched R8 + R4 + R2 global Stockham stages for leaf NTTs.
     ///
-    /// Dispatches R4 stages first using `leaf_r4_pipeline`, then any R2
-    /// remainder stages using `leaf_global_pipeline`. The src/dst ping-pong
-    /// continues across both R4 and R2 dispatches.
+    /// Dispatches R8 stages first (consume 3 logical stages each,
+    /// introduced in T3.A 2026-04-17), then R4 stages (2 stages each),
+    /// then the R2 residue (1 stage). The src/dst ping-pong continues
+    /// across all radix bands because each dispatch swaps.
     #[allow(clippy::too_many_arguments)]
     fn encode_batched_leaf_r4(
         &self,
@@ -229,7 +236,14 @@ impl FourStepPlan {
         encoder: &mut wgpu::CommandEncoder,
         buf: &WgpuBuffer<BabyBear>,
         leaf_config: &StockhamPlanConfig,
-        batch_count: u32,
+        // `batch_count` (= `cols` for Phase 2, `rows` for Phase 5) is no
+        // longer used at encode time after Fix 2b moved the dispatch
+        // computation to plan-build time, but the callers still pass it
+        // and it documents the encode-site invariant.
+        _batch_count: u32,
+        r8_twiddle_buffer: &wgpu::Buffer,
+        r8_twiddle_prime_buffer: &wgpu::Buffer,
+        r8_stage_param_buffers: &[wgpu::Buffer],
         r4_twiddle_buffer: &wgpu::Buffer,
         r4_twiddle_prime_buffer: &wgpu::Buffer,
         r4_stage_param_buffers: &[wgpu::Buffer],
@@ -241,6 +255,63 @@ impl FourStepPlan {
     ) -> usize {
         let mut dispatch_idx = start_dispatch;
         let mut parity = 0usize;
+
+        // NVIDIA scale-up T3.A (2026-04-17): R8 dispatches run first
+        // (smallest `s` per `StockhamPlanConfig::new_global_only` greedy
+        // factoring). Each R8 butterfly covers 3 logical Stockham stages
+        // and processes 8 elements. Total workgroup coverage = n/8.
+        for param_buffer in r8_stage_param_buffers {
+            let (src_buf, dst_buf) = if parity % 2 == 0 {
+                (&buf.inner, &self.scratch_buffer)
+            } else {
+                (&self.scratch_buffer, &buf.inner)
+            };
+
+            let bind_group = wgpu_device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.leaf_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: src_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: dst_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: r8_twiddle_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: param_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: r8_twiddle_prime_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+            let ts = ts_writes.get(dispatch_idx).and_then(|t| t.clone());
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: None,
+                    timestamp_writes: ts,
+                });
+                pass.set_pipeline(&self.leaf_r8_pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                // 2D-folded dispatch: leaf_r8_dispatch covers n/8 butterflies.
+                pass.dispatch_workgroups(
+                    self.leaf_r8_dispatch.x,
+                    self.leaf_r8_dispatch.y,
+                    1,
+                );
+            }
+            dispatch_idx += 1;
+            parity += 1;
+        }
 
         // R4 dispatches: each R4 butterfly processes 4 elements → leaf_n/4 butterflies per batch
         for param_buffer in r4_stage_param_buffers {
@@ -277,9 +348,6 @@ impl FourStepPlan {
                 ],
             });
 
-            let total_r4_butterflies = batch_count * (leaf_config.n / 4);
-            let workgroups = total_r4_butterflies.div_ceil(WORKGROUP_SIZE);
-
             let ts = ts_writes.get(dispatch_idx).and_then(|t| t.clone());
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -288,7 +356,17 @@ impl FourStepPlan {
                 });
                 pass.set_pipeline(&self.leaf_r4_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(workgroups, 1, 1);
+                // Tier 1 Fix 2b (2026-04-16): 2D-folded dispatch.
+                // `leaf_r4_dispatch.{x,y}` together cover
+                // `batch_count * leaf_config.n / 4` butterflies; 2D
+                // grid avoids the wgpu 65535 per-dim limit at log ≥ 26.
+                // See matching `tid = gid.x + gid.y * groups_per_row * 256`
+                // in `babybear_fourstep_leaf_r4.wgsl`.
+                pass.dispatch_workgroups(
+                    self.leaf_r4_dispatch.x,
+                    self.leaf_r4_dispatch.y,
+                    1,
+                );
             }
             dispatch_idx += 1;
             parity += 1;
@@ -329,9 +407,6 @@ impl FourStepPlan {
                 ],
             });
 
-            let total_butterflies = batch_count * (leaf_config.n / 2);
-            let workgroups = total_butterflies.div_ceil(WORKGROUP_SIZE);
-
             let ts = ts_writes.get(dispatch_idx).and_then(|t| t.clone());
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -340,7 +415,13 @@ impl FourStepPlan {
                 });
                 pass.set_pipeline(&self.leaf_global_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(workgroups, 1, 1);
+                // Tier 1 Fix 2b (2026-04-16): 2D-folded dispatch —
+                // see R4 site above for rationale.
+                pass.dispatch_workgroups(
+                    self.leaf_r2_dispatch.x,
+                    self.leaf_r2_dispatch.y,
+                    1,
+                );
             }
             dispatch_idx += 1;
             parity += 1;

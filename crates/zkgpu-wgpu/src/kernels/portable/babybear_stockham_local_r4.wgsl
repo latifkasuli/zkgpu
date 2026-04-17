@@ -29,7 +29,12 @@ struct LocalR4Params {
     stride: u32,
     omega4: u32,
     omega4_prime: u32,
-    _pad0: u32,
+    // NVIDIA scale-up Tier 1 Fix 2 (2026-04-16): 2D-folded dispatch.
+    // Local kernel uses `block_id = wg_id.x + wg_id.y * groups_per_row`
+    // so workloads with >65535 workgroups (log_n ≥ 25) dispatch
+    // without hitting the wgpu per-dimension limit. See
+    // babybear_stockham_r2.wgsl for the full rationale.
+    groups_per_row: u32,
 }
 
 @group(0) @binding(3) var<uniform> params: LocalR4Params;
@@ -88,7 +93,8 @@ fn stockham_local_r4(
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(workgroup_id) wg_id: vec3<u32>,
 ) {
-    let block_id = wg_id.x;
+    // 2D-folded workgroup index (see struct comment).
+    let block_id = wg_id.x + wg_id.y * params.groups_per_row;
     let t = lid.x;
     let stride = params.stride;
     let omega4 = params.omega4;

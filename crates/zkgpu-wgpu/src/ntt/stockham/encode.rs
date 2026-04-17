@@ -3,7 +3,6 @@ use zkgpu_babybear::BabyBear;
 use crate::buffer::WgpuBuffer;
 
 use super::StockhamPlan;
-use super::super::planner::WORKGROUP_SIZE;
 
 impl StockhamPlan {
     /// Encode NTT stages into the given command encoder.
@@ -17,7 +16,6 @@ impl StockhamPlan {
         ts_writes: &[Option<wgpu::ComputePassTimestampWrites<'_>>],
     ) {
         let mut dispatch_idx: usize = 0;
-        let r4_workgroups = (self.config.n / 4).div_ceil(WORKGROUP_SIZE);
 
         // Phase 1a: Radix-4 global dispatches
         for param_buffer in self.r4_stage_param_buffers.iter() {
@@ -63,7 +61,14 @@ impl StockhamPlan {
                 });
                 pass.set_pipeline(&self.r4_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(r4_workgroups, 1, 1);
+                // Tier 1 Fix 2 (2026-04-16): 2D-folded dispatch. Total
+                // workgroups = r4_dispatch.x * r4_dispatch.y covers
+                // `config.n / 4` butterflies; log_n ≥ 25 workloads wrap
+                // into the y-dimension instead of hitting wgpu's
+                // per-dimension limit. See the WGSL kernel for the
+                // matching `tid = gid.x + gid.y * groups_per_row * 256`
+                // reconstruction.
+                pass.dispatch_workgroups(self.r4_dispatch.x, self.r4_dispatch.y, 1);
             }
 
             dispatch_idx += 1;
@@ -113,7 +118,9 @@ impl StockhamPlan {
                 });
                 pass.set_pipeline(&self.global_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(self.config.global_workgroups, 1, 1);
+                // Tier 1 Fix 2 (2026-04-16): 2D-folded dispatch — see
+                // R4 site above for the rationale.
+                pass.dispatch_workgroups(self.r2_dispatch.x, self.r2_dispatch.y, 1);
             }
 
             dispatch_idx += 1;
@@ -166,7 +173,11 @@ impl StockhamPlan {
                 });
                 pass.set_pipeline(&self.local_pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                pass.dispatch_workgroups(self.config.local_workgroups, 1, 1);
+                // Tier 1 Fix 2 (2026-04-16): 2D-folded workgroup grid.
+                // Local kernel uses workgroup_id (not global_invocation_id)
+                // so `block_id = wg_id.x + wg_id.y * groups_per_row` in
+                // the WGSL. log_n ≥ 25 ⇒ local_workgroups > 65535.
+                pass.dispatch_workgroups(self.local_dispatch.x, self.local_dispatch.y, 1);
             }
         }
 

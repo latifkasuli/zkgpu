@@ -13,7 +13,7 @@ use crate::device::WgpuDevice;
 use crate::dispatch::LinearDispatch;
 use crate::profiling::{GpuProfiler, GpuTiming, TimestampSpan};
 
-use super::planner::FourStepPlanConfig;
+use super::planner::{FourStepPlanConfig, StockhamPlanConfig};
 use super::stockham::NttTimings;
 
 /// Which transpose kernel the four-step plan uses.
@@ -77,12 +77,20 @@ impl TransposeVariant {
 pub(crate) struct FourStepPlan {
     pub(super) leaf_global_pipeline: Arc<wgpu::ComputePipeline>,
     pub(super) leaf_r4_pipeline: Arc<wgpu::ComputePipeline>,
+    // NVIDIA scale-up T3.A (2026-04-17): R8 leaf pipeline — 3 logical
+    // Stockham stages per dispatch, vs R4's 2 and R2's 1. Planner greedy-
+    // factors leaves as R8+R4+R2 via `StockhamPlanConfig::new_global_only`.
+    pub(super) leaf_r8_pipeline: Arc<wgpu::ComputePipeline>,
     pub(super) leaf_bgl: Arc<wgpu::BindGroupLayout>,
 
     pub(super) twiddle_pipeline: Arc<wgpu::ComputePipeline>,
     pub(super) twiddle_bgl: Arc<wgpu::BindGroupLayout>,
     pub(super) twiddle_buffer: wgpu::Buffer,
-    pub(super) twiddle_prime_buffer: wgpu::Buffer,
+    // NVIDIA scale-up Tier 2A Option A (2026-04-16): the companion
+    // `twiddle_prime_buffer` field was dropped. The diagonal twiddle
+    // shader now uses `mod_mul` (10-iter reducer) instead of Shoup's
+    // `mod_mul_shoup`, eliminating the 16 MiB prime buffer's L2
+    // pressure at log ≥ 22.
     pub(super) twiddle_param_buffer: wgpu::Buffer,
     pub(super) twiddle_dispatch: LinearDispatch,
 
@@ -101,6 +109,9 @@ pub(crate) struct FourStepPlan {
     pub(super) scale_dispatch: LinearDispatch,
 
     /// Phase-2 leaf: R-point NTTs (col_leaf config), C batches
+    pub(super) phase2_r8_twiddle_buffer: wgpu::Buffer,
+    pub(super) phase2_r8_twiddle_prime_buffer: wgpu::Buffer,
+    pub(super) phase2_r8_stage_param_buffers: Vec<wgpu::Buffer>,
     pub(super) phase2_r4_twiddle_buffer: wgpu::Buffer,
     pub(super) phase2_r4_twiddle_prime_buffer: wgpu::Buffer,
     pub(super) phase2_r4_stage_param_buffers: Vec<wgpu::Buffer>,
@@ -109,12 +120,26 @@ pub(crate) struct FourStepPlan {
     pub(super) phase2_r2_stage_param_buffers: Vec<wgpu::Buffer>,
 
     /// Phase-5 leaf: C-point NTTs (row_leaf config), R batches
+    pub(super) phase5_r8_twiddle_buffer: wgpu::Buffer,
+    pub(super) phase5_r8_twiddle_prime_buffer: wgpu::Buffer,
+    pub(super) phase5_r8_stage_param_buffers: Vec<wgpu::Buffer>,
     pub(super) phase5_r4_twiddle_buffer: wgpu::Buffer,
     pub(super) phase5_r4_twiddle_prime_buffer: wgpu::Buffer,
     pub(super) phase5_r4_stage_param_buffers: Vec<wgpu::Buffer>,
     pub(super) phase5_r2_twiddle_buffer: wgpu::Buffer,
     pub(super) phase5_r2_twiddle_prime_buffer: wgpu::Buffer,
     pub(super) phase5_r2_stage_param_buffers: Vec<wgpu::Buffer>,
+
+    // NVIDIA scale-up Tier 1 Fix 2b (2026-04-16): 2D-folded leaf
+    // dispatches. Phase 2 and Phase 5 each cover `n/radix` butterflies
+    // across their batches — same count across phases. At log_n ≥ 26
+    // the 1D grid exceeds 65535 workgroups; 2D fold wraps into gid.y.
+    //
+    // T3.A (2026-04-17) adds `leaf_r8_dispatch` for R8 kernels that
+    // cover n/8 butterflies.
+    pub(super) leaf_r8_dispatch: LinearDispatch,
+    pub(super) leaf_r4_dispatch: LinearDispatch,
+    pub(super) leaf_r2_dispatch: LinearDispatch,
 
     pub(super) scratch_buffer: wgpu::Buffer,
     pub(super) transpose_scratch_buffer: wgpu::Buffer,
@@ -319,26 +344,41 @@ impl FourStepPlan {
     }
 
     fn dispatch_labels(&self) -> Vec<String> {
+        // NVIDIA scale-up T3.A (2026-04-17): leaf labels now emit in
+        // dispatch order (R8 → R4 → R2), matching `encode_batched_leaf_r4`.
+        // Helper: compute leaf stage labels for a given phase.
+        fn leaf_labels(
+            phase: &str,
+            label_stem: &str,
+            leaf: &StockhamPlanConfig,
+        ) -> Vec<String> {
+            let mut out = Vec::new();
+            // R8 stages (3 logical stages each, starting at h = 0, 3, 6, ...)
+            for i in 0..leaf.r8_stage_params.len() {
+                let h = i as u32 * 3;
+                out.push(format!("{phase} {label_stem} r8 stages {}+{}+{}", h, h + 1, h + 2));
+            }
+            // R4 stages (2 logical stages each, starting after the R8 stages)
+            let r4_start_h = leaf.r8_stage_params.len() as u32 * 3;
+            for i in 0..leaf.r4_stage_params.len() {
+                let h = r4_start_h + i as u32 * 2;
+                out.push(format!("{phase} {label_stem} r4 stages {}+{}", h, h + 1));
+            }
+            // R2 residue (at most one dispatch, at the final h)
+            let r2_start_h = r4_start_h + leaf.r4_stage_params.len() as u32 * 2;
+            for i in 0..leaf.global_stage_params.len() {
+                let h = r2_start_h + i as u32;
+                out.push(format!("{phase} {label_stem} r2 stage {h}"));
+            }
+            out
+        }
+
         let mut labels = Vec::new();
         labels.push("transpose R\u{d7}C\u{2192}C\u{d7}R".to_string());
-        for i in 0..self.config.col_leaf.r4_stage_params.len() {
-            let h = i as u32 * 2;
-            labels.push(format!("phase2 R-pt r4 stages {}+{}", h, h + 1));
-        }
-        for i in 0..self.config.col_leaf.global_stage_params.len() {
-            let h = self.config.col_leaf.r4_stage_params.len() as u32 * 2 + i as u32;
-            labels.push(format!("phase2 R-pt r2 stage {h}"));
-        }
+        labels.extend(leaf_labels("phase2", "R-pt", &self.config.col_leaf));
         labels.push("twiddle multiply".to_string());
         labels.push("transpose C\u{d7}R\u{2192}R\u{d7}C".to_string());
-        for i in 0..self.config.row_leaf.r4_stage_params.len() {
-            let h = i as u32 * 2;
-            labels.push(format!("phase5 C-pt r4 stages {}+{}", h, h + 1));
-        }
-        for i in 0..self.config.row_leaf.global_stage_params.len() {
-            let h = self.config.row_leaf.r4_stage_params.len() as u32 * 2 + i as u32;
-            labels.push(format!("phase5 C-pt r2 stage {h}"));
-        }
+        labels.extend(leaf_labels("phase5", "C-pt", &self.config.row_leaf));
         labels.push("transpose R\u{d7}C\u{2192}C\u{d7}R (output)".to_string());
         if self.scale_param_buffer.is_some() {
             labels.push("inverse scale".to_string());

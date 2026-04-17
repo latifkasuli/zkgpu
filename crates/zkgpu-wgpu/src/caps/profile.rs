@@ -205,15 +205,47 @@ impl CapabilityProfile {
     /// The minimum wgpu limits this runtime actually needs, clamped to
     /// what the adapter can provide.
     ///
-    /// Requests up to 256 MB for storage buffers (NTT up to 2^26
-    /// BabyBear elements), but clamps to the adapter maximum on devices
-    /// with tighter limits (e.g. Adreno at 128 MB).
+    /// **Mobile / integrated** (AndroidNative / DesktopIntegrated /
+    /// Browser / AppleNative / Unknown): requests up to 256 MB for storage
+    /// buffers (NTT up to 2^26 BabyBear elements), clamped to the adapter
+    /// maximum. This matches mobile device caps (Adreno 128 MB, Mali
+    /// typically 2 GB, Apple 2 GB).
+    ///
+    /// **Desktop discrete** (DesktopDiscrete): requests the adapter's full
+    /// reported `max_storage_buffer_binding_size` / `max_buffer_size`. On
+    /// RTX 4090 that's ~2 GB, unlocking log 24+ working buffers.
+    ///
+    /// NVIDIA scale-up Tier 1 (2026-04-16): this is the "Gap 2" from
+    /// G.0.2 (`research/benchmarks/foundation-audit-2026-04-15/
+    /// g02-desktop-webgpu/README.md` §"Gap 2 — wgpu adapter requested
+    /// with default (256 MB) buffer limits"). Stockham at log 25 wants
+    /// 512 MB and Four-Step at log 24 wants 335 MB — both panic with
+    /// `BufferSize { requested: X, limit: 268435456 }` against the old
+    /// 256 MB ceiling. Bumping the request to the adapter max unlocks
+    /// log 24+ on desktop silicon without affecting any mobile path.
     ///
     /// Callers that need larger buffers (e.g. 2^20+ element NTTs) can
     /// check `CapabilityProfile` fields directly and fail gracefully.
     pub fn required_limits(&self, adapter_limits: &wgpu::Limits) -> wgpu::Limits {
         let defaults = wgpu::Limits::downlevel_defaults();
-        let desired_buffer: u64 = 256 * 1024 * 1024;
+        const MOBILE_DESIRED_BUFFER: u64 = 256 * 1024 * 1024;
+        let desired_buffer: u64 = match self.platform_class {
+            // Desktop discrete (NVIDIA / AMD / Intel Arc): request the
+            // adapter's full reported ceiling. These GPUs report 2 GB
+            // (Vulkan's i32 cap) and have the VRAM to back it.
+            PlatformClass::DesktopDiscrete => adapter_limits
+                .max_storage_buffer_binding_size
+                .max(MOBILE_DESIRED_BUFFER),
+            // Mobile / integrated / browser / Apple / unknown: keep the
+            // conservative 256 MB ceiling. Mobile devices can report
+            // smaller maxima (Adreno ~128 MB); the adapter clamp below
+            // still handles that correctly.
+            PlatformClass::AndroidNative
+            | PlatformClass::DesktopIntegrated
+            | PlatformClass::Browser
+            | PlatformClass::AppleNative
+            | PlatformClass::UnknownNative => MOBILE_DESIRED_BUFFER,
+        };
         wgpu::Limits {
             max_storage_buffer_binding_size: desired_buffer
                 .min(adapter_limits.max_storage_buffer_binding_size),

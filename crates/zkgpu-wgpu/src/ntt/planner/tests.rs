@@ -221,19 +221,30 @@ fn planner_rejects_tail_below_log_block() {
 
 #[test]
 fn planner_global_only_tail_matches_global_only_shape() {
-    // The whole point of the GlobalOnlyR4 tail strategy is that it produces
-    // the same dispatch shape as new_global_only — the difference is purely
-    // metadata (the `tail` field is populated so reporting can tell them apart).
+    // Pre-T3.A (2026-04-16 and earlier): `new_global_only` and
+    // `new(log_n, Some(GlobalOnlyR4))` produced the same dispatch shape,
+    // differing only in metadata (the `tail` field).
+    //
+    // Post-T3.A (2026-04-17): `new_global_only` now uses R8/R4/R2 greedy
+    // factoring for four-step leaves (where the R8 kernel is wired).
+    // Top-level Stockham (via `new` with tail) keeps R4-only factoring
+    // because the top-level R8 kernel isn't wired. The two plans can
+    // legitimately have different R4/R8 stage breakdowns now.
+    //
+    // Invariants that still hold:
+    //   - Same `num_global_stages` (both cover all log_n stages).
+    //   - Neither uses the local kernel.
+    //   - Tail metadata still distinguishes them.
     for log_n in [LOG_BLOCK, 12, 15, 20, 22] {
         let global_only = StockhamPlanConfig::new_global_only(log_n).unwrap();
         let global_tail = stockham_global_tail(log_n);
         assert_eq!(global_only.num_global_stages, global_tail.num_global_stages);
-        assert_eq!(global_only.r4_stage_params, global_tail.r4_stage_params);
-        assert_eq!(global_only.global_stage_params, global_tail.global_stage_params);
-        assert_eq!(global_only.ntt_dispatches(), global_tail.ntt_dispatches());
         assert!(!global_tail.use_local_kernel());
         assert!(global_tail.tail.is_some(), "GlobalOnlyR4 must record a tail decision");
         assert!(global_only.tail.is_none(), "new_global_only leaves tail unset");
+        // R4 stage params differ by design: new_global_only may have
+        // consumed some stages with R8 dispatches.
+        assert!(global_tail.r8_stage_params.is_empty(), "top-level Stockham has no R8");
     }
 }
 
@@ -287,8 +298,14 @@ fn four_step_log21_unbalanced() {
 #[test]
 fn four_step_dispatch_count() {
     let c = FourStepPlanConfig::new(20).unwrap();
-    // 1 transpose + 5 R4 leaf + 1 twiddle + 1 transpose + 5 R4 leaf + 1 transpose = 14
-    assert_eq!(c.total_dispatches(), 14);
+    // Post-T3.A (2026-04-17) with R8/R4/R2 factoring for leaves of log 10:
+    //   log 10 = 3 R8 (9 stages) + 1 R2 (1 stage) = 4 dispatches per leaf
+    //   (pre-T3.A was 5 R4 = 5 dispatches per leaf)
+    // Total: 1 transpose (phase 1) + 4 leaf dispatches (phase 2) + 1 twiddle +
+    //        1 transpose (phase 4) + 4 leaf dispatches (phase 5) +
+    //        1 transpose (phase 6) = 12 dispatches.
+    // (Tier 2B Option A removed the separate Phase-7 inverse-scale dispatch.)
+    assert_eq!(c.total_dispatches(), 12);
 }
 
 // --- Policy-driven family selection tests ---
@@ -511,9 +528,15 @@ fn from_caps_intel_integrated_uses_raised_threshold() {
 
 #[test]
 fn from_caps_nvidia_discrete_uses_raised_threshold() {
+    // NVIDIA scale-up Tier 1 (2026-04-16): dropped from 24 to 21 after
+    // G.0.4 ICICLE A/B on RTX 4090 showed zkgpu Four-Step beats ICICLE
+    // Radix-2 at log 21 (0.75×). The old log_n >= 24 threshold left the
+    // pathological 17–21× DEFAULT regression on the table. See:
+    // `research/benchmarks/foundation-audit-2026-04-15/nvidia-scale-up-roadmap.md`
+    // §Tier 1, and the matching comment in `policy.rs::from_vulkan_family`.
     let caps = mock_caps_identity(GpuFamily::Nvidia, PlatformClass::DesktopDiscrete);
     let policy = PlannerPolicy::from_caps(&caps);
-    assert_eq!(policy.four_step_threshold(), Some(24));
+    assert_eq!(policy.four_step_threshold(), Some(21));
 }
 
 #[test]
@@ -584,11 +607,21 @@ fn mobile_non_android_selects_four_step_at_default_threshold() {
 
 #[test]
 fn desktop_discrete_selects_four_step_at_raised_threshold() {
+    // NVIDIA scale-up Tier 1 (2026-04-16): threshold moved from 24 to 21.
+    // log 20 still Stockham (below threshold); log 21+ is Four-Step.
     let caps = mock_caps_identity(GpuFamily::Nvidia, PlatformClass::DesktopDiscrete);
     let policy = PlannerPolicy::from_caps(&caps);
     assert!(matches!(
-        plan_ntt(23, &policy).unwrap(),
+        plan_ntt(20, &policy).unwrap(),
         PlannedNtt::Stockham(_)
+    ));
+    assert!(matches!(
+        plan_ntt(21, &policy).unwrap(),
+        PlannedNtt::FourStep(_)
+    ));
+    assert!(matches!(
+        plan_ntt(23, &policy).unwrap(),
+        PlannedNtt::FourStep(_)
     ));
     assert!(matches!(
         plan_ntt(24, &policy).unwrap(),
@@ -631,39 +664,54 @@ fn stockham_tail_from_plan(
 }
 
 #[test]
-fn xclipse_keeps_local_tail_across_all_sizes() {
-    // PR 2 close-out (2026-04-15): the Xclipse `log_n >= 20 → GlobalOnlyR4`
-    // rule was dropped after phase-e FTL A/B on Xclipse 940 (e1q/Galaxy S24)
-    // failed to reproduce the Xclipse-540 collapse the rule was derived from.
-    // See `apps/android-harness/research/benchmarks/phase-e-tail-ab-2026-04-15/README.md`.
+fn xclipse_picks_global_tail_at_all_tail_sizes() {
+    // G.2.3 (2026-04-16): G.2.2 BrowserStack App Automate cohort measured
+    // 4 Exynos-pinned Samsung Galaxies — S22 + S22 Ultra (Xclipse 920 /
+    // Exynos 2200 / first-gen RDNA2, 2022), S24 (Xclipse 940 / Exynos
+    // 2400, 2024), S26 (Xclipse 960 / Exynos 2600, 2026) — plus an FTL
+    // e2s cross-vendor confirmation on Xclipse 940 Galaxy S24+. All report
+    // `UNCONDITIONAL @ log21`: 38/40 cells ≥+20% Global win, 2/40 narrow
+    // at +17.8% / +18.7% (still Global wins), three driver major revisions
+    // all showing identical shape. See:
+    // `apps/android-harness/research/benchmarks/browserstack-xclipse-cohort-2026-04-16/`.
+    //
+    // This test supersedes the PR-2-era `xclipse_keeps_local_tail_across_all_sizes`
+    // defensive assertion. PR 2 dropped the n=1 Xclipse-540 rule; G.2.2
+    // supplied the multi-SKU evidence that was always supposed to decide
+    // the shape.
     //
     // Four-step disabled so we observe the tail decision in isolation;
     // Xclipse's default four-step threshold would otherwise flip at log_n=20.
     let caps = mock_caps_identity(GpuFamily::Xclipse, PlatformClass::AndroidNative);
     let mut policy = PlannerPolicy::from_caps(&caps);
     policy.four_step_threshold = None;
-    for log_n in [18, 20, 22] {
+    for log_n in [10, 15, 18, 20, 22] {
         assert_eq!(
             stockham_tail_from_plan(log_n, &policy),
-            Some(StockhamTailStrategy::LocalFusedR4),
-            "Xclipse must keep LocalFusedR4 at log_n={log_n} after PR 2",
+            Some(StockhamTailStrategy::GlobalOnlyR4),
+            "Xclipse must pick GlobalOnlyR4 at log_n={log_n}",
         );
     }
 }
 
 #[test]
-fn mali_keeps_local_tail_across_all_sizes() {
-    // PR 2 close-out (2026-04-15): the Mali `log_n >= 22 → GlobalOnlyR4`
-    // rule was dropped — phase-e A/B across G715/G720 measured the log22
-    // delta at ±1% (not the predicted collapse). A small-N opportunity
-    // at log18-19 exists on Mali but is deferred (see phase-e README).
+fn mali_picks_global_tail_at_all_tail_sizes() {
+    // G.1.4 (2026-04-16): G.1.1 + G.1.3 measured 5 Mali devices (oriole
+    // Mali-G78 MP20, panther Mali-G710 MC7, husky/komodo/comet Mali-G715
+    // MC7) across 4 silicon generations, 3 SoC generations (Tensor G1..G4),
+    // and 2 Mali driver major revisions (r38p1 + r51p0). All cells at log
+    // 18..=22, both directions, report +33% to +88% GlobalOnlyR4 wins —
+    // `UNCONDITIONAL @ log21` from `zkgpu-tail-analyze` on every device.
+    // See:
+    // - `apps/android-harness/research/benchmarks/mali-scope-match-2026-04-16/`
+    // - `apps/android-harness/research/benchmarks/mali-older-gen-2026-04-16/`
     let caps = mock_caps_identity(GpuFamily::Mali, PlatformClass::AndroidNative);
     let policy = PlannerPolicy::from_caps(&caps);
-    for log_n in [18, 20, 22] {
+    for log_n in [10, 15, 18, 20, 22] {
         assert_eq!(
             stockham_tail_from_plan(log_n, &policy),
-            Some(StockhamTailStrategy::LocalFusedR4),
-            "Mali must keep LocalFusedR4 at log_n={log_n} after PR 2",
+            Some(StockhamTailStrategy::GlobalOnlyR4),
+            "Mali must pick GlobalOnlyR4 at log_n={log_n}",
         );
     }
 }

@@ -218,9 +218,35 @@ impl StockhamPlan {
                     usage: wgpu::BufferUsages::STORAGE,
                 });
 
+        // NVIDIA scale-up Tier 1 Fix 2 (2026-04-16): 2D-folded dispatch
+        // grids. Each stage covers a fixed number of butterflies
+        // regardless of stage index (Stockham invariant), so a single
+        // dispatch shape per dispatch type is sufficient.
+        let max_dim = device.caps.max_compute_workgroups_per_dimension;
+        let r2_dispatch = plan_linear_dispatch(config.n / 2, WORKGROUP_SIZE, max_dim)?;
+        let r4_dispatch = plan_linear_dispatch(config.n / 4, WORKGROUP_SIZE, max_dim)?;
+        // Local kernel: one workgroup per BLOCK_SIZE-element sub-problem.
+        // Each workgroup is its own unit (no workgroup_size multiplier
+        // applied), so pass `WORKGROUP_SIZE=1` so `plan_linear_dispatch`
+        // treats `local_workgroups` as the direct workgroup count.
+        let local_dispatch = if config.local_workgroups > 0 {
+            plan_linear_dispatch(config.local_workgroups, 1, max_dim)?
+        } else {
+            crate::dispatch::LinearDispatch { x: 0, y: 0, groups_per_row: 1 }
+        };
+
         let mut global_stage_param_buffers = Vec::with_capacity(config.global_stage_params.len());
         for sp in &config.global_stage_params {
-            let params = [sp.n, sp.s, sp.m, sp.twiddle_offset];
+            let params = [
+                sp.n,
+                sp.s,
+                sp.m,
+                sp.twiddle_offset,
+                r2_dispatch.groups_per_row,
+                0u32,
+                0u32,
+                0u32,
+            ];
             let buf = device
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -257,7 +283,18 @@ impl StockhamPlan {
 
         let mut r4_stage_param_buffers = Vec::with_capacity(config.r4_stage_params.len());
         for sp in &config.r4_stage_params {
-            let params = [sp.n, sp.s, sp.m4, sp.twiddle_offset, omega4, omega4_prime, 0u32, 0u32];
+            // Slot 7 (`_pad0` in the WGSL struct) now carries the
+            // 2D-dispatch `groups_per_row` for thread-index reconstruction.
+            let params = [
+                sp.n,
+                sp.s,
+                sp.m4,
+                sp.twiddle_offset,
+                omega4,
+                omega4_prime,
+                r4_dispatch.groups_per_row,
+                0u32,
+            ];
             let buf = device
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -288,7 +325,14 @@ impl StockhamPlan {
                     usage: wgpu::BufferUsages::STORAGE,
                 });
 
-        let local_params = [config.local_stride, local_omega4, local_omega4_prime, 0u32];
+        // Slot 3 (`_pad0` in the WGSL struct) now carries the 2D-dispatch
+        // `groups_per_row` for workgroup-index reconstruction.
+        let local_params = [
+            config.local_stride,
+            local_omega4,
+            local_omega4_prime,
+            local_dispatch.groups_per_row,
+        ];
         let local_param_buffer =
             device
                 .device
@@ -328,6 +372,9 @@ impl StockhamPlan {
             scale_bind_group_layout,
             scale_param_buffer,
             scale_dispatch,
+            r2_dispatch,
+            r4_dispatch,
+            local_dispatch,
             config,
         })
     }

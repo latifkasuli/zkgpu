@@ -19,7 +19,13 @@ struct BatchedR4Params {
     batch_count: u32,
     omega4: u32,
     omega4_prime: u32,
-    _pad0: u32,
+    // NVIDIA scale-up Tier 1 Fix 2b (2026-04-16): 2D-folded dispatch
+    // for log_n >= 26. `groups_per_row` is the x-extent of the 2D
+    // workgroup grid; threads reconstruct the 1D tid via
+    // `tid = gid.x + gid.y * groups_per_row * 256`. See the Stockham
+    // companion kernel `babybear_stockham_r4.wgsl` for the same
+    // pattern on the Stockham side.
+    groups_per_row: u32,
 }
 
 @group(0) @binding(3) var<uniform> params: BatchedR4Params;
@@ -65,7 +71,8 @@ fn mod_sub(a: u32, b: u32) -> u32 {
 
 @compute @workgroup_size(256)
 fn batched_stockham_r4_butterfly(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let tid = gid.x;
+    // 2D-folded dispatch index (see struct comment).
+    let tid = gid.x + gid.y * params.groups_per_row * 256u;
     let s = params.s;
     let m4 = params.m4;
     let leaf_n = params.leaf_n;

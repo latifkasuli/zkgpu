@@ -16,6 +16,16 @@ struct StockhamParams {
     s: u32,
     m: u32,
     twiddle_offset: u32,
+    // NVIDIA scale-up Tier 1 Fix 2 (2026-04-16): 2D-folded dispatch.
+    // `groups_per_row` is the x-extent of the 2D workgroup grid; threads
+    // in row y with local workgroup x reconstruct a flat 1D thread index
+    // as `tid = gid.x + gid.y * groups_per_row * WORKGROUP_SIZE`. Lets
+    // `n/2 > 65535*256` workloads (log_n ≥ 25 on BabyBear) dispatch
+    // without hitting the wgpu per-dimension limit.
+    groups_per_row: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(3) var<uniform> params: StockhamParams;
@@ -120,7 +130,8 @@ fn mod_mul(a: u32, b: u32) -> u32 {
 
 @compute @workgroup_size(256)
 fn stockham_butterfly(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let tid = gid.x;
+    // 2D-folded dispatch index (see struct comment).
+    let tid = gid.x + gid.y * params.groups_per_row * 256u;
     let s = params.s;
     let m = params.m;
 

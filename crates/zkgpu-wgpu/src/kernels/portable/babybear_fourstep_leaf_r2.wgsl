@@ -19,7 +19,10 @@ struct BatchedStockhamParams {
     m: u32,
     twiddle_offset: u32,
     batch_count: u32,
-    _pad0: u32,
+    // NVIDIA scale-up Tier 1 Fix 2b (2026-04-16): 2D-folded dispatch
+    // for log_n >= 26. See babybear_fourstep_leaf_r4.wgsl for the
+    // same pattern applied to the R4 variant.
+    groups_per_row: u32,
     _pad1: u32,
     _pad2: u32,
 }
@@ -110,7 +113,8 @@ fn mod_mul(a: u32, b: u32) -> u32 {
 
 @compute @workgroup_size(256)
 fn batched_stockham_butterfly(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let tid = gid.x;
+    // 2D-folded dispatch index (see struct comment).
+    let tid = gid.x + gid.y * params.groups_per_row * 256u;
     let s = params.s;
     let m = params.m;
     let leaf_n = params.leaf_n;

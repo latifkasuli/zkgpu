@@ -49,15 +49,88 @@
 //! marginal pa3q regression is within phase-e's measured noise band and
 //! acceptable against 40-70% wins on the older silicon.
 //!
+//! ## Mali collapse (G.1.4, 2026-04-16)
+//!
+//! G.1.1 (`apps/android-harness/research/benchmarks/mali-scope-match-2026-04-16/`)
+//! re-ran phase-e's exact narrow forced-A/B scope on the same 3× Mali-G715
+//! device cohort (husky/Pixel 8 Pro, komodo/Pixel 9 Pro XL, comet/Pixel 9
+//! Pro Fold). Unlike phase-e's windowed shape, G.1.1 measured +50-85%
+//! GlobalOnlyR4 wins across log 18..=22 on all 3 devices, forward and
+//! inverse — matching phase-f's full-suite shape despite the cold device
+//! and narrow scope. This falsified the "phase-f warm-up amplified the
+//! win" thermal hypothesis: the signal is microarchitecture, not
+//! thermal/test-order.
+//!
+//! G.1.3 (`apps/android-harness/research/benchmarks/mali-older-gen-2026-04-16/`)
+//! extended coverage to two older Mali generations: oriole (Pixel 6,
+//! Mali-G78 MP20, Tensor G1, Mali driver r38p1) and panther (Pixel 7,
+//! Mali-G710 MC7, Tensor G2, also r38p1). Both devices reproduced the
+//! unconditional shape with identical recommendation (`UNCONDITIONAL @
+//! log21`, Global win +33-88%). Combined 5-device cohort spans 4 silicon
+//! generations, 3 SoC generations, and 2 Mali driver major revisions
+//! (r38 → r51). Weakest cell in the 50-cell combined matrix was panther
+//! log 20 inverse at +33.0%, still well above the 20% decision-gate
+//! threshold.
+//!
+//! Like Adreno, the collapse has no log_n floor within measurable range —
+//! smallest test (log 18) shows +85-92% wins — so the rule is unconditional
+//! once a tail phase exists. The capability-gate side finding: absolute
+//! GlobalR4 timing at log 22 is within 1.2× of flagship G715 even on the
+//! 2021 Tensor G1; all five devices are viable zk-proving targets.
+//!
+//! ## Xclipse collapse (G.2.3, 2026-04-16)
+//!
+//! G.2.2
+//! (`apps/android-harness/research/benchmarks/browserstack-xclipse-cohort-2026-04-16/`)
+//! sidestepped the FTL Exynos-pinning blocker via BrowserStack App Automate,
+//! which exposes Exynos-pinned Samsung Galaxy axes (no region-split
+//! lottery). The full `ZkgpuInstrumentedTest` class ran in parallel on
+//! Galaxy S22 + S22 Ultra (Exynos 2200, Xclipse 920 — first-gen RDNA2
+//! Xclipse, 2022), Galaxy S24 (Exynos 2400, Xclipse 940, 2024), and Galaxy
+//! S26 (Exynos 2600, Xclipse 960, 2026). All four Xclipse devices reported
+//! `UNCONDITIONAL @ log21` from `zkgpu-tail-analyze`: 38/40 cells
+//! `global-big` (≥20% Global win), 2/40 cells `global-narrow` (S22
+//! log21inv +17.8%, S24 log22inv +18.7%) — every cell a Global win, just
+//! two slightly below the +20% "big" classification. Three driver major
+//! revisions across the cohort (`a927fb4` / `3b10981` / `24.0.x` /
+//! `25.2.x`) all show identical shape, reinforcing that the signal is
+//! microarchitecture-level, not a driver regression.
+//!
+//! Cross-vendor confirmation: the same-day G.1.4 FTL lottery rolled e2s
+//! (Galaxy S24+, Exynos 2400 variant) to Xclipse 940 and independently
+//! measured `UNCONDITIONAL @ log21` (weakest cell log 22 inv +27.0%),
+//! within measurement noise of the BrowserStack S24 result.
+//!
+//! As with Adreno and Mali, the collapse has no log_n floor within
+//! measurable range — smallest test (log 18) shows +62-84% wins on every
+//! Xclipse generation — so the rule is unconditional once a tail phase
+//! exists. Xclipse 540 (Exynos 1580, Galaxy A56) is still queued on FTL
+//! at this writing but not gating the rule decision: 3 Xclipse generations
+//! × 4 devices × 40 cells exceeds the G.1.4 Mali evidence bar. If Xclipse
+//! 540 fails to reproduce when it dequeues, we'd narrow the rule; absent
+//! evidence to the contrary, unconditional stands.
+//!
+//! Absolute performance: Xclipse 960 at 9.16 ms log22 fwd GlobalR4
+//! competes with Adreno 830 (6 ms) and Mali-G715 (15 ms); Xclipse 920 at
+//! 14–17 ms peers with 2022-cohort Mali/Adreno. All 3 measured gens pass
+//! the ≤17 ms capability gate established in G.1.3.
+//!
 //! ## Current policy
 //!
 //! * **Browser (any family):** `log_n ≥ 20 → GlobalOnlyR4` — conservative;
 //!   the sandbox hides the silicon and we have no field data to drop it.
 //! * **Native Adreno:** unconditional `GlobalOnlyR4` once a tail phase
 //!   exists (`log_n ≥ LOG_BLOCK`). Reason: `HeuristicAdrenoCollapse`.
-//! * **Native Mali / Xclipse / Apple / everything else:** `LocalFusedR4`.
-//!   The two Mali/Xclipse large-N flips PR 1 inherited from the
-//!   Xclipse-540 table were falsified by phase-e and are gone.
+//!   Covers 730/740/750/830/840.
+//! * **Native Mali:** unconditional `GlobalOnlyR4` once a tail phase
+//!   exists. Reason: `HeuristicMaliCollapse`. Covers G78/G710/G715 and
+//!   forward-extrapolates to G720/G725 (Valhall/Bifrost family, same
+//!   gather-collapse pathology).
+//! * **Native Xclipse:** unconditional `GlobalOnlyR4` once a tail phase
+//!   exists. Reason: `HeuristicXclipseCollapse`. Covers 920 (RDNA2) /
+//!   940 (RDNA3) / 960 (RDNA3+) measured, forward-extrapolates to 540
+//!   (pending a56x FTL dequeue) and future Exynos RDNA variants.
+//! * **Native Apple / everything else:** `LocalFusedR4`.
 //!
 //! Pure data only — no GPU calls — so the heuristic is unit-testable.
 
@@ -94,6 +167,18 @@ impl StockhamTailStrategy {
 /// `HeuristicAdrenoCollapse` was added in PR 3 (2026-04-15) after the
 /// generation-confirmation A/B on Adreno 730/740/750 reproduced the
 /// Xclipse-540 pathology.
+/// `HeuristicMaliCollapse` was added in G.1.4 (2026-04-16) after G.1.1 +
+/// G.1.3 measured 5 Mali devices across 4 silicon generations (G78 / G710 /
+/// G715×2, Tensor G1..G4) showing unconditional +33–88% GlobalOnlyR4 wins.
+/// The earlier phase-e shape (windowed at log 18 only) was falsified by
+/// G.1.1's scope-matched cold rerun.
+/// `HeuristicXclipseCollapse` was added in G.2.3 (2026-04-16) after the
+/// BrowserStack G.2.2 cohort (Xclipse 920/940/960 across 4 Samsung
+/// Galaxies, 3 driver major revisions) + FTL e2s lottery (Xclipse 940
+/// independent confirmation) reported unconditional +18–84% GlobalOnlyR4
+/// wins at every measured cell. Closed out the Xclipse data gap that had
+/// been open since PR 2's falsification of the original n=1
+/// Xclipse-540-based rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StockhamTailReason {
     /// BrowserWebGpu at log_n ≥ 20 — conservative; the browser hides the
@@ -104,6 +189,23 @@ pub(crate) enum StockhamTailReason {
     /// collapse at every measured size; see the module doc and
     /// `apps/android-harness/research/benchmarks/adreno-gen-confirm-2026-04-15/`.
     HeuristicAdrenoCollapse,
+    /// Native Mali — unconditional `GlobalOnlyR4` once a tail phase
+    /// exists. Four silicon generations (G78 / G710 / G715×2 on Tensor
+    /// G1..G4) reproduce the gather collapse at every measured size
+    /// (log 18..=22, +33–88% GlobalOnlyR4 wins, both directions, two Mali
+    /// driver major revisions r38 + r51). See the module doc and
+    /// `apps/android-harness/research/benchmarks/mali-scope-match-2026-04-16/`
+    /// + `mali-older-gen-2026-04-16/`.
+    HeuristicMaliCollapse,
+    /// Native Xclipse — unconditional `GlobalOnlyR4` once a tail phase
+    /// exists. Three silicon generations measured (Xclipse 920 / 940 / 960
+    /// on Exynos 2200 / 2400 / 2600) across 4 Samsung Galaxies and 3
+    /// driver major revisions all report unconditional +18–84%
+    /// GlobalOnlyR4 wins at every cell (log 18..=22, both directions).
+    /// Xclipse 540 queued on FTL as confirmation of the 4th generation;
+    /// not gating. See the module doc and
+    /// `apps/android-harness/research/benchmarks/browserstack-xclipse-cohort-2026-04-16/`.
+    HeuristicXclipseCollapse,
     /// Default — local fused remains fastest at all tested sizes for this
     /// (backend, family) combination, or no caps were available.
     HeuristicDefaultLocal,
@@ -120,6 +222,8 @@ impl StockhamTailReason {
         match self {
             Self::HeuristicBrowserConservative => "HeuristicBrowserConservative",
             Self::HeuristicAdrenoCollapse => "HeuristicAdrenoCollapse",
+            Self::HeuristicMaliCollapse => "HeuristicMaliCollapse",
+            Self::HeuristicXclipseCollapse => "HeuristicXclipseCollapse",
             Self::HeuristicDefaultLocal => "HeuristicDefaultLocal",
             Self::ForcedLocal => "ForcedLocal",
             Self::ForcedGlobal => "ForcedGlobal",
@@ -232,15 +336,49 @@ fn heuristic_default(
         );
     }
 
-    // Native Vulkan (other families): phase-e A/B (2026-04-15) falsified the two
-    // family-specific large-N flips PR 1 inherited from the Xclipse-540 scaling
-    // table. Current silicon (Xclipse 940, Mali-G715/G720) shows no collapse at
-    // log22 worth flipping for. See:
-    // `apps/android-harness/research/benchmarks/phase-e-tail-ab-2026-04-15/README.md`.
-    //
-    // The phase-e data did surface a small-N Mali win (log18-19, GlobalOnlyR4
-    // +30-50%) but with one mixed-signal device (comet). Adding that rule is
-    // deferred until the anomaly is explained.
+    // Native Vulkan Mali: G.1.1 (2026-04-16, scope-matched rerun on 3× G715)
+    // falsified the earlier phase-e windowed shape — cold forced-A/B with no
+    // preceding suite still produced +50-85% GlobalOnlyR4 wins across log
+    // 18..=22, matching the phase-f warm-run shape. G.1.3 (2026-04-16)
+    // confirmed the shape holds on older-gen Mali (G78 MP20 / G710 MC7) and
+    // across the older Mali driver major revision (r38p1 vs r51p0 on G715).
+    // Five devices × four silicon generations × two driver majors all report
+    // `UNCONDITIONAL @ log21`, weakest cell +33%. Same treatment as Adreno:
+    // unconditional flip once a tail phase exists — pathology is kernel-level
+    // and present at the smallest size we can measure. See:
+    // `apps/android-harness/research/benchmarks/mali-scope-match-2026-04-16/README.md`
+    // and `mali-older-gen-2026-04-16/README.md`.
+    if matches!(caps.gpu_family, GpuFamily::Mali) {
+        return (
+            StockhamTailStrategy::GlobalOnlyR4,
+            StockhamTailReason::HeuristicMaliCollapse,
+        );
+    }
+
+    // Native Vulkan Xclipse: G.2.2 (2026-04-16) ran the full
+    // ZkgpuInstrumentedTest on 4 Exynos-pinned Samsung Galaxies via
+    // BrowserStack App Automate (sidestepping the FTL region-split lottery):
+    // S22 + S22 Ultra (Xclipse 920 / Exynos 2200 / RDNA2, 2022), S24
+    // (Xclipse 940 / Exynos 2400, 2024), and S26 (Xclipse 960 / Exynos
+    // 2600, 2026). All 4 devices × 40 cells report UNCONDITIONAL @ log21
+    // (38/40 ≥+20% Global win, 2/40 `global-narrow` at +17.8% / +18.7%
+    // still Global wins). Three driver major revisions across the cohort
+    // (`a927fb4` / `3b10981` / `24.0.x` / `25.2.x`) all show identical
+    // shape. Cross-vendor confirmation via FTL e2s lottery (Xclipse 940
+    // Galaxy S24+) matched within noise. Same treatment as Adreno and
+    // Mali: unconditional flip once a tail phase exists — the pathology
+    // is kernel-level and present at the smallest tested size. See:
+    // `apps/android-harness/research/benchmarks/browserstack-xclipse-cohort-2026-04-16/README.md`.
+    if matches!(caps.gpu_family, GpuFamily::Xclipse) {
+        return (
+            StockhamTailStrategy::GlobalOnlyR4,
+            StockhamTailReason::HeuristicXclipseCollapse,
+        );
+    }
+
+    // Native Vulkan (other families / Apple / Unknown / Intel etc.):
+    // LocalFusedR4 is the legacy default. No field data has shown a
+    // collapse pattern on these families.
     (
         StockhamTailStrategy::LocalFusedR4,
         StockhamTailReason::HeuristicDefaultLocal,
@@ -285,38 +423,53 @@ mod tests {
     // -- Heuristic defaults --
 
     #[test]
-    fn xclipse_keeps_local_at_all_sizes() {
-        // PR 2 close-out (2026-04-15): the Xclipse log20 flip inherited from
-        // the Xclipse-540 measurement was falsified by phase-e A/B on
-        // Xclipse 940 (e1q/Galaxy S24). Large-N keeps LocalFusedR4.
+    fn xclipse_picks_global_tail_at_all_sizes() {
+        // G.2.3 (2026-04-16): G.2.2 BrowserStack cohort measured 4 Exynos-
+        // pinned Samsung Galaxies (S22 + S22 Ultra / Xclipse 920, S24 /
+        // Xclipse 940, S26 / Xclipse 960) plus an FTL e2s cross-vendor
+        // confirmation on Xclipse 940. All report `UNCONDITIONAL @ log21`
+        // — 38/40 cells ≥+20% Global win, 2/40 narrow at +17.8% / +18.7%
+        // (still Global wins). Three driver major revisions show identical
+        // shape. Same treatment as Adreno / Mali: flip is unconditional
+        // once a tail phase exists. See the module doc's
+        // "Xclipse collapse (G.2.3)" section.
+        //
+        // This test supersedes the PR 2 close-out
+        // `xclipse_keeps_local_at_all_sizes` assertion: that one was
+        // defensive after phase-e falsified the original n=1 Xclipse-540
+        // rule; G.2.2 supplied the multi-SKU evidence that was always
+        // supposed to decide the rule shape.
         let caps = Some(vulkan(GpuFamily::Xclipse));
-        for log_n in [18, 19, 20, 21, 22, 24] {
+        for log_n in [10, 15, 18, 22, 24] {
             let d = choose_stockham_tail(log_n, caps, StockhamTailOverride::Auto).unwrap();
             assert_eq!(
                 d.strategy,
-                StockhamTailStrategy::LocalFusedR4,
-                "Xclipse should keep local at log_n={log_n} after PR 2",
+                StockhamTailStrategy::GlobalOnlyR4,
+                "Xclipse must pick GlobalOnlyR4 at log_n={log_n}",
             );
-            assert_eq!(d.reason, StockhamTailReason::HeuristicDefaultLocal);
+            assert_eq!(d.reason, StockhamTailReason::HeuristicXclipseCollapse);
         }
     }
 
     #[test]
-    fn mali_keeps_local_at_all_sizes() {
-        // PR 2 close-out (2026-04-15): Mali @ log22 flip was falsified by
-        // phase-e A/B across G715/G720 — the collapse did not reproduce.
-        // A small-N Mali opportunity (log18-19) was surfaced but is deferred
-        // (see phase-e README), so the current heuristic keeps local for all
-        // log_n.
+    fn mali_picks_global_tail_at_all_sizes() {
+        // G.1.4 (2026-04-16): G.1.1 + G.1.3 measured 5 Mali devices across
+        // 4 silicon generations (G78 MP20 / G710 MC7 / G715 MC7 × 3) and 2
+        // Mali driver major revisions (r38p1 + r51p0) at log 18..=22, both
+        // directions. All 50 measured cells: GlobalOnlyR4 wins by +33% to
+        // +88% (weakest cell: panther log 20 inv at +33.0%). Same treatment
+        // as Adreno: flip is unconditional once a tail phase exists — the
+        // pathology is kernel-level and present at the smallest tested size.
+        // See the module doc's "Mali collapse (G.1.4)" section.
         let caps = Some(vulkan(GpuFamily::Mali));
-        for log_n in [18, 19, 20, 21, 22, 24] {
+        for log_n in [10, 15, 18, 22, 24] {
             let d = choose_stockham_tail(log_n, caps, StockhamTailOverride::Auto).unwrap();
             assert_eq!(
                 d.strategy,
-                StockhamTailStrategy::LocalFusedR4,
-                "Mali should keep local at log_n={log_n} after PR 2",
+                StockhamTailStrategy::GlobalOnlyR4,
+                "Mali must pick GlobalOnlyR4 at log_n={log_n}",
             );
-            assert_eq!(d.reason, StockhamTailReason::HeuristicDefaultLocal);
+            assert_eq!(d.reason, StockhamTailReason::HeuristicMaliCollapse);
         }
     }
 
