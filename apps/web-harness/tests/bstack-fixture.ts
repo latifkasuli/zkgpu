@@ -38,6 +38,12 @@ interface BrowserStackCaps {
   "browserstack.networkLogs"?: "true" | "false";
   "browserstack.consoleLogs"?: string;
   "client.playwrightVersion": string;
+
+  // Browser-launch tunables passed through to the remote browser.
+  // BrowserStack's CDP ingress forwards `args` to Chromium-family
+  // command lines and `firefox_user_prefs` to Firefox's about:config.
+  args?: string[];
+  firefox_user_prefs?: Record<string, string | number | boolean>;
 }
 
 export interface BstackProjectUse {
@@ -45,6 +51,10 @@ export interface BstackProjectUse {
   bstackOsVersion?: string;
   bstackBrowser?: string;
   bstackBrowserVersion?: string;
+  // Chromium-family command-line args (e.g. "--enable-unsafe-webgpu").
+  bstackArgs?: string[];
+  // Firefox about:config prefs (e.g. { "dom.webgpu.enabled": true }).
+  bstackFirefoxPrefs?: Record<string, string | number | boolean>;
 }
 
 function capsFromProject(
@@ -167,6 +177,10 @@ export const test = base.extend({
       "browserstack.networkLogs": "false",
       "browserstack.consoleLogs": "errors",
       "client.playwrightVersion": getPlaywrightVersion(),
+      ...(projectUse.bstackArgs ? { args: projectUse.bstackArgs } : {}),
+      ...(projectUse.bstackFirefoxPrefs
+        ? { firefox_user_prefs: projectUse.bstackFirefoxPrefs }
+        : {}),
     };
 
     // All BrowserStack Playwright sessions dial through the chromium

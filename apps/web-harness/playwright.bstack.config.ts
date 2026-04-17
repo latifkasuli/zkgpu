@@ -14,6 +14,21 @@ import { defineConfig } from "@playwright/test";
 
 const PROJECT_SUFFIX = "@browserstack";
 
+// Per-project defaults for the launch flags the bstack-fixture
+// forwards as caps. Chrome's `--enable-unsafe-webgpu` is belt-and-
+// braces for non-allowlisted adapters (cloud GPUs frequently fall
+// into this bucket). Firefox needs `dom.webgpu.enabled` on every
+// version through 2026 — WebGPU isn't on by default yet on desktop
+// Firefox builds BrowserStack serves.
+const CHROME_WEBGPU_ARGS = ["--enable-unsafe-webgpu"];
+const FIREFOX_WEBGPU_PREFS = {
+  "dom.webgpu.enabled": true,
+  // Firefox gates some WebGPU features behind Nightly; these are
+  // harmless on releases that don't honor them.
+  "dom.webgpu.workers.enabled": true,
+  "gfx.webrender.all": true,
+};
+
 export default defineConfig({
   testDir: "./tests",
   testMatch: "g02_tail_ab.spec.ts",
@@ -58,6 +73,7 @@ export default defineConfig({
         bstackBrowser: "chrome",
         bstackOs: "Windows",
         bstackOsVersion: "11",
+        bstackArgs: CHROME_WEBGPU_ARGS,
       } as any,
     },
     {
@@ -67,6 +83,7 @@ export default defineConfig({
         bstackBrowser: "playwright-firefox",
         bstackOs: "Windows",
         bstackOsVersion: "11",
+        bstackFirefoxPrefs: FIREFOX_WEBGPU_PREFS,
       } as any,
     },
 
@@ -78,6 +95,7 @@ export default defineConfig({
         bstackBrowser: "chrome",
         bstackOs: "OS X",
         bstackOsVersion: "Sonoma",
+        bstackArgs: CHROME_WEBGPU_ARGS,
       } as any,
     },
     {
@@ -87,6 +105,7 @@ export default defineConfig({
         bstackBrowser: "chrome",
         bstackOs: "OS X",
         bstackOsVersion: "Sequoia",
+        bstackArgs: CHROME_WEBGPU_ARGS,
       } as any,
     },
     {
@@ -96,6 +115,7 @@ export default defineConfig({
         bstackBrowser: "playwright-firefox",
         bstackOs: "OS X",
         bstackOsVersion: "Sonoma",
+        bstackFirefoxPrefs: FIREFOX_WEBGPU_PREFS,
       } as any,
     },
   ],
