@@ -13,10 +13,13 @@
     "test:chromium": "npx playwright test --project=chromium",
     "test:firefox": "npx playwright test --project=firefox",
     "test:webkit": "npx playwright test --project=webkit",
-    "test:headed": "npx playwright test --headed"
+    "test:headed": "npx playwright test --headed",
+    "test:bstack": "npx playwright test --config playwright.bstack.config.ts"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
+    "@playwright/test": "^1.57.0",
+    "browserstack-local": "^1.5.13",
+    "playwright": "^1.57.0",
     "typescript": "^5.4",
     "vite": "^6.0"
   }

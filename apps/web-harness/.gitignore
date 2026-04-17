@@ -2,3 +2,8 @@ node_modules/
 dist/
 pkg/
 .vite/
+log/
+local.log
+.browserstack-local-identifier
+test-results/
+playwright-report/

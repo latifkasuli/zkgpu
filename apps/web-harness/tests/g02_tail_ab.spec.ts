@@ -13,7 +13,11 @@
  * can send arbitrary HarnessRequest payloads without fighting the UI's
  * preset suite selector.
  */
-import { test, expect } from "@playwright/test";
+// Uses the custom fixture from bstack-fixture.ts — for local runs
+// (project name lacks `@browserstack`) this is a transparent re-export
+// of @playwright/test's `test`. For BrowserStack runs the `page`
+// fixture redials against `wss://cdp.browserstack.com/playwright`.
+import { test, expect } from "./bstack-fixture";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,7 +69,11 @@ test.describe("G.0.2 Browser WebGPU tail A/B", () => {
 
   for (const tail of ["Local", "Global"] as const) {
     test(`stockham ${tail} tail @ log ${LOGS.join(",")}`, async ({ page }, info) => {
-      const browserName = info.project.name;
+      // Sanitize project name for filenames. Local projects are plain
+      // ("chromium", "firefox"). BrowserStack SDK sets names like
+      // "chrome-latest:Windows 11-browserstack" — normalize spaces
+      // and colons so the JSON sits in a filesystem-safe path.
+      const browserName = info.project.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
 
       const consoleLines: string[] = [];
       page.on("console", (msg) => {
