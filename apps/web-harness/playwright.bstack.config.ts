@@ -118,5 +118,42 @@ export default defineConfig({
         bstackFirefoxPrefs: FIREFOX_WEBGPU_PREFS,
       } as any,
     },
+
+    // iOS Safari on real iPhone/iPad — WebGPU shipped in iOS 18.
+    // BrowserStack uses the Playwright-on-real-iOS channel (CDP
+    // endpoint is the same wss://cdp.browserstack.com/playwright;
+    // caps carry `device`/`realMobile`/`os_version` instead of
+    // `os`). Playwright's `browserName` field is `webkit` on the
+    // client but caps pass `playwright-webkit` to BrowserStack.
+    {
+      name: `iPhone 16 Pro@iOS 18.0${PROJECT_SUFFIX}`,
+      use: {
+        browserName: "webkit",
+        bstackBrowser: "playwright-webkit",
+        bstackDevice: "iPhone 16 Pro",
+        bstackOsVersion: "18.0",
+        bstackRealMobile: true,
+      } as any,
+    },
+    {
+      name: `iPhone 16 Pro@iOS 18.6${PROJECT_SUFFIX}`,
+      use: {
+        browserName: "webkit",
+        bstackBrowser: "playwright-webkit",
+        bstackDevice: "iPhone 16 Pro",
+        bstackOsVersion: "18.6",
+        bstackRealMobile: true,
+      } as any,
+    },
+    {
+      name: `iPad Pro 11 2021@iOS 18.6${PROJECT_SUFFIX}`,
+      use: {
+        browserName: "webkit",
+        bstackBrowser: "playwright-webkit",
+        bstackDevice: "iPad Pro 11 2021",
+        bstackOsVersion: "18.6",
+        bstackRealMobile: true,
+      } as any,
+    },
   ],
 });

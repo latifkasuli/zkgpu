@@ -24,8 +24,8 @@ import * as path from "node:path";
 
 interface BrowserStackCaps {
   browser: string;
-  browser_version: string;
-  os: string;
+  browser_version?: string;
+  os?: string;
   os_version: string;
   name: string;
   build: string;
@@ -39,6 +39,12 @@ interface BrowserStackCaps {
   "browserstack.consoleLogs"?: string;
   "client.playwrightVersion": string;
 
+  // Real-device caps (iOS iPhone/iPad). When `device` is set, the
+  // session is scheduled on a real mobile device rather than a desktop
+  // VM; `os_version` becomes the iOS version (e.g. "18.0").
+  device?: string;
+  realMobile?: "true" | "false";
+
   // Browser-launch tunables passed through to the remote browser.
   // BrowserStack's CDP ingress forwards `args` to Chromium-family
   // command lines and `firefox_user_prefs` to Firefox's about:config.
@@ -51,19 +57,40 @@ export interface BstackProjectUse {
   bstackOsVersion?: string;
   bstackBrowser?: string;
   bstackBrowserVersion?: string;
+  // Real-mobile-device targeting. When `bstackDevice` is set the
+  // session runs on a real iPhone/iPad rather than a desktop VM;
+  // `bstackOs` should be "ios" and `bstackOsVersion` the iOS release
+  // ("18.0", "18.2", "18.6"). `bstackOs` / `bstackOsVersion` are
+  // omitted entirely when `bstackDevice` is present and BrowserStack
+  // uses the device-version mapping implicit in the name.
+  bstackDevice?: string;
+  bstackRealMobile?: boolean;
   // Chromium-family command-line args (e.g. "--enable-unsafe-webgpu").
   bstackArgs?: string[];
   // Firefox about:config prefs (e.g. { "dom.webgpu.enabled": true }).
   bstackFirefoxPrefs?: Record<string, string | number | boolean>;
 }
 
+type DerivedCaps = Pick<
+  BrowserStackCaps,
+  "browser" | "browser_version" | "os" | "os_version" | "device" | "realMobile"
+>;
+
 function capsFromProject(
   name: string,
   use: BstackProjectUse,
-): Omit<BrowserStackCaps, "name" | "build" | "browserstack.username" | "browserstack.accessKey" | "browserstack.local" | "client.playwrightVersion"> {
-  // If the project's `use` block supplies bstack* fields, prefer
-  // them — unambiguous. Otherwise fall back to a best-effort parse
-  // of the project name.
+): DerivedCaps {
+  // Real iOS device: BrowserStack uses `device` + `os_version` and
+  // omits `os` (the device name determines the platform).
+  if (use.bstackDevice) {
+    return {
+      browser: use.bstackBrowser ?? "playwright-webkit",
+      os_version: use.bstackOsVersion ?? "",
+      device: use.bstackDevice,
+      realMobile: (use.bstackRealMobile ?? true) ? "true" : "false",
+    };
+  }
+  // Desktop VM: explicit bstack* fields preferred over name-parsing.
   if (use.bstackOs && use.bstackBrowser) {
     return {
       browser: use.bstackBrowser,
@@ -190,9 +217,14 @@ export const test = base.extend({
       `wss://cdp.browserstack.com/playwright?caps=` +
       encodeURIComponent(JSON.stringify(caps));
 
+    // iOS runs identify by `device`; desktop runs by `os`. Log whichever
+    // applies so the harness output stays readable across platforms.
+    const target = caps.device
+      ? `${caps.device} iOS ${caps.os_version}`
+      : `${caps.os ?? "?"} ${caps.os_version}`;
     console.log(
       `[bstack-fixture] Connecting to BrowserStack (`
-      + `${caps.browser}@${caps.browser_version} on ${caps.os} ${caps.os_version})`,
+      + `${caps.browser}@${caps.browser_version ?? "latest"} on ${target})`,
     );
     const browser = await playwright.chromium.connect({
       wsEndpoint,
@@ -201,7 +233,19 @@ export const test = base.extend({
     console.log(`[bstack-fixture] Connected — creating page`);
     // BrowserStack's CDP variant expects newPage() directly on the
     // Browser; it doesn't expose the regular newContext surface.
-    const remotePage = await browser.newPage({ baseURL });
+    //
+    // Real iOS/Android devices can't resolve `localhost` through the
+    // BrowserStack Local tunnel — the tunnel proxies hostname
+    // `bs-local.com` (127.0.0.1 in DNS on the device side) back to
+    // the dev machine's loopback. Swap the baseURL hostname when a
+    // real device cap is in play; desktop VMs keep plain `localhost`.
+    const effectiveBaseURL = caps.device && baseURL
+      ? baseURL.replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)/, "$1bs-local.com")
+      : baseURL;
+    if (caps.device && effectiveBaseURL !== baseURL) {
+      console.log(`[bstack-fixture] iOS/device — rewriting baseURL to ${effectiveBaseURL}`);
+    }
+    const remotePage = await browser.newPage({ baseURL: effectiveBaseURL });
     console.log(`[bstack-fixture] Page ready — handing to test`);
 
     try {

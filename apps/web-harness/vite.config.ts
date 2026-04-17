@@ -14,6 +14,11 @@ export default defineConfig({
     },
   },
   server: {
+    // Allow BrowserStack Local's real-device hostname (iOS/Android
+    // tunnel resolves localhost → bs-local.com, which then proxies
+    // back to the dev machine's loopback). Vite 6+ rejects unknown
+    // Host headers by default.
+    allowedHosts: ["bs-local.com"],
     headers: {
       // Required for SharedArrayBuffer (needed by some WebGPU impls)
       "Cross-Origin-Opener-Policy": "same-origin",
