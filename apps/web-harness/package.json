@@ -11,6 +11,7 @@
     "serve": "npm run build && npx serve dist",
     "test": "npx playwright test",
     "test:chromium": "npx playwright test --project=chromium",
+    "test:chromium-vulkan": "npx playwright test --project=chromium-vulkan",
     "test:firefox": "npx playwright test --project=firefox",
     "test:webkit": "npx playwright test --project=webkit",
     "test:headed": "npx playwright test --headed",

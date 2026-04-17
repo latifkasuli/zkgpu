@@ -35,10 +35,32 @@ export default defineConfig({
 
   projects: [
     {
+      // Default chromium project — uses the platform-native WebGPU
+      // backend (Metal on macOS via Dawn). `--enable-unsafe-webgpu`
+      // is the only flag needed on current Playwright Chromium; it
+      // allows WebGPU on adapters Chrome's allowlist doesn't
+      // recognize (Playwright's bundled build counts as unrecognized).
+      //
+      // Do NOT add `--enable-features=Vulkan` here — it forces
+      // Dawn→MoltenVK→Metal on macOS, which measures the MoltenVK
+      // translation layer, not Chrome users' actual WebGPU path.
+      // For that comparison, use the `chromium-vulkan` project below.
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        // Chromium needs these flags for WebGPU in headless mode
+        launchOptions: {
+          args: ["--enable-unsafe-webgpu"],
+        },
+      },
+    },
+    {
+      // Chromium forced onto the Vulkan backend (via MoltenVK on
+      // macOS, ICD on Linux). Retained for A/B vs the default so
+      // the MoltenVK translation cost is measurable rather than
+      // silently skewing the default numbers.
+      name: "chromium-vulkan",
+      use: {
+        ...devices["Desktop Chrome"],
         launchOptions: {
           args: [
             "--enable-unsafe-webgpu",
