@@ -95,11 +95,17 @@ impl FamilyOverride {
         }
     }
 
-    fn planner_policy(self) -> Option<PlannerPolicy> {
+    fn planner_policy(
+        self,
+        caps: &zkgpu_wgpu::CapabilityProfile,
+    ) -> Option<PlannerPolicy> {
         match self {
             Self::Auto => None,
-            Self::Stockham => Some(PlannerPolicy::stockham_only()),
-            Self::FourStep => Some(PlannerPolicy::force_four_step()),
+            // Build from caps first so `tail_caps_hint` is populated
+            // (lets per-family logic like `r8_max_log_leaf` kick in),
+            // then apply the forced family. T3.A (2026-04-17).
+            Self::Stockham => Some(PlannerPolicy::from_caps(caps).with_four_step_disabled()),
+            Self::FourStep => Some(PlannerPolicy::from_caps(caps).with_force_four_step()),
         }
     }
 }
@@ -341,7 +347,7 @@ fn build_plan(
     // Both overrides go into a single PlannerPolicy. If family is Auto we
     // still need a policy whenever tail is non-Auto, so we bootstrap from
     // device caps in that case. Mirrors the Android harness pattern.
-    match (family_override.planner_policy(), tail_override) {
+    match (family_override.planner_policy(device.caps()), tail_override) {
         (Some(policy), tail) => {
             let policy = policy.with_public_tail_override(tail.as_public());
             WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)

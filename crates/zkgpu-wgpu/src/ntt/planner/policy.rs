@@ -63,6 +63,53 @@ impl PlannerPolicy {
         self.four_step_threshold
     }
 
+    /// Per-(backend, family) cap on `log_leaf` where R8 leaves are used in
+    /// Four-Step. Values above this cap fall back to R4+R2.
+    ///
+    /// NVIDIA scale-up T3.A investigation (2026-04-17) found R8 behavior
+    /// varies by platform:
+    ///
+    /// - **Apple / Metal**: R8 wins consistently (M4 Pro measured 1.30×
+    ///   faster than R4 at log 22/23, 5/5 trials stable). No regression
+    ///   observed.
+    /// - **NVIDIA / Vulkan**: Bimodal at log 23–24 due to GPU memory-system
+    ///   regime (same pathology that affects Stockham at log 24). R4
+    ///   Four-Step sometimes hits a "fast mode" at log 23 that R8 can't
+    ///   reach; R8 wins median at log 24 but R4 wins median at log 23.
+    ///   Conservative cap at 11 keeps R8 wins at log_leaf ≤ 11 without
+    ///   risking the log-23 regression.
+    /// - **Others (Mali/Adreno/Xclipse/AMD/Intel)**: Not A/B-tested at
+    ///   log_leaf ≥ 12. Mobile workloads rarely exceed log 22 (log_leaf=11)
+    ///   so the cap is effectively unlimited in practice. Correctness is
+    ///   validated by the existing post-landing regression tests.
+    ///
+    /// Overridable via env var `ZKGPU_R8_MAX_LOG_LEAF` for investigation.
+    pub(crate) fn r8_max_log_leaf(&self) -> u32 {
+        // Env var override wins — used for A/B investigation (not a public
+        // knob).
+        if let Ok(s) = std::env::var("ZKGPU_R8_MAX_LOG_LEAF") {
+            if let Ok(v) = s.parse::<u32>() {
+                return v;
+            }
+        }
+        let Some(hint) = self.tail_caps_hint else {
+            // No device context (unit tests, fallback): conservative cap.
+            return 11;
+        };
+        use crate::caps::GpuFamily;
+        match (hint.backend, hint.gpu_family) {
+            // Apple Metal — measured win, no regression.
+            (wgpu::Backend::Metal, _) => u32::MAX,
+            // NVIDIA Vulkan — bimodal at log 23 on RTX 4090. Keep conservative.
+            (wgpu::Backend::Vulkan, GpuFamily::Nvidia)
+            | (wgpu::Backend::Dx12, GpuFamily::Nvidia) => 11,
+            // Everything else: ungate. Mobile families rarely reach
+            // log_leaf ≥ 12 in practice; correctness verified via
+            // post-landing tests.
+            _ => u32::MAX,
+        }
+    }
+
     /// Disable the four-step path while preserving every other policy field.
     ///
     /// Use when a benchmark or test needs to force Stockham on a device

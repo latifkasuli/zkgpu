@@ -236,7 +236,9 @@ fn planner_global_only_tail_matches_global_only_shape() {
     //   - Neither uses the local kernel.
     //   - Tail metadata still distinguishes them.
     for log_n in [LOG_BLOCK, 12, 15, 20, 22] {
-        let global_only = StockhamPlanConfig::new_global_only(log_n).unwrap();
+        // T3.A (2026-04-17): `new_global_only` takes `r8_max_log_leaf`.
+        // Tests use `u32::MAX` to exercise the R8-always path.
+        let global_only = StockhamPlanConfig::new_global_only(log_n, u32::MAX).unwrap();
         let global_tail = stockham_global_tail(log_n);
         assert_eq!(global_only.num_global_stages, global_tail.num_global_stages);
         assert!(!global_tail.use_local_kernel());
@@ -275,7 +277,7 @@ fn planner_tail_stride_bytes_only_set_for_local_fused() {
 
 #[test]
 fn four_step_log20_balanced() {
-    let c = FourStepPlanConfig::new(20).unwrap();
+    let c = FourStepPlanConfig::new(20, u32::MAX).unwrap();
     assert_eq!(c.n, 1 << 20);
     assert_eq!(c.row_log_n, 10);
     assert_eq!(c.col_log_n, 10);
@@ -287,7 +289,7 @@ fn four_step_log20_balanced() {
 
 #[test]
 fn four_step_log21_unbalanced() {
-    let c = FourStepPlanConfig::new(21).unwrap();
+    let c = FourStepPlanConfig::new(21, u32::MAX).unwrap();
     assert_eq!(c.n, 1 << 21);
     assert_eq!(c.row_log_n, 10);
     assert_eq!(c.col_log_n, 11);
@@ -297,7 +299,7 @@ fn four_step_log21_unbalanced() {
 
 #[test]
 fn four_step_dispatch_count() {
-    let c = FourStepPlanConfig::new(20).unwrap();
+    let c = FourStepPlanConfig::new(20, u32::MAX).unwrap();
     // Post-T3.A (2026-04-17) with R8/R4/R2 factoring for leaves of log 10:
     //   log 10 = 3 R8 (9 stages) + 1 R2 (1 stage) = 4 dispatches per leaf
     //   (pre-T3.A was 5 R4 = 5 dispatches per leaf)

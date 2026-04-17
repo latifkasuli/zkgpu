@@ -30,7 +30,11 @@ impl FourStepPlanConfig {
     /// Plan a four-step NTT of size `2^log_n`.
     ///
     /// Uses a balanced factorization: rows = 2^floor(log_n/2), cols = 2^ceil(log_n/2).
-    pub fn new(log_n: u32) -> Result<Self, ZkGpuError> {
+    ///
+    /// `r8_max_log_leaf` caps the leaf-size at which R8 leaves engage; pass
+    /// the value from `PlannerPolicy::r8_max_log_leaf()`. Test-only callers
+    /// can use `u32::MAX` (R8 always on) or 0 (R4 only).
+    pub fn new(log_n: u32, r8_max_log_leaf: u32) -> Result<Self, ZkGpuError> {
         if log_n == 0 || log_n > MAX_LOG_N {
             return Err(ZkGpuError::InvalidNttSize(format!(
                 "log_n={log_n} out of range (must be 1..={MAX_LOG_N})"
@@ -43,8 +47,8 @@ impl FourStepPlanConfig {
         let rows = 1u32 << row_log_n;
         let cols = 1u32 << col_log_n;
 
-        let row_leaf = StockhamPlanConfig::new_global_only(col_log_n)?;
-        let col_leaf = StockhamPlanConfig::new_global_only(row_log_n)?;
+        let row_leaf = StockhamPlanConfig::new_global_only(col_log_n, r8_max_log_leaf)?;
+        let col_leaf = StockhamPlanConfig::new_global_only(row_log_n, r8_max_log_leaf)?;
 
         let transpose_tile = TRANSPOSE_TILE;
         let transpose_workgroups_x = cols.div_ceil(transpose_tile);

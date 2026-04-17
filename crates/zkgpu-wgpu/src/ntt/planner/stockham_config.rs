@@ -202,6 +202,10 @@ impl StockhamPlanConfig {
     /// `FourStepPlan`. Top-level Stockham still uses R4-only factoring via
     /// `Self::new(log_n, None)`.
     ///
+    /// `r8_max_log_leaf` caps the leaf size at which R8 is used. See
+    /// [`PlannerPolicy::r8_max_log_leaf`](super::policy::PlannerPolicy::r8_max_log_leaf)
+    /// for the per-family decision table.
+    ///
     /// Greedy factoring:
     ///   num_r8 = num_stages / 3
     ///   remainder = num_stages % 3
@@ -210,7 +214,7 @@ impl StockhamPlanConfig {
     ///
     /// Dispatch ordering: R8 stages run first (s = 1, 8, 64, …), then R4
     /// stages (s = 8^num_r8, …), then optional R2 residue.
-    pub fn new_global_only(log_n: u32) -> Result<Self, ZkGpuError> {
+    pub fn new_global_only(log_n: u32, r8_max_log_leaf: u32) -> Result<Self, ZkGpuError> {
         if log_n == 0 || log_n > MAX_LOG_N {
             return Err(ZkGpuError::InvalidNttSize(format!(
                 "log_n={log_n} out of range (must be 1..={MAX_LOG_N})"
@@ -223,24 +227,10 @@ impl StockhamPlanConfig {
         let num_butterflies = n / 2;
         let global_workgroups = num_butterflies.div_ceil(WORKGROUP_SIZE);
 
-        // T3.A gate (2026-04-17): RTX 4090 measurement showed R8 at
-        // log_leaf ≥ 12 is 1.73× SLOWER per dispatch than R4 (27.78 ms vs
-        // 16.07 ms at log 24 Four-Step). Per-stage breakdown shows each
-        // R8 stage at log 24 takes ~2200 µs uniformly — the R4 equivalent
-        // takes ~150 µs. Suspected shader-compiler regression at this
-        // parameter band; root cause investigation ongoing. Falling back
-        // to R4+R2 for log_leaf ≥ 12 keeps the log-24 performance at
-        // pre-T3.A baseline while still capturing R8 wins at log_leaf
-        // ≤ 11 (i.e. log 22 Four-Step, where leaf size is 11).
-        //
-        // Override the gate for investigation via the env var
-        // `ZKGPU_R8_MAX_LOG_LEAF` (any u32). Not exposed as a public
-        // knob — purely for root-cause A/B.
-        const R8_MAX_LOG_LEAF_DEFAULT: u32 = 11;
-        let r8_max_log_leaf = std::env::var("ZKGPU_R8_MAX_LOG_LEAF")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(R8_MAX_LOG_LEAF_DEFAULT);
+        // T3.A gate (2026-04-17): passed in per-family from PlannerPolicy.
+        // See `PlannerPolicy::r8_max_log_leaf` for the per-(backend, family)
+        // decision matrix and evidence base (M4 Pro, RTX 4090 5-trial
+        // medians).
         let use_r8 = num_global_stages <= r8_max_log_leaf;
 
         // Greedy R8 → R4 → R2 factoring.

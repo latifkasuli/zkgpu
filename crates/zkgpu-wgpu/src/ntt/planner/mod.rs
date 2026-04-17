@@ -37,7 +37,10 @@ pub(crate) fn plan_ntt(log_n: u32, policy: &PlannerPolicy) -> Result<PlannedNtt,
 
     if let Some(threshold) = policy.four_step_threshold {
         if log_n >= threshold {
-            return Ok(PlannedNtt::FourStep(FourStepPlanConfig::new(log_n)?));
+            return Ok(PlannedNtt::FourStep(FourStepPlanConfig::new(
+                log_n,
+                policy.r8_max_log_leaf(),
+            )?));
         }
     }
 
