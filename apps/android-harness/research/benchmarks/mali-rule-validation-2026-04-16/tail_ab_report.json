@@ -1,0 +1,852 @@
+{
+  "benchmark_dir": "apps/android-harness/research/benchmarks/mali-rule-validation-2026-04-16",
+  "devices": [
+    {
+      "device": "b0q",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 2.0,
+          "global_gpu_ms": 0.74,
+          "global_win_ratio": 0.63
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 2.14,
+          "global_gpu_ms": 0.99,
+          "global_win_ratio": 0.5373831775700935
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 3.78,
+          "global_gpu_ms": 1.5,
+          "global_win_ratio": 0.6031746031746031
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 4.4,
+          "global_gpu_ms": 1.94,
+          "global_win_ratio": 0.5590909090909092
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 8.66,
+          "global_gpu_ms": 2.98,
+          "global_win_ratio": 0.6558891454965358
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 9.32,
+          "global_gpu_ms": 3.87,
+          "global_win_ratio": 0.5847639484978541
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 15.09,
+          "global_gpu_ms": 6.36,
+          "global_win_ratio": 0.5785288270377734
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 17.57,
+          "global_gpu_ms": 7.98,
+          "global_win_ratio": 0.545816733067729
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 33.08,
+          "global_gpu_ms": 12.67,
+          "global_win_ratio": 0.6169891172914147
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 36.82,
+          "global_gpu_ms": 15.88,
+          "global_win_ratio": 0.5687126561651276
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "comet",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 5.75,
+          "global_gpu_ms": 1.73,
+          "global_win_ratio": 0.6991304347826086
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 9.2,
+          "global_gpu_ms": 2.65,
+          "global_win_ratio": 0.7119565217391304
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 12.41,
+          "global_gpu_ms": 2.61,
+          "global_win_ratio": 0.7896857373086221
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 9.76,
+          "global_gpu_ms": 2.43,
+          "global_win_ratio": 0.7510245901639344
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 17.27,
+          "global_gpu_ms": 6.82,
+          "global_win_ratio": 0.6050955414012739
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 19.46,
+          "global_gpu_ms": 14.14,
+          "global_win_ratio": 0.2733812949640288
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 24.24,
+          "global_gpu_ms": 13.13,
+          "global_win_ratio": 0.45833333333333326
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 23.67,
+          "global_gpu_ms": 8.3,
+          "global_win_ratio": 0.6493451626531475
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 47.9,
+          "global_gpu_ms": 16.02,
+          "global_win_ratio": 0.665553235908142
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 49.95,
+          "global_gpu_ms": 16.23,
+          "global_win_ratio": 0.675075075075075
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "e1q",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 0.46,
+          "global_gpu_ms": 0.27,
+          "global_win_ratio": 0.41304347826086957
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 0.9,
+          "global_gpu_ms": 0.32,
+          "global_win_ratio": 0.6444444444444445
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 2.25,
+          "global_gpu_ms": 0.63,
+          "global_win_ratio": 0.7200000000000001
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 2.06,
+          "global_gpu_ms": 0.71,
+          "global_win_ratio": 0.6553398058252428
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 5.42,
+          "global_gpu_ms": 1.72,
+          "global_win_ratio": 0.6826568265682658
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 5.52,
+          "global_gpu_ms": 1.85,
+          "global_win_ratio": 0.6648550724637681
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 12.98,
+          "global_gpu_ms": 3.98,
+          "global_win_ratio": 0.6933744221879815
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 10.6,
+          "global_gpu_ms": 4.44,
+          "global_win_ratio": 0.5811320754716981
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 24.38,
+          "global_gpu_ms": 8.45,
+          "global_win_ratio": 0.6534044298605415
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 21.56,
+          "global_gpu_ms": 9.63,
+          "global_win_ratio": 0.5533395176252318
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "e1q-reroll",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 0.46,
+          "global_gpu_ms": 0.28,
+          "global_win_ratio": 0.3913043478260869
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 0.89,
+          "global_gpu_ms": 0.32,
+          "global_win_ratio": 0.6404494382022472
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 2.25,
+          "global_gpu_ms": 0.68,
+          "global_win_ratio": 0.6977777777777777
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 2.16,
+          "global_gpu_ms": 0.75,
+          "global_win_ratio": 0.6527777777777778
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 5.15,
+          "global_gpu_ms": 1.72,
+          "global_win_ratio": 0.6660194174757282
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 4.94,
+          "global_gpu_ms": 1.91,
+          "global_win_ratio": 0.6133603238866396
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 12.21,
+          "global_gpu_ms": 4.37,
+          "global_win_ratio": 0.6420966420966421
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 11.34,
+          "global_gpu_ms": 4.56,
+          "global_win_ratio": 0.5978835978835979
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 24.64,
+          "global_gpu_ms": 8.78,
+          "global_win_ratio": 0.6436688311688312
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 21.16,
+          "global_gpu_ms": 9.41,
+          "global_win_ratio": 0.5552930056710775
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "e2q",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 0.46,
+          "global_gpu_ms": 0.34,
+          "global_win_ratio": 0.2608695652173913
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 0.93,
+          "global_gpu_ms": 0.4,
+          "global_win_ratio": 0.5698924731182796
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 2.34,
+          "global_gpu_ms": 0.85,
+          "global_win_ratio": 0.6367521367521367
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 2.17,
+          "global_gpu_ms": 0.92,
+          "global_win_ratio": 0.5760368663594471
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 5.42,
+          "global_gpu_ms": 2.08,
+          "global_win_ratio": 0.6162361623616236
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 5.12,
+          "global_gpu_ms": 2.14,
+          "global_win_ratio": 0.58203125
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 12.66,
+          "global_gpu_ms": 4.34,
+          "global_win_ratio": 0.6571879936808847
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 11.43,
+          "global_gpu_ms": 4.7,
+          "global_win_ratio": 0.5888013998250219
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 26.14,
+          "global_gpu_ms": 8.57,
+          "global_win_ratio": 0.672149961744453
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 21.76,
+          "global_gpu_ms": 9.43,
+          "global_win_ratio": 0.5666360294117647
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "e2s",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 1.83,
+          "global_gpu_ms": 0.54,
+          "global_win_ratio": 0.7049180327868853
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 1.86,
+          "global_gpu_ms": 0.49,
+          "global_win_ratio": 0.7365591397849462
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 3.1,
+          "global_gpu_ms": 1.26,
+          "global_win_ratio": 0.5935483870967742
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 3.39,
+          "global_gpu_ms": 1.54,
+          "global_win_ratio": 0.5457227138643068
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 5.84,
+          "global_gpu_ms": 2.67,
+          "global_win_ratio": 0.5428082191780822
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 7.06,
+          "global_gpu_ms": 2.75,
+          "global_win_ratio": 0.6104815864022662
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 11.75,
+          "global_gpu_ms": 6.29,
+          "global_win_ratio": 0.4646808510638298
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 13.0,
+          "global_gpu_ms": 7.18,
+          "global_win_ratio": 0.4476923076923077
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 18.2,
+          "global_gpu_ms": 11.75,
+          "global_win_ratio": 0.35439560439560436
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 18.55,
+          "global_gpu_ms": 13.54,
+          "global_win_ratio": 0.2700808625336928
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "husky",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 8.02,
+          "global_gpu_ms": 1.1,
+          "global_win_ratio": 0.8628428927680798
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 6.17,
+          "global_gpu_ms": 1.32,
+          "global_win_ratio": 0.786061588330632
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 9.07,
+          "global_gpu_ms": 3.48,
+          "global_win_ratio": 0.6163175303197354
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 8.6,
+          "global_gpu_ms": 4.08,
+          "global_win_ratio": 0.5255813953488372
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 17.76,
+          "global_gpu_ms": 5.12,
+          "global_win_ratio": 0.7117117117117117
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 16.4,
+          "global_gpu_ms": 5.73,
+          "global_win_ratio": 0.6506097560975609
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 25.62,
+          "global_gpu_ms": 9.52,
+          "global_win_ratio": 0.6284153005464481
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 25.95,
+          "global_gpu_ms": 12.1,
+          "global_win_ratio": 0.5337186897880539
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 49.93,
+          "global_gpu_ms": 16.43,
+          "global_win_ratio": 0.6709393150410575
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 51.91,
+          "global_gpu_ms": 18.4,
+          "global_win_ratio": 0.6455403583124639
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "komodo",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 11.88,
+          "global_gpu_ms": 0.61,
+          "global_win_ratio": 0.9486531986531987
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 10.33,
+          "global_gpu_ms": 0.91,
+          "global_win_ratio": 0.9119070667957405
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 9.92,
+          "global_gpu_ms": 1.87,
+          "global_win_ratio": 0.811491935483871
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 9.34,
+          "global_gpu_ms": 3.01,
+          "global_win_ratio": 0.6777301927194861
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 14.01,
+          "global_gpu_ms": 4.86,
+          "global_win_ratio": 0.6531049250535331
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 16.37,
+          "global_gpu_ms": 7.01,
+          "global_win_ratio": 0.5717776420281002
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 25.26,
+          "global_gpu_ms": 9.31,
+          "global_win_ratio": 0.6314330958036422
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 22.97,
+          "global_gpu_ms": 7.99,
+          "global_win_ratio": 0.6521549847627339
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 47.97,
+          "global_gpu_ms": 11.94,
+          "global_win_ratio": 0.7510944340212633
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 49.87,
+          "global_gpu_ms": 15.91,
+          "global_win_ratio": 0.6809705233607378
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "oriole",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 5.21,
+          "global_gpu_ms": 0.7,
+          "global_win_ratio": 0.8656429942418425
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 4.94,
+          "global_gpu_ms": 0.84,
+          "global_win_ratio": 0.8299595141700405
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 8.99,
+          "global_gpu_ms": 1.9,
+          "global_win_ratio": 0.7886540600667408
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 9.38,
+          "global_gpu_ms": 2.14,
+          "global_win_ratio": 0.7718550106609807
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 18.7,
+          "global_gpu_ms": 3.9,
+          "global_win_ratio": 0.7914438502673796
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 19.6,
+          "global_gpu_ms": 4.52,
+          "global_win_ratio": 0.7693877551020408
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 22.85,
+          "global_gpu_ms": 8.76,
+          "global_win_ratio": 0.6166301969365428
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 20.93,
+          "global_gpu_ms": 10.02,
+          "global_win_ratio": 0.5212613473483039
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 41.96,
+          "global_gpu_ms": 17.39,
+          "global_win_ratio": 0.5855576739752145
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 43.59,
+          "global_gpu_ms": 19.1,
+          "global_win_ratio": 0.5618261069052535
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "pa3q",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 0.32,
+          "global_gpu_ms": 0.22,
+          "global_win_ratio": 0.3125
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 0.56,
+          "global_gpu_ms": 0.28,
+          "global_win_ratio": 0.5
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 1.5,
+          "global_gpu_ms": 0.48,
+          "global_win_ratio": 0.68
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 1.39,
+          "global_gpu_ms": 0.6,
+          "global_win_ratio": 0.5683453237410072
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 3.61,
+          "global_gpu_ms": 1.2,
+          "global_win_ratio": 0.6675900277008311
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 3.67,
+          "global_gpu_ms": 1.34,
+          "global_win_ratio": 0.6348773841961853
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 7.43,
+          "global_gpu_ms": 3.07,
+          "global_win_ratio": 0.5868102288021534
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 7.73,
+          "global_gpu_ms": 3.37,
+          "global_win_ratio": 0.5640362225097024
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 14.79,
+          "global_gpu_ms": 6.02,
+          "global_win_ratio": 0.5929682217714672
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 15.51,
+          "global_gpu_ms": 6.79,
+          "global_win_ratio": 0.5622179239200515
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "panther",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 10.15,
+          "global_gpu_ms": 1.6,
+          "global_win_ratio": 0.8423645320197045
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 8.95,
+          "global_gpu_ms": 2.12,
+          "global_win_ratio": 0.7631284916201116
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 15.22,
+          "global_gpu_ms": 4.11,
+          "global_win_ratio": 0.7299605781865965
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 10.89,
+          "global_gpu_ms": 4.14,
+          "global_win_ratio": 0.6198347107438017
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 17.8,
+          "global_gpu_ms": 9.05,
+          "global_win_ratio": 0.49157303370786515
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 19.23,
+          "global_gpu_ms": 12.64,
+          "global_win_ratio": 0.34269370774830993
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 27.27,
+          "global_gpu_ms": 16.2,
+          "global_win_ratio": 0.40594059405940597
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 25.69,
+          "global_gpu_ms": 12.55,
+          "global_win_ratio": 0.5114830673413779
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 52.22,
+          "global_gpu_ms": 17.76,
+          "global_win_ratio": 0.6599004212945231
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 55.03,
+          "global_gpu_ms": 17.33,
+          "global_win_ratio": 0.6850808649827367
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    }
+  ]
+}

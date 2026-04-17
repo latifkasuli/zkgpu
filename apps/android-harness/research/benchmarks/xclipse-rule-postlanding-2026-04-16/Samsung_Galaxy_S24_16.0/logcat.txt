@@ -1,0 +1,1055 @@
+==== TESTCASE: crossoverStockhamLocalTail (f8477d7a349d0c4f7da5875ee9f6f0d6a82e55489be017de) ====
+04-16 16:28:39.884 I/g.zkgpu.harness(20528): Late-enabling -Xcheck:jni
+04-16 16:28:39.902 I/g.zkgpu.harness(20528): Using CollectorTypeCMC GC.
+04-16 16:28:39.910 D/nativeloader(20528): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:28:39.913 D/ActivityThread(20528): setConscryptValidator
+04-16 16:28:39.913 D/ActivityThread(20528): setConscryptValidator - put
+04-16 16:28:39.937 W/ActivityThread(20528): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:28:39.949 D/nativeloader(20528): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:28:39.955 V/GraphicsEnvironment(20528): Currently set values for:
+04-16 16:28:39.955 V/GraphicsEnvironment(20528):   angle_gl_driver_selection_pkgs=[]
+04-16 16:28:39.955 V/GraphicsEnvironment(20528):   angle_gl_driver_selection_values=[]
+04-16 16:28:39.955 V/GraphicsEnvironment(20528): org.zkgpu.harness is not listed in per-application setting
+04-16 16:28:39.955 V/GraphicsEnvironment(20528): ANGLE allowlist from config: 
+04-16 16:28:39.955 V/GraphicsEnvironment(20528): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:28:39.955 V/GraphicsEnvironment(20528): App is not on the allowlist for updatable production driver.
+04-16 16:28:39.991 I/AndroidJUnitRunner(20528): newApplication android.app.Application
+04-16 16:28:39.992 I/AndroidJUnitRunner(20528): onCreate Bundle[mParcelledData.dataSize=164]
+04-16 16:28:39.992 D/AndroidJUnitRunner(20528): Use the raw file system for managing file I/O.
+04-16 16:28:39.996 V/TestEventClient(20528): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:28:39.997 D/AndroidJUnitRunner(20528): onStart is called.
+04-16 16:28:40.002 I/InstrConnection(20528): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:28:40.013 I/TestRunner(20528): run started: 1 tests
+04-16 16:28:40.013 I/TestRunner(20528): started: crossoverStockhamLocalTail(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:28:40.024 D/nativeloader(20528): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:28:40.025 D/vulkan  (20528): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:28:40.025 D/vulkan  (20528): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:28:40.025 D/vulkan  (20528): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:28:40.026 I/vulkan  (20528): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:28:40.026 V/XGL     (20528): ----------------------------------------------------------------------
+04-16 16:28:40.026 V/XGL     (20528): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:28:40.026 V/XGL     (20528): SUMD version revision number   = 1fc295b0d2
+04-16 16:28:40.026 V/XGL     (20528): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:28:40.026 V/XGL     (20528): ----------------------------------------------------------------------
+04-16 16:28:40.026 V/XGL     (20528): Entering: Create
+04-16 16:28:40.035 V/XGL     (20528): Exiting: Create
+04-16 16:28:40.055 I/GSC     (20528): SID[0] : 7a8c4124979ab702, Kind: 3, time : 10.244 ms
+04-16 16:28:40.065 I/GSC     (20528): SID[1] : 24ac4d8737310efd, Kind: 3, time : 8.865 ms
+04-16 16:28:40.316 I/GSC     (20528): SID[2] : 9b7ac20048a4c0ff, Kind: 3, time : 242.664 ms
+04-16 16:28:40.341 I/GSC     (20528): SID[3] : ad3789b010d981b8, Kind: 3, time : 4.841 ms
+04-16 16:28:40.351 I/GSC     (20528): SID[4] : 18145002e82bd6ca, Kind: 3, time : 8.387 ms
+04-16 16:28:40.371 I/GSC     (20528): SID[5] : 7efd304e0a0e988c, Kind: 3, time : 15.265 ms
+04-16 16:28:40.379 I/GSC     (20528): SID[6] : a707a6e013953087, Kind: 3, time : 3.125 ms
+04-16 16:28:42.277 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json family_override=Stockham tail_override=Local
+04-16 16:28:42.281 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL kernel.ntt_variant=stockham kernel.stockham_tail_strategy=LocalFusedR4
+04-16 16:28:42.281 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL device name="Samsung Xclipse 940" backend=Vulkan tier=UnifiedMemoryNative family=Xclipse driver="Driver version: 24.0.545, git hash: 1fc295b0d2 " max_buffer=268435456 max_wg_x=256 max_invocations=256 max_wg_storage_bytes=16352
+04-16 16:28:42.281 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log18: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=1024 wall=3.82ms gpu=2.68ms
+04-16 16:28:42.281 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log18 stage[0] "r4 stages 0+1" gpu=0.130ms
+04-16 16:28:42.281 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log18 stage[1] "r4 stages 2+3" gpu=0.092ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log18 stage[2] "r4 stages 4+5" gpu=0.090ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log18 stage[3] "r4 stages 6+7" gpu=0.090ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log18 stage[4] "local fused" gpu=2.275ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log18: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=1024 wall=3.68ms gpu=2.56ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log18 stage[0] "r4 stages 0+1" gpu=0.131ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log18 stage[1] "r4 stages 2+3" gpu=0.088ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log18 stage[2] "r4 stages 4+5" gpu=0.083ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log18 stage[3] "r4 stages 6+7" gpu=0.083ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log18 stage[4] "local fused" gpu=1.999ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log18 stage[5] "inverse scale" gpu=0.178ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log19: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=2048 wall=5.53ms gpu=4.10ms
+04-16 16:28:42.282 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log19 stage[0] "r4 stages 0+1" gpu=0.259ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log19 stage[1] "r4 stages 2+3" gpu=0.160ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log19 stage[2] "r4 stages 4+5" gpu=0.138ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log19 stage[3] "r4 stages 6+7" gpu=0.134ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log19 stage[4] "r2 stage 8" gpu=0.126ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log19 stage[5] "local fused" gpu=3.285ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log19: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=2048 wall=6.03ms gpu=4.40ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log19 stage[0] "r4 stages 0+1" gpu=0.261ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log19 stage[1] "r4 stages 2+3" gpu=0.164ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log19 stage[2] "r4 stages 4+5" gpu=0.143ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log19 stage[3] "r4 stages 6+7" gpu=0.137ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log19 stage[4] "r2 stage 8" gpu=0.128ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log19 stage[5] "local fused" gpu=3.286ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log19 stage[6] "inverse scale" gpu=0.284ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log20: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=4096 wall=11.08ms gpu=8.83ms
+04-16 16:28:42.283 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log20 stage[0] "r4 stages 0+1" gpu=0.812ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log20 stage[1] "r4 stages 2+3" gpu=0.516ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log20 stage[2] "r4 stages 4+5" gpu=0.435ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log20 stage[3] "r4 stages 6+7" gpu=0.426ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log20 stage[4] "r4 stages 8+9" gpu=0.409ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log20 stage[5] "local fused" gpu=6.233ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log20: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=4096 wall=8.73ms gpu=6.71ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log20 stage[0] "r4 stages 0+1" gpu=0.376ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log20 stage[1] "r4 stages 2+3" gpu=0.248ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log20 stage[2] "r4 stages 4+5" gpu=0.220ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log20 stage[3] "r4 stages 6+7" gpu=0.213ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log20 stage[4] "r4 stages 8+9" gpu=0.220ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log20 stage[5] "local fused" gpu=5.029ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log20 stage[6] "inverse scale" gpu=0.407ms
+04-16 16:28:42.284 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log21: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=8192 wall=14.03ms gpu=11.57ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log21 stage[0] "r4 stages 0+1" gpu=0.692ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log21 stage[1] "r4 stages 2+3" gpu=0.466ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log21 stage[2] "r4 stages 4+5" gpu=0.427ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log21 stage[3] "r4 stages 6+7" gpu=0.424ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log21 stage[4] "r4 stages 8+9" gpu=0.418ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log21 stage[5] "r2 stage 10" gpu=0.393ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log21 stage[6] "local fused" gpu=8.748ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=8192 wall=13.20ms gpu=10.54ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21 stage[0] "r4 stages 0+1" gpu=0.716ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21 stage[1] "r4 stages 2+3" gpu=0.480ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21 stage[2] "r4 stages 4+5" gpu=0.442ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21 stage[3] "r4 stages 6+7" gpu=0.436ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21 stage[4] "r4 stages 8+9" gpu=0.426ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21 stage[5] "r2 stage 10" gpu=0.432ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21 stage[6] "local fused" gpu=7.023ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log21 stage[7] "inverse scale" gpu=0.586ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log22: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=16384 wall=18.01ms gpu=15.44ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log22 stage[0] "r4 stages 0+1" gpu=1.260ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log22 stage[1] "r4 stages 2+3" gpu=0.836ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log22 stage[2] "r4 stages 4+5" gpu=0.745ms
+04-16 16:28:42.285 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log22 stage[3] "r4 stages 6+7" gpu=0.741ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log22 stage[4] "r4 stages 8+9" gpu=0.717ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log22 stage[5] "r4 stages 10+11" gpu=0.737ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL forward_log22 stage[6] "local fused" gpu=10.404ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22: family=stockham tail=LocalFusedR4 reason=ForcedLocal stride_bytes=16384 wall=16.94ms gpu=14.57ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22 stage[0] "r4 stages 0+1" gpu=1.192ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22 stage[1] "r4 stages 2+3" gpu=0.806ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22 stage[2] "r4 stages 4+5" gpu=0.733ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22 stage[3] "r4 stages 6+7" gpu=0.720ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22 stage[4] "r4 stages 8+9" gpu=0.702ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22 stage[5] "r4 stages 10+11" gpu=0.714ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22 stage[6] "local fused" gpu=8.828ms
+04-16 16:28:42.286 I/ZkgpuHarnessTest(20528): CROSSOVER_STOCKHAM_LOCAL_TAIL inverse_log22 stage[7] "inverse scale" gpu=0.873ms
+04-16 16:28:42.286 I/TestRunner(20528): finished: crossoverStockhamLocalTail(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:28:42.289 I/TestRunner(20528): run finished: 1 tests, 0 failed, 0 ignored
+04-16 16:28:43.665 D/io_stats(  625): !@ Read_top(KB): g.zkgpu.harness(20528) 592 kworker/7:1H(9453) 8
+
+==== TESTCASE: crossoverStockhamGlobalTail (f8477d7a349d0c4f7da5875ee9f6f0d6a82e55482e258e98) ====
+04-16 16:28:53.405 I/g.zkgpu.harness(22931): Late-enabling -Xcheck:jni
+04-16 16:28:53.425 I/g.zkgpu.harness(22931): Using CollectorTypeCMC GC.
+04-16 16:28:53.433 D/nativeloader(22931): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:28:53.436 D/ActivityThread(22931): setConscryptValidator
+04-16 16:28:53.436 D/ActivityThread(22931): setConscryptValidator - put
+04-16 16:28:53.462 W/ActivityThread(22931): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:28:53.476 D/nativeloader(22931): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:28:53.483 V/GraphicsEnvironment(22931): Currently set values for:
+04-16 16:28:53.483 V/GraphicsEnvironment(22931):   angle_gl_driver_selection_pkgs=[]
+04-16 16:28:53.483 V/GraphicsEnvironment(22931):   angle_gl_driver_selection_values=[]
+04-16 16:28:53.483 V/GraphicsEnvironment(22931): org.zkgpu.harness is not listed in per-application setting
+04-16 16:28:53.483 V/GraphicsEnvironment(22931): ANGLE allowlist from config: 
+04-16 16:28:53.483 V/GraphicsEnvironment(22931): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:28:53.484 V/GraphicsEnvironment(22931): App is not on the allowlist for updatable production driver.
+04-16 16:28:53.516 I/AndroidJUnitRunner(22931): newApplication android.app.Application
+04-16 16:28:53.517 I/AndroidJUnitRunner(22931): onCreate Bundle[mParcelledData.dataSize=164]
+04-16 16:28:53.517 D/AndroidJUnitRunner(22931): Use the raw file system for managing file I/O.
+04-16 16:28:53.520 V/TestEventClient(22931): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:28:53.521 D/AndroidJUnitRunner(22931): onStart is called.
+04-16 16:28:53.532 I/InstrConnection(22931): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:28:53.565 I/TestRunner(22931): run started: 1 tests
+04-16 16:28:53.565 I/TestRunner(22931): started: crossoverStockhamGlobalTail(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:28:53.572 D/nativeloader(22931): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:28:53.574 D/vulkan  (22931): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:28:53.574 D/vulkan  (22931): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:28:53.574 D/vulkan  (22931): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:28:53.574 I/vulkan  (22931): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:28:53.575 V/XGL     (22931): ----------------------------------------------------------------------
+04-16 16:28:53.575 V/XGL     (22931): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:28:53.575 V/XGL     (22931): SUMD version revision number   = 1fc295b0d2
+04-16 16:28:53.575 V/XGL     (22931): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:28:53.575 V/XGL     (22931): ----------------------------------------------------------------------
+04-16 16:28:53.575 V/XGL     (22931): Entering: Create
+04-16 16:28:53.585 V/XGL     (22931): Exiting: Create
+04-16 16:28:53.600 I/GSC     (22931): SID[0] : 7a8c4124979ab702, Kind: 3, time : 8.448 ms
+04-16 16:28:53.608 I/GSC     (22931): SID[1] : 24ac4d8737310efd, Kind: 3, time : 6.590 ms
+04-16 16:28:53.647 I/GSC     (22931): SID[2] : a707a6e013953087, Kind: 3, time : 3.313 ms
+04-16 16:28:55.254 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json family_override=Stockham tail_override=Global
+04-16 16:28:55.257 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL kernel.ntt_variant=stockham kernel.stockham_tail_strategy=GlobalOnlyR4
+04-16 16:28:55.257 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL device name="Samsung Xclipse 940" backend=Vulkan tier=UnifiedMemoryNative family=Xclipse driver="Driver version: 24.0.545, git hash: 1fc295b0d2 " max_buffer=268435456 max_wg_x=256 max_invocations=256 max_wg_storage_bytes=16352
+04-16 16:28:55.257 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=1.45ms gpu=0.39ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[0] "r4 stages 0+1" gpu=0.072ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[1] "r4 stages 2+3" gpu=0.048ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[2] "r4 stages 4+5" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[3] "r4 stages 6+7" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[4] "r4 stages 8+9" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[5] "r4 stages 10+11" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[6] "r4 stages 12+13" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[7] "r4 stages 14+15" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log18 stage[8] "r4 stages 16+17" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=1.75ms gpu=0.49ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[0] "r4 stages 0+1" gpu=0.075ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[1] "r4 stages 2+3" gpu=0.049ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[2] "r4 stages 4+5" gpu=0.042ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[3] "r4 stages 6+7" gpu=0.040ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[4] "r4 stages 8+9" gpu=0.040ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[5] "r4 stages 10+11" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[6] "r4 stages 12+13" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[7] "r4 stages 14+15" gpu=0.039ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[8] "r4 stages 16+17" gpu=0.040ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log18 stage[9] "inverse scale" gpu=0.083ms
+04-16 16:28:55.258 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=2.08ms gpu=0.95ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[0] "r4 stages 0+1" gpu=0.148ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[1] "r4 stages 2+3" gpu=0.101ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[2] "r4 stages 4+5" gpu=0.091ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[3] "r4 stages 6+7" gpu=0.089ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[4] "r4 stages 8+9" gpu=0.087ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[5] "r4 stages 10+11" gpu=0.088ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[6] "r4 stages 12+13" gpu=0.087ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[7] "r4 stages 14+15" gpu=0.088ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[8] "r4 stages 16+17" gpu=0.087ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log19 stage[9] "r2 stage 18" gpu=0.087ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=2.56ms gpu=1.26ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[0] "r4 stages 0+1" gpu=0.166ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[1] "r4 stages 2+3" gpu=0.112ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[2] "r4 stages 4+5" gpu=0.102ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[3] "r4 stages 6+7" gpu=0.101ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[4] "r4 stages 8+9" gpu=0.098ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[5] "r4 stages 10+11" gpu=0.099ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[6] "r4 stages 12+13" gpu=0.097ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[7] "r4 stages 14+15" gpu=0.100ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[8] "r4 stages 16+17" gpu=0.098ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[9] "r2 stage 18" gpu=0.097ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log19 stage[10] "inverse scale" gpu=0.190ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=4.22ms gpu=2.58ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[0] "r4 stages 0+1" gpu=0.402ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[1] "r4 stages 2+3" gpu=0.273ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[2] "r4 stages 4+5" gpu=0.245ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[3] "r4 stages 6+7" gpu=0.240ms
+04-16 16:28:55.259 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[4] "r4 stages 8+9" gpu=0.236ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[5] "r4 stages 10+11" gpu=0.239ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[6] "r4 stages 12+13" gpu=0.238ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[7] "r4 stages 14+15" gpu=0.241ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[8] "r4 stages 16+17" gpu=0.235ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log20 stage[9] "r4 stages 18+19" gpu=0.231ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=7.44ms gpu=5.29ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[0] "r4 stages 0+1" gpu=0.746ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[1] "r4 stages 2+3" gpu=0.439ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[2] "r4 stages 4+5" gpu=0.373ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[3] "r4 stages 6+7" gpu=0.366ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[4] "r4 stages 8+9" gpu=0.352ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[5] "r4 stages 10+11" gpu=0.345ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[6] "r4 stages 12+13" gpu=0.404ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[7] "r4 stages 14+15" gpu=0.413ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[8] "r4 stages 16+17" gpu=0.545ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[9] "r4 stages 18+19" gpu=0.549ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log20 stage[10] "inverse scale" gpu=0.760ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=10.29ms gpu=7.05ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[0] "r4 stages 0+1" gpu=1.368ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[1] "r4 stages 2+3" gpu=0.693ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[2] "r4 stages 4+5" gpu=0.561ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[3] "r4 stages 6+7" gpu=0.548ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[4] "r4 stages 8+9" gpu=0.551ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[5] "r4 stages 10+11" gpu=0.551ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[6] "r4 stages 12+13" gpu=0.548ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[7] "r4 stages 14+15" gpu=0.546ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[8] "r4 stages 16+17" gpu=0.547ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[9] "r4 stages 18+19" gpu=0.550ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log21 stage[10] "r2 stage 20" gpu=0.584ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=10.60ms gpu=7.41ms
+04-16 16:28:55.260 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[0] "r4 stages 0+1" gpu=1.033ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[1] "r4 stages 2+3" gpu=0.632ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[2] "r4 stages 4+5" gpu=0.542ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[3] "r4 stages 6+7" gpu=0.534ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[4] "r4 stages 8+9" gpu=0.536ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[5] "r4 stages 10+11" gpu=0.529ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[6] "r4 stages 12+13" gpu=0.523ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[7] "r4 stages 14+15" gpu=0.515ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[8] "r4 stages 16+17" gpu=0.516ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[9] "r4 stages 18+19" gpu=0.515ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[10] "r2 stage 20" gpu=0.465ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log21 stage[11] "inverse scale" gpu=1.068ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=16.61ms gpu=12.68ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[0] "r4 stages 0+1" gpu=1.526ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[1] "r4 stages 2+3" gpu=1.202ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[2] "r4 stages 4+5" gpu=1.107ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[3] "r4 stages 6+7" gpu=1.077ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[4] "r4 stages 8+9" gpu=1.082ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[5] "r4 stages 10+11" gpu=1.119ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[6] "r4 stages 12+13" gpu=1.105ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[7] "r4 stages 14+15" gpu=1.116ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[8] "r4 stages 16+17" gpu=1.110ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[9] "r4 stages 18+19" gpu=1.126ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL forward_log22 stage[10] "r4 stages 20+21" gpu=1.111ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22: family=stockham tail=GlobalOnlyR4 reason=ForcedGlobal stride_bytes=none wall=15.10ms gpu=11.73ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[0] "r4 stages 0+1" gpu=1.594ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[1] "r4 stages 2+3" gpu=1.068ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[2] "r4 stages 4+5" gpu=0.922ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[3] "r4 stages 6+7" gpu=0.890ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[4] "r4 stages 8+9" gpu=0.894ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[5] "r4 stages 10+11" gpu=0.936ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[6] "r4 stages 12+13" gpu=0.849ms
+04-16 16:28:55.261 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[7] "r4 stages 14+15" gpu=0.820ms
+04-16 16:28:55.262 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[8] "r4 stages 16+17" gpu=0.828ms
+04-16 16:28:55.262 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[9] "r4 stages 18+19" gpu=0.828ms
+04-16 16:28:55.262 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[10] "r4 stages 20+21" gpu=0.825ms
+04-16 16:28:55.262 I/ZkgpuHarnessTest(22931): CROSSOVER_STOCKHAM_GLOBAL_TAIL inverse_log22 stage[11] "inverse scale" gpu=1.276ms
+04-16 16:28:55.262 I/TestRunner(22931): finished: crossoverStockhamGlobalTail(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:28:55.264 I/TestRunner(22931): run finished: 1 tests, 0 failed, 0 ignored
+
+==== TESTCASE: crossoverBenchmarkCompletes (f8477d7a349d0c4f7da5875ee9f6f0d6a82e5548175c5f4f) ====
+04-16 16:29:06.341 I/g.zkgpu.harness(25181): Late-enabling -Xcheck:jni
+04-16 16:29:06.361 I/g.zkgpu.harness(25181): Using CollectorTypeCMC GC.
+04-16 16:29:06.369 D/nativeloader(25181): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:29:06.372 D/ActivityThread(25181): setConscryptValidator
+04-16 16:29:06.372 D/ActivityThread(25181): setConscryptValidator - put
+04-16 16:29:06.396 W/ActivityThread(25181): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:29:06.409 D/nativeloader(25181): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:29:06.415 V/GraphicsEnvironment(25181): Currently set values for:
+04-16 16:29:06.415 V/GraphicsEnvironment(25181):   angle_gl_driver_selection_pkgs=[]
+04-16 16:29:06.415 V/GraphicsEnvironment(25181):   angle_gl_driver_selection_values=[]
+04-16 16:29:06.415 V/GraphicsEnvironment(25181): org.zkgpu.harness is not listed in per-application setting
+04-16 16:29:06.415 V/GraphicsEnvironment(25181): ANGLE allowlist from config: 
+04-16 16:29:06.415 V/GraphicsEnvironment(25181): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:29:06.415 V/GraphicsEnvironment(25181): App is not on the allowlist for updatable production driver.
+04-16 16:29:06.448 I/AndroidJUnitRunner(25181): newApplication android.app.Application
+04-16 16:29:06.448 I/AndroidJUnitRunner(25181): onCreate Bundle[mParcelledData.dataSize=164]
+04-16 16:29:06.449 D/AndroidJUnitRunner(25181): Use the raw file system for managing file I/O.
+04-16 16:29:06.451 V/TestEventClient(25181): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:29:06.452 D/AndroidJUnitRunner(25181): onStart is called.
+04-16 16:29:06.462 I/InstrConnection(25181): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:29:06.492 I/TestRunner(25181): run started: 1 tests
+04-16 16:29:06.493 I/TestRunner(25181): started: crossoverBenchmarkCompletes(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:06.500 D/nativeloader(25181): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:29:06.502 D/vulkan  (25181): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:29:06.502 D/vulkan  (25181): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:29:06.503 D/vulkan  (25181): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:29:06.503 I/vulkan  (25181): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:29:06.503 V/XGL     (25181): ----------------------------------------------------------------------
+04-16 16:29:06.503 V/XGL     (25181): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:29:06.503 V/XGL     (25181): SUMD version revision number   = 1fc295b0d2
+04-16 16:29:06.503 V/XGL     (25181): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:29:06.503 V/XGL     (25181): ----------------------------------------------------------------------
+04-16 16:29:06.503 V/XGL     (25181): Entering: Create
+04-16 16:29:06.516 V/XGL     (25181): Exiting: Create
+04-16 16:29:06.531 I/GSC     (25181): SID[0] : 7a8c4124979ab702, Kind: 3, time : 8.390 ms
+04-16 16:29:06.539 I/GSC     (25181): SID[1] : 24ac4d8737310efd, Kind: 3, time : 6.397 ms
+04-16 16:29:06.579 I/GSC     (25181): SID[2] : a707a6e013953087, Kind: 3, time : 3.420 ms
+04-16 16:29:06.781 I/GSC     (25181): SID[3] : df14750eaf1da2d2, Kind: 3, time : 5.652 ms
+04-16 16:29:06.793 I/GSC     (25181): SID[4] : 43a9f73cc1ffc217, Kind: 3, time : 9.963 ms
+04-16 16:29:06.800 I/GSC     (25181): SID[5] : 43b64c15d49b4d08, Kind: 3, time : 5.963 ms
+04-16 16:29:06.814 I/GSC     (25181): SID[6] : 02a7a44f6e5bd9f2, Kind: 3, time : 12.971 ms
+04-16 16:29:08.593 I/ZkgpuHarnessTest(25181): CROSSOVER path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json family_override=Auto tail_override=Auto
+04-16 16:29:08.599 I/ZkgpuHarnessTest(25181): CROSSOVER kernel.ntt_variant=mixed kernel.stockham_tail_strategy=GlobalOnlyR4
+04-16 16:29:08.599 I/ZkgpuHarnessTest(25181): CROSSOVER device name="Samsung Xclipse 940" backend=Vulkan tier=UnifiedMemoryNative family=Xclipse driver="Driver version: 24.0.545, git hash: 1fc295b0d2 " max_buffer=268435456 max_wg_x=256 max_invocations=256 max_wg_storage_bytes=16352
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=1.55ms gpu=0.45ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[0] "r4 stages 0+1" gpu=0.075ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[1] "r4 stages 2+3" gpu=0.049ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[2] "r4 stages 4+5" gpu=0.047ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[3] "r4 stages 6+7" gpu=0.047ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[4] "r4 stages 8+9" gpu=0.047ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[5] "r4 stages 10+11" gpu=0.047ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[6] "r4 stages 12+13" gpu=0.047ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[7] "r4 stages 14+15" gpu=0.047ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log18 stage[8] "r4 stages 16+17" gpu=0.047ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=1.84ms gpu=0.55ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[0] "r4 stages 0+1" gpu=0.077ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[1] "r4 stages 2+3" gpu=0.053ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[2] "r4 stages 4+5" gpu=0.045ms
+04-16 16:29:08.600 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[3] "r4 stages 6+7" gpu=0.046ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[4] "r4 stages 8+9" gpu=0.046ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[5] "r4 stages 10+11" gpu=0.045ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[6] "r4 stages 12+13" gpu=0.046ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[7] "r4 stages 14+15" gpu=0.046ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[8] "r4 stages 16+17" gpu=0.046ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log18 stage[9] "inverse scale" gpu=0.102ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=2.31ms gpu=1.02ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[0] "r4 stages 0+1" gpu=0.153ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[1] "r4 stages 2+3" gpu=0.100ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[2] "r4 stages 4+5" gpu=0.097ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[3] "r4 stages 6+7" gpu=0.097ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[4] "r4 stages 8+9" gpu=0.097ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[5] "r4 stages 10+11" gpu=0.097ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[6] "r4 stages 12+13" gpu=0.097ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[7] "r4 stages 14+15" gpu=0.097ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[8] "r4 stages 16+17" gpu=0.097ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log19 stage[9] "r2 stage 18" gpu=0.085ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=3.24ms gpu=1.80ms
+04-16 16:29:08.601 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[0] "r4 stages 0+1" gpu=0.250ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[1] "r4 stages 2+3" gpu=0.156ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[2] "r4 stages 4+5" gpu=0.139ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[3] "r4 stages 6+7" gpu=0.139ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[4] "r4 stages 8+9" gpu=0.139ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[5] "r4 stages 10+11" gpu=0.139ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[6] "r4 stages 12+13" gpu=0.139ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[7] "r4 stages 14+15" gpu=0.139ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[8] "r4 stages 16+17" gpu=0.139ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[9] "r2 stage 18" gpu=0.119ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log19 stage[10] "inverse scale" gpu=0.300ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20: family=four-step tail=none reason=none stride_bytes=none wall=10.72ms gpu=8.15ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[0] "transpose R×C→C×R" gpu=1.786ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.190ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.190ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.191ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.190ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.190ms
+04-16 16:29:08.602 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[6] "twiddle multiply" gpu=0.903ms
+04-16 16:29:08.603 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[7] "transpose C×R→R×C" gpu=1.783ms
+04-16 16:29:08.603 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.190ms
+04-16 16:29:08.603 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.191ms
+04-16 16:29:08.603 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.193ms
+04-16 16:29:08.603 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.190ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.192ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log20 stage[13] "transpose R×C→C×R (output)" gpu=1.768ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20: family=four-step tail=none reason=none stride_bytes=none wall=10.34ms gpu=7.52ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[0] "transpose R×C→C×R" gpu=1.529ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.178ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.178ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.179ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.178ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.178ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[6] "twiddle multiply" gpu=0.872ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[7] "transpose C×R→R×C" gpu=1.487ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.198ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.197ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.197ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.196ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.196ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[13] "transpose R×C→C×R (output)" gpu=1.467ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log20 stage[14] "inverse scale" gpu=0.293ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21: family=four-step tail=none reason=none stride_bytes=none wall=16.19ms gpu=12.85ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[0] "transpose R×C→C×R" gpu=2.164ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.434ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.431ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.421ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.400ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.408ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[6] "twiddle multiply" gpu=1.980ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[7] "transpose C×R→R×C" gpu=2.149ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.404ms
+04-16 16:29:08.604 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.389ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.393ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.387ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.386ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[13] "phase5 C-pt r2 stage 10" gpu=0.394ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log21 stage[14] "transpose R×C→C×R (output)" gpu=2.109ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21: family=four-step tail=none reason=none stride_bytes=none wall=15.76ms gpu=12.23ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[0] "transpose R×C→C×R" gpu=1.900ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.369ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.375ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.374ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.381ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.378ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[6] "twiddle multiply" gpu=1.923ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[7] "transpose C×R→R×C" gpu=1.899ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.383ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.371ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.381ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.375ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.375ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[13] "phase5 C-pt r2 stage 10" gpu=0.374ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[14] "transpose R×C→C×R (output)" gpu=1.899ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log21 stage[15] "inverse scale" gpu=0.473ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22: family=four-step tail=none reason=none stride_bytes=none wall=26.46ms gpu=22.09ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[0] "transpose R×C→C×R" gpu=3.463ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.697ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.686ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.689ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.679ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.680ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[6] "phase2 R-pt r2 stage 10" gpu=0.689ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[7] "twiddle multiply" gpu=3.444ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[8] "transpose C×R→R×C" gpu=3.463ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[9] "phase5 C-pt r4 stages 0+1" gpu=0.693ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[10] "phase5 C-pt r4 stages 2+3" gpu=0.688ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[11] "phase5 C-pt r4 stages 4+5" gpu=0.685ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[12] "phase5 C-pt r4 stages 6+7" gpu=0.682ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[13] "phase5 C-pt r4 stages 8+9" gpu=0.693ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[14] "phase5 C-pt r2 stage 10" gpu=0.694ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER forward_log22 stage[15] "transpose R×C→C×R (output)" gpu=3.462ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22: family=four-step tail=none reason=none stride_bytes=none wall=26.85ms gpu=22.80ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[0] "transpose R×C→C×R" gpu=3.464ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.688ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.677ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.679ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.674ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.674ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[6] "phase2 R-pt r2 stage 10" gpu=0.684ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[7] "twiddle multiply" gpu=3.393ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[8] "transpose C×R→R×C" gpu=3.464ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[9] "phase5 C-pt r4 stages 0+1" gpu=0.684ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[10] "phase5 C-pt r4 stages 2+3" gpu=0.688ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[11] "phase5 C-pt r4 stages 4+5" gpu=0.687ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[12] "phase5 C-pt r4 stages 6+7" gpu=0.670ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[13] "phase5 C-pt r4 stages 8+9" gpu=0.671ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[14] "phase5 C-pt r2 stage 10" gpu=0.687ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[15] "transpose R×C→C×R (output)" gpu=3.462ms
+04-16 16:29:08.605 I/ZkgpuHarnessTest(25181): CROSSOVER inverse_log22 stage[16] "inverse scale" gpu=0.858ms
+04-16 16:29:08.606 I/TestRunner(25181): finished: crossoverBenchmarkCompletes(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:08.609 I/TestRunner(25181): run finished: 1 tests, 0 failed, 0 ignored
+
+==== TESTCASE: deviceMetadataIsNonEmpty (f8477d7a349d0c4f7da5875ee9f6f0d6a82e5548fcf1b29f) ====
+04-16 16:29:19.640 I/g.zkgpu.harness(27490): Late-enabling -Xcheck:jni
+04-16 16:29:19.658 I/g.zkgpu.harness(27490): Using CollectorTypeCMC GC.
+04-16 16:29:19.667 D/nativeloader(27490): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:29:19.670 D/ActivityThread(27490): setConscryptValidator
+04-16 16:29:19.670 D/ActivityThread(27490): setConscryptValidator - put
+04-16 16:29:19.696 W/ActivityThread(27490): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:29:19.710 D/nativeloader(27490): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:29:19.717 V/GraphicsEnvironment(27490): Currently set values for:
+04-16 16:29:19.717 V/GraphicsEnvironment(27490):   angle_gl_driver_selection_pkgs=[]
+04-16 16:29:19.717 V/GraphicsEnvironment(27490):   angle_gl_driver_selection_values=[]
+04-16 16:29:19.717 V/GraphicsEnvironment(27490): org.zkgpu.harness is not listed in per-application setting
+04-16 16:29:19.717 V/GraphicsEnvironment(27490): ANGLE allowlist from config: 
+04-16 16:29:19.717 V/GraphicsEnvironment(27490): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:29:19.717 V/GraphicsEnvironment(27490): App is not on the allowlist for updatable production driver.
+04-16 16:29:19.755 I/AndroidJUnitRunner(27490): newApplication android.app.Application
+04-16 16:29:19.756 I/AndroidJUnitRunner(27490): onCreate Bundle[mParcelledData.dataSize=160]
+04-16 16:29:19.757 D/AndroidJUnitRunner(27490): Use the raw file system for managing file I/O.
+04-16 16:29:19.762 V/TestEventClient(27490): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:29:19.762 D/AndroidJUnitRunner(27490): onStart is called.
+04-16 16:29:19.777 I/InstrConnection(27490): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:29:19.807 I/TestRunner(27490): run started: 1 tests
+04-16 16:29:19.808 I/TestRunner(27490): started: deviceMetadataIsNonEmpty(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:19.813 D/nativeloader(27490): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:29:19.815 D/vulkan  (27490): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:29:19.815 D/vulkan  (27490): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:29:19.816 D/vulkan  (27490): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:29:19.816 I/vulkan  (27490): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:29:19.816 V/XGL     (27490): ----------------------------------------------------------------------
+04-16 16:29:19.816 V/XGL     (27490): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:29:19.816 V/XGL     (27490): SUMD version revision number   = 1fc295b0d2
+04-16 16:29:19.816 V/XGL     (27490): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:29:19.816 V/XGL     (27490): ----------------------------------------------------------------------
+04-16 16:29:19.816 V/XGL     (27490): Entering: Create
+04-16 16:29:19.826 V/XGL     (27490): Exiting: Create
+04-16 16:29:19.842 I/GSC     (27490): SID[0] : 7a8c4124979ab702, Kind: 3, time : 8.715 ms
+04-16 16:29:19.850 I/GSC     (27490): SID[1] : 24ac4d8737310efd, Kind: 3, time : 6.521 ms
+04-16 16:29:19.883 I/ZkgpuHarnessTest(27490): suite=Smoke path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json
+04-16 16:29:19.886 I/TestRunner(27490): finished: deviceMetadataIsNonEmpty(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:19.889 I/TestRunner(27490): run finished: 1 tests, 0 failed, 0 ignored
+
+==== TESTCASE: benchmarkSuitePassesWithTimings (f8477d7a349d0c4f7da5875ee9f6f0d6a82e55488482b760) ====
+04-16 16:29:30.801 I/g.zkgpu.harness(29421): Late-enabling -Xcheck:jni
+04-16 16:29:30.819 I/g.zkgpu.harness(29421): Using CollectorTypeCMC GC.
+04-16 16:29:30.826 D/nativeloader(29421): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:29:30.829 D/ActivityThread(29421): setConscryptValidator
+04-16 16:29:30.830 D/ActivityThread(29421): setConscryptValidator - put
+04-16 16:29:30.857 W/ActivityThread(29421): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:29:30.869 D/nativeloader(29421): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:29:30.876 V/GraphicsEnvironment(29421): Currently set values for:
+04-16 16:29:30.876 V/GraphicsEnvironment(29421):   angle_gl_driver_selection_pkgs=[]
+04-16 16:29:30.876 V/GraphicsEnvironment(29421):   angle_gl_driver_selection_values=[]
+04-16 16:29:30.876 V/GraphicsEnvironment(29421): org.zkgpu.harness is not listed in per-application setting
+04-16 16:29:30.876 V/GraphicsEnvironment(29421): ANGLE allowlist from config: 
+04-16 16:29:30.876 V/GraphicsEnvironment(29421): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:29:30.876 V/GraphicsEnvironment(29421): App is not on the allowlist for updatable production driver.
+04-16 16:29:30.917 I/AndroidJUnitRunner(29421): newApplication android.app.Application
+04-16 16:29:30.918 I/AndroidJUnitRunner(29421): onCreate Bundle[mParcelledData.dataSize=172]
+04-16 16:29:30.919 D/AndroidJUnitRunner(29421): Use the raw file system for managing file I/O.
+04-16 16:29:30.923 V/TestEventClient(29421): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:29:30.923 D/AndroidJUnitRunner(29421): onStart is called.
+04-16 16:29:30.932 I/InstrConnection(29421): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:29:30.968 I/TestRunner(29421): run started: 1 tests
+04-16 16:29:30.969 I/TestRunner(29421): started: benchmarkSuitePassesWithTimings(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:30.975 D/nativeloader(29421): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:29:30.976 D/vulkan  (29421): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:29:30.976 D/vulkan  (29421): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:29:30.976 D/vulkan  (29421): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:29:30.976 I/vulkan  (29421): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:29:30.976 V/XGL     (29421): ----------------------------------------------------------------------
+04-16 16:29:30.976 V/XGL     (29421): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:29:30.976 V/XGL     (29421): SUMD version revision number   = 1fc295b0d2
+04-16 16:29:30.976 V/XGL     (29421): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:29:30.976 V/XGL     (29421): ----------------------------------------------------------------------
+04-16 16:29:30.976 V/XGL     (29421): Entering: Create
+04-16 16:29:30.985 V/XGL     (29421): Exiting: Create
+04-16 16:29:30.999 I/GSC     (29421): SID[0] : 7a8c4124979ab702, Kind: 3, time : 7.541 ms
+04-16 16:29:31.007 I/GSC     (29421): SID[1] : 24ac4d8737310efd, Kind: 3, time : 5.847 ms
+04-16 16:29:31.029 I/GSC     (29421): SID[2] : a707a6e013953087, Kind: 3, time : 3.362 ms
+04-16 16:29:31.220 I/ZkgpuHarnessTest(29421): suite=Benchmark path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json
+04-16 16:29:31.222 I/ZkgpuHarnessTest(29421): BENCH benchmark_forward_log10: wall=0.74ms gpu=0.02ms
+04-16 16:29:31.223 I/ZkgpuHarnessTest(29421): BENCH benchmark_forward_log14: wall=0.84ms gpu=0.05ms
+04-16 16:29:31.223 I/ZkgpuHarnessTest(29421): BENCH benchmark_forward_log18: wall=1.62ms gpu=0.46ms
+04-16 16:29:31.223 I/ZkgpuHarnessTest(29421): BENCH benchmark_forward_log20: wall=12.07ms gpu=8.99ms
+04-16 16:29:31.223 I/TestRunner(29421): finished: benchmarkSuitePassesWithTimings(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:31.227 I/TestRunner(29421): run finished: 1 tests, 0 failed, 0 ignored
+
+==== TESTCASE: crossoverBenchmarkStockhamFamily (f8477d7a349d0c4f7da5875ee9f6f0d6a82e554856a832a0) ====
+04-16 16:29:42.332 I/g.zkgpu.harness(31545): Late-enabling -Xcheck:jni
+04-16 16:29:42.350 I/g.zkgpu.harness(31545): Using CollectorTypeCMC GC.
+04-16 16:29:42.358 D/nativeloader(31545): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:29:42.361 D/ActivityThread(31545): setConscryptValidator
+04-16 16:29:42.362 D/ActivityThread(31545): setConscryptValidator - put
+04-16 16:29:42.387 W/ActivityThread(31545): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:29:42.401 D/nativeloader(31545): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:29:42.408 V/GraphicsEnvironment(31545): Currently set values for:
+04-16 16:29:42.408 V/GraphicsEnvironment(31545):   angle_gl_driver_selection_pkgs=[]
+04-16 16:29:42.408 V/GraphicsEnvironment(31545):   angle_gl_driver_selection_values=[]
+04-16 16:29:42.408 V/GraphicsEnvironment(31545): org.zkgpu.harness is not listed in per-application setting
+04-16 16:29:42.408 V/GraphicsEnvironment(31545): ANGLE allowlist from config: 
+04-16 16:29:42.408 V/GraphicsEnvironment(31545): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:29:42.408 V/GraphicsEnvironment(31545): App is not on the allowlist for updatable production driver.
+04-16 16:29:42.440 I/AndroidJUnitRunner(31545): newApplication android.app.Application
+04-16 16:29:42.440 I/AndroidJUnitRunner(31545): onCreate Bundle[mParcelledData.dataSize=176]
+04-16 16:29:42.441 D/AndroidJUnitRunner(31545): Use the raw file system for managing file I/O.
+04-16 16:29:42.443 V/TestEventClient(31545): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:29:42.444 D/AndroidJUnitRunner(31545): onStart is called.
+04-16 16:29:42.448 I/InstrConnection(31545): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:29:42.464 I/TestRunner(31545): run started: 1 tests
+04-16 16:29:42.464 I/TestRunner(31545): started: crossoverBenchmarkStockhamFamily(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:42.471 D/nativeloader(31545): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:29:42.472 D/vulkan  (31545): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:29:42.472 D/vulkan  (31545): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:29:42.472 D/vulkan  (31545): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:29:42.472 I/vulkan  (31545): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:29:42.472 V/XGL     (31545): ----------------------------------------------------------------------
+04-16 16:29:42.473 V/XGL     (31545): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:29:42.473 V/XGL     (31545): SUMD version revision number   = 1fc295b0d2
+04-16 16:29:42.473 V/XGL     (31545): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:29:42.473 V/XGL     (31545): ----------------------------------------------------------------------
+04-16 16:29:42.473 V/XGL     (31545): Entering: Create
+04-16 16:29:42.482 V/XGL     (31545): Exiting: Create
+04-16 16:29:42.496 I/GSC     (31545): SID[0] : 7a8c4124979ab702, Kind: 3, time : 7.992 ms
+04-16 16:29:42.504 I/GSC     (31545): SID[1] : 24ac4d8737310efd, Kind: 3, time : 6.332 ms
+04-16 16:29:42.543 I/GSC     (31545): SID[2] : a707a6e013953087, Kind: 3, time : 3.319 ms
+04-16 16:29:44.161 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json family_override=Stockham tail_override=Auto
+04-16 16:29:44.164 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM kernel.ntt_variant=stockham kernel.stockham_tail_strategy=GlobalOnlyR4
+04-16 16:29:44.164 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM device name="Samsung Xclipse 940" backend=Vulkan tier=UnifiedMemoryNative family=Xclipse driver="Driver version: 24.0.545, git hash: 1fc295b0d2 " max_buffer=268435456 max_wg_x=256 max_invocations=256 max_wg_storage_bytes=16352
+04-16 16:29:44.164 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=2.17ms gpu=0.75ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[0] "r4 stages 0+1" gpu=0.114ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[1] "r4 stages 2+3" gpu=0.082ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[2] "r4 stages 4+5" gpu=0.079ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[3] "r4 stages 6+7" gpu=0.079ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[4] "r4 stages 8+9" gpu=0.079ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[5] "r4 stages 10+11" gpu=0.079ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[6] "r4 stages 12+13" gpu=0.079ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[7] "r4 stages 14+15" gpu=0.079ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log18 stage[8] "r4 stages 16+17" gpu=0.079ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=2.54ms gpu=1.04ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[0] "r4 stages 0+1" gpu=0.118ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[1] "r4 stages 2+3" gpu=0.090ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[2] "r4 stages 4+5" gpu=0.090ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[3] "r4 stages 6+7" gpu=0.090ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[4] "r4 stages 8+9" gpu=0.090ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[5] "r4 stages 10+11" gpu=0.090ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[6] "r4 stages 12+13" gpu=0.090ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[7] "r4 stages 14+15" gpu=0.090ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[8] "r4 stages 16+17" gpu=0.090ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log18 stage[9] "inverse scale" gpu=0.200ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=3.45ms gpu=1.76ms
+04-16 16:29:44.165 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[0] "r4 stages 0+1" gpu=0.231ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[1] "r4 stages 2+3" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[2] "r4 stages 4+5" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[3] "r4 stages 6+7" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[4] "r4 stages 8+9" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[5] "r4 stages 10+11" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[6] "r4 stages 12+13" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[7] "r4 stages 14+15" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[8] "r4 stages 16+17" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log19 stage[9] "r2 stage 18" gpu=0.138ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=3.74ms gpu=2.19ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[0] "r4 stages 0+1" gpu=0.283ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[1] "r4 stages 2+3" gpu=0.176ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[2] "r4 stages 4+5" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[3] "r4 stages 6+7" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[4] "r4 stages 8+9" gpu=0.174ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[5] "r4 stages 10+11" gpu=0.173ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[6] "r4 stages 12+13" gpu=0.174ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[7] "r4 stages 14+15" gpu=0.174ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[8] "r4 stages 16+17" gpu=0.174ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[9] "r2 stage 18" gpu=0.140ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log19 stage[10] "inverse scale" gpu=0.373ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=4.99ms gpu=3.16ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[0] "r4 stages 0+1" gpu=0.535ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[1] "r4 stages 2+3" gpu=0.331ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[2] "r4 stages 4+5" gpu=0.297ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[3] "r4 stages 6+7" gpu=0.291ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[4] "r4 stages 8+9" gpu=0.292ms
+04-16 16:29:44.166 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[5] "r4 stages 10+11" gpu=0.290ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[6] "r4 stages 12+13" gpu=0.291ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[7] "r4 stages 14+15" gpu=0.279ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[8] "r4 stages 16+17" gpu=0.276ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log20 stage[9] "r4 stages 18+19" gpu=0.276ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=5.55ms gpu=3.65ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[0] "r4 stages 0+1" gpu=0.495ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[1] "r4 stages 2+3" gpu=0.306ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[2] "r4 stages 4+5" gpu=0.289ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[3] "r4 stages 6+7" gpu=0.289ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[4] "r4 stages 8+9" gpu=0.289ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[5] "r4 stages 10+11" gpu=0.289ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[6] "r4 stages 12+13" gpu=0.289ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[7] "r4 stages 14+15" gpu=0.276ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[8] "r4 stages 16+17" gpu=0.275ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[9] "r4 stages 18+19" gpu=0.275ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log20 stage[10] "inverse scale" gpu=0.580ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=8.09ms gpu=5.64ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[0] "r4 stages 0+1" gpu=0.864ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[1] "r4 stages 2+3" gpu=0.552ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[2] "r4 stages 4+5" gpu=0.482ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[3] "r4 stages 6+7" gpu=0.471ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[4] "r4 stages 8+9" gpu=0.465ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[5] "r4 stages 10+11" gpu=0.472ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[6] "r4 stages 12+13" gpu=0.463ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[7] "r4 stages 14+15" gpu=0.460ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[8] "r4 stages 16+17" gpu=0.458ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[9] "r4 stages 18+19" gpu=0.477ms
+04-16 16:29:44.167 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log21 stage[10] "r2 stage 20" gpu=0.477ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=14.94ms gpu=11.33ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[0] "r4 stages 0+1" gpu=1.538ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[1] "r4 stages 2+3" gpu=1.041ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[2] "r4 stages 4+5" gpu=0.904ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[3] "r4 stages 6+7" gpu=0.870ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[4] "r4 stages 8+9" gpu=0.865ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[5] "r4 stages 10+11" gpu=0.868ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[6] "r4 stages 12+13" gpu=0.871ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[7] "r4 stages 14+15" gpu=0.867ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[8] "r4 stages 16+17" gpu=0.868ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[9] "r4 stages 18+19" gpu=0.825ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[10] "r2 stage 20" gpu=0.635ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log21 stage[11] "inverse scale" gpu=1.176ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=13.79ms gpu=10.18ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[0] "r4 stages 0+1" gpu=1.471ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[1] "r4 stages 2+3" gpu=0.965ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[2] "r4 stages 4+5" gpu=0.867ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[3] "r4 stages 6+7" gpu=0.858ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[4] "r4 stages 8+9" gpu=0.849ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[5] "r4 stages 10+11" gpu=0.886ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[6] "r4 stages 12+13" gpu=0.871ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[7] "r4 stages 14+15" gpu=0.875ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[8] "r4 stages 16+17" gpu=0.855ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[9] "r4 stages 18+19" gpu=0.841ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM forward_log22 stage[10] "r4 stages 20+21" gpu=0.841ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22: family=stockham tail=GlobalOnlyR4 reason=HeuristicXclipseCollapse stride_bytes=none wall=14.16ms gpu=11.02ms
+04-16 16:29:44.168 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[0] "r4 stages 0+1" gpu=1.368ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[1] "r4 stages 2+3" gpu=0.941ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[2] "r4 stages 4+5" gpu=0.851ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[3] "r4 stages 6+7" gpu=0.846ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[4] "r4 stages 8+9" gpu=0.808ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[5] "r4 stages 10+11" gpu=0.821ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[6] "r4 stages 12+13" gpu=0.787ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[7] "r4 stages 14+15" gpu=0.794ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[8] "r4 stages 16+17" gpu=0.778ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[9] "r4 stages 18+19" gpu=0.818ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[10] "r4 stages 20+21" gpu=0.814ms
+04-16 16:29:44.169 I/ZkgpuHarnessTest(31545): CROSSOVER_STOCKHAM inverse_log22 stage[11] "inverse scale" gpu=1.399ms
+04-16 16:29:44.169 I/TestRunner(31545): finished: crossoverBenchmarkStockhamFamily(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:44.171 I/TestRunner(31545): run finished: 1 tests, 0 failed, 0 ignored
+
+==== TESTCASE: crossoverBenchmarkFourStepFamily (f8477d7a349d0c4f7da5875ee9f6f0d6a82e55488ff13fd3) ====
+04-16 16:29:55.280 I/g.zkgpu.harness( 2100): Late-enabling -Xcheck:jni
+04-16 16:29:55.296 I/g.zkgpu.harness( 2100): Using CollectorTypeCMC GC.
+04-16 16:29:55.303 D/nativeloader( 2100): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:29:55.306 D/ActivityThread( 2100): setConscryptValidator
+04-16 16:29:55.306 D/ActivityThread( 2100): setConscryptValidator - put
+04-16 16:29:55.335 W/ActivityThread( 2100): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:29:55.347 D/nativeloader( 2100): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:29:55.353 V/GraphicsEnvironment( 2100): Currently set values for:
+04-16 16:29:55.354 V/GraphicsEnvironment( 2100):   angle_gl_driver_selection_pkgs=[]
+04-16 16:29:55.354 V/GraphicsEnvironment( 2100):   angle_gl_driver_selection_values=[]
+04-16 16:29:55.354 V/GraphicsEnvironment( 2100): org.zkgpu.harness is not listed in per-application setting
+04-16 16:29:55.354 V/GraphicsEnvironment( 2100): ANGLE allowlist from config: 
+04-16 16:29:55.354 V/GraphicsEnvironment( 2100): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:29:55.354 V/GraphicsEnvironment( 2100): App is not on the allowlist for updatable production driver.
+04-16 16:29:55.390 I/AndroidJUnitRunner( 2100): newApplication android.app.Application
+04-16 16:29:55.391 I/AndroidJUnitRunner( 2100): onCreate Bundle[mParcelledData.dataSize=176]
+04-16 16:29:55.391 D/AndroidJUnitRunner( 2100): Use the raw file system for managing file I/O.
+04-16 16:29:55.393 V/TestEventClient( 2100): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:29:55.394 D/AndroidJUnitRunner( 2100): onStart is called.
+04-16 16:29:55.402 I/InstrConnection( 2100): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:29:55.433 I/TestRunner( 2100): run started: 1 tests
+04-16 16:29:55.433 I/TestRunner( 2100): started: crossoverBenchmarkFourStepFamily(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:55.441 D/nativeloader( 2100): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:29:55.444 D/vulkan  ( 2100): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:29:55.444 D/vulkan  ( 2100): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:29:55.444 D/vulkan  ( 2100): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:29:55.445 I/vulkan  ( 2100): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:29:55.445 V/XGL     ( 2100): ----------------------------------------------------------------------
+04-16 16:29:55.445 V/XGL     ( 2100): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:29:55.445 V/XGL     ( 2100): SUMD version revision number   = 1fc295b0d2
+04-16 16:29:55.445 V/XGL     ( 2100): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:29:55.445 V/XGL     ( 2100): ----------------------------------------------------------------------
+04-16 16:29:55.445 V/XGL     ( 2100): Entering: Create
+04-16 16:29:55.454 V/XGL     ( 2100): Exiting: Create
+04-16 16:29:55.467 I/GSC     ( 2100): SID[0] : 7a8c4124979ab702, Kind: 3, time : 7.421 ms
+04-16 16:29:55.475 I/GSC     ( 2100): SID[1] : 24ac4d8737310efd, Kind: 3, time : 5.902 ms
+04-16 16:29:55.511 I/GSC     ( 2100): SID[2] : a707a6e013953087, Kind: 3, time : 3.265 ms
+04-16 16:29:55.686 D/io_stats(  625): !@ Read_top(KB): .gms.persistent(12552) 644 g.zkgpu.harness(2100) 448 earchbox:search(10169) 300
+04-16 16:29:57.676 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json family_override=FourStep tail_override=Auto
+04-16 16:29:57.679 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP kernel.ntt_variant=four-step kernel.stockham_tail_strategy=none
+04-16 16:29:57.679 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP device name="Samsung Xclipse 940" backend=Vulkan tier=UnifiedMemoryNative family=Xclipse driver="Driver version: 24.0.545, git hash: 1fc295b0d2 " max_buffer=268435456 max_wg_x=256 max_invocations=256 max_wg_storage_bytes=16352
+04-16 16:29:57.679 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18: family=four-step tail=none reason=none stride_bytes=none wall=5.16ms gpu=3.39ms
+04-16 16:29:57.679 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[0] "transpose R×C→C×R" gpu=0.774ms
+04-16 16:29:57.679 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.083ms
+04-16 16:29:57.679 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.082ms
+04-16 16:29:57.679 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.082ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.082ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[5] "phase2 R-pt r2 stage 8" gpu=0.077ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[6] "twiddle multiply" gpu=0.299ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[7] "transpose C×R→R×C" gpu=0.766ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.081ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.080ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.080ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.080ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[12] "phase5 C-pt r2 stage 8" gpu=0.075ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log18 stage[13] "transpose R×C→C×R (output)" gpu=0.751ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18: family=four-step tail=none reason=none stride_bytes=none wall=5.39ms gpu=3.75ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[0] "transpose R×C→C×R" gpu=0.817ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.088ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.086ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.086ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.086ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[5] "phase2 R-pt r2 stage 8" gpu=0.081ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[6] "twiddle multiply" gpu=0.295ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[7] "transpose C×R→R×C" gpu=0.810ms
+04-16 16:29:57.680 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.086ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.086ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.086ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.086ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[12] "phase5 C-pt r2 stage 8" gpu=0.080ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[13] "transpose R×C→C×R (output)" gpu=0.805ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log18 stage[14] "inverse scale" gpu=0.170ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19: family=four-step tail=none reason=none stride_bytes=none wall=7.99ms gpu=5.25ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[0] "transpose R×C→C×R" gpu=1.065ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.143ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.140ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.138ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.138ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[5] "phase2 R-pt r2 stage 8" gpu=0.136ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[6] "twiddle multiply" gpu=0.662ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[7] "transpose C×R→R×C" gpu=1.067ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.139ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.139ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.139ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.139ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.140ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log19 stage[13] "transpose R×C→C×R (output)" gpu=1.065ms
+04-16 16:29:57.681 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19: family=four-step tail=none reason=none stride_bytes=none wall=7.99ms gpu=5.32ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[0] "transpose R×C→C×R" gpu=1.075ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.133ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.126ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.123ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.121ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[5] "phase2 R-pt r2 stage 8" gpu=0.128ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[6] "twiddle multiply" gpu=0.667ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[7] "transpose C×R→R×C" gpu=1.062ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.131ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.126ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.128ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.130ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.130ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[13] "transpose R×C→C×R (output)" gpu=1.024ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log19 stage[14] "inverse scale" gpu=0.214ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20: family=four-step tail=none reason=none stride_bytes=none wall=11.54ms gpu=8.34ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[0] "transpose R×C→C×R" gpu=1.750ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.206ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.206ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.217ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.212ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.210ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[6] "twiddle multiply" gpu=1.004ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[7] "transpose C×R→R×C" gpu=1.752ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.207ms
+04-16 16:29:57.682 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.210ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.211ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.201ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.207ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log20 stage[13] "transpose R×C→C×R (output)" gpu=1.752ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20: family=four-step tail=none reason=none stride_bytes=none wall=11.49ms gpu=8.37ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[0] "transpose R×C→C×R" gpu=1.598ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.235ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.226ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.228ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.229ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.230ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[6] "twiddle multiply" gpu=1.083ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[7] "transpose C×R→R×C" gpu=1.598ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.207ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.203ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.202ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.201ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.203ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[13] "transpose R×C→C×R (output)" gpu=1.598ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log20 stage[14] "inverse scale" gpu=0.329ms
+04-16 16:29:57.683 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21: family=four-step tail=none reason=none stride_bytes=none wall=15.94ms gpu=12.76ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[0] "transpose R×C→C×R" gpu=2.122ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.393ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.393ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.393ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.392ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.396ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[6] "twiddle multiply" gpu=2.023ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[7] "transpose C×R→R×C" gpu=2.122ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.407ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.399ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.410ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.397ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.405ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[13] "phase5 C-pt r2 stage 10" gpu=0.395ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log21 stage[14] "transpose R×C→C×R (output)" gpu=2.113ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21: family=four-step tail=none reason=none stride_bytes=none wall=16.83ms gpu=13.42ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[0] "transpose R×C→C×R" gpu=2.110ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.410ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.400ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.399ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.399ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.406ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[6] "twiddle multiply" gpu=2.010ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[7] "transpose C×R→R×C" gpu=2.109ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[8] "phase5 C-pt r4 stages 0+1" gpu=0.431ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[9] "phase5 C-pt r4 stages 2+3" gpu=0.428ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[10] "phase5 C-pt r4 stages 4+5" gpu=0.430ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[11] "phase5 C-pt r4 stages 6+7" gpu=0.417ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[12] "phase5 C-pt r4 stages 8+9" gpu=0.421ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[13] "phase5 C-pt r2 stage 10" gpu=0.416ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[14] "transpose R×C→C×R (output)" gpu=2.104ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log21 stage[15] "inverse scale" gpu=0.531ms
+04-16 16:29:57.684 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22: family=four-step tail=none reason=none stride_bytes=none wall=26.98ms gpu=22.17ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[0] "transpose R×C→C×R" gpu=3.465ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.694ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.687ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.687ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.681ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.684ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[6] "phase2 R-pt r2 stage 10" gpu=0.694ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[7] "twiddle multiply" gpu=3.524ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[8] "transpose C×R→R×C" gpu=3.463ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[9] "phase5 C-pt r4 stages 0+1" gpu=0.690ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[10] "phase5 C-pt r4 stages 2+3" gpu=0.686ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[11] "phase5 C-pt r4 stages 4+5" gpu=0.691ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[12] "phase5 C-pt r4 stages 6+7" gpu=0.688ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[13] "phase5 C-pt r4 stages 8+9" gpu=0.683ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[14] "phase5 C-pt r2 stage 10" gpu=0.690ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP forward_log22 stage[15] "transpose R×C→C×R (output)" gpu=3.463ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22: family=four-step tail=none reason=none stride_bytes=none wall=27.12ms gpu=22.89ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[0] "transpose R×C→C×R" gpu=3.464ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[1] "phase2 R-pt r4 stages 0+1" gpu=0.696ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[2] "phase2 R-pt r4 stages 2+3" gpu=0.689ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[3] "phase2 R-pt r4 stages 4+5" gpu=0.697ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[4] "phase2 R-pt r4 stages 6+7" gpu=0.680ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[5] "phase2 R-pt r4 stages 8+9" gpu=0.687ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[6] "phase2 R-pt r2 stage 10" gpu=0.696ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[7] "twiddle multiply" gpu=3.453ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[8] "transpose C×R→R×C" gpu=3.464ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[9] "phase5 C-pt r4 stages 0+1" gpu=0.676ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[10] "phase5 C-pt r4 stages 2+3" gpu=0.670ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[11] "phase5 C-pt r4 stages 4+5" gpu=0.678ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[12] "phase5 C-pt r4 stages 6+7" gpu=0.678ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[13] "phase5 C-pt r4 stages 8+9" gpu=0.672ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[14] "phase5 C-pt r2 stage 10" gpu=0.675ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[15] "transpose R×C→C×R (output)" gpu=3.463ms
+04-16 16:29:57.685 I/ZkgpuHarnessTest( 2100): CROSSOVER_FOURSTEP inverse_log22 stage[16] "inverse scale" gpu=0.857ms
+04-16 16:29:57.685 I/TestRunner( 2100): finished: crossoverBenchmarkFourStepFamily(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:29:57.689 I/TestRunner( 2100): run finished: 1 tests, 0 failed, 0 ignored
+
+==== TESTCASE: validationSuitePassesOnSupportedHardware (f8477d7a349d0c4f7da5875ee9f6f0d6a82e5548f8392c6b) ====
+04-16 16:30:10.858 I/g.zkgpu.harness( 5748): Late-enabling -Xcheck:jni
+04-16 16:30:10.876 I/g.zkgpu.harness( 5748): Using CollectorTypeCMC GC.
+04-16 16:30:10.885 D/nativeloader( 5748): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:30:10.889 D/ActivityThread( 5748): setConscryptValidator
+04-16 16:30:10.889 D/ActivityThread( 5748): setConscryptValidator - put
+04-16 16:30:10.917 W/ActivityThread( 5748): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:30:10.930 D/nativeloader( 5748): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:30:10.936 V/GraphicsEnvironment( 5748): Currently set values for:
+04-16 16:30:10.936 V/GraphicsEnvironment( 5748):   angle_gl_driver_selection_pkgs=[]
+04-16 16:30:10.936 V/GraphicsEnvironment( 5748):   angle_gl_driver_selection_values=[]
+04-16 16:30:10.936 V/GraphicsEnvironment( 5748): org.zkgpu.harness is not listed in per-application setting
+04-16 16:30:10.936 V/GraphicsEnvironment( 5748): ANGLE allowlist from config: 
+04-16 16:30:10.936 V/GraphicsEnvironment( 5748): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:30:10.937 V/GraphicsEnvironment( 5748): App is not on the allowlist for updatable production driver.
+04-16 16:30:10.970 I/AndroidJUnitRunner( 5748): newApplication android.app.Application
+04-16 16:30:10.971 I/AndroidJUnitRunner( 5748): onCreate Bundle[mParcelledData.dataSize=192]
+04-16 16:30:10.971 D/AndroidJUnitRunner( 5748): Use the raw file system for managing file I/O.
+04-16 16:30:10.974 V/TestEventClient( 5748): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:30:10.975 D/AndroidJUnitRunner( 5748): onStart is called.
+04-16 16:30:10.984 I/InstrConnection( 5748): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:30:11.013 I/TestRunner( 5748): run started: 1 tests
+04-16 16:30:11.014 I/TestRunner( 5748): started: validationSuitePassesOnSupportedHardware(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:30:11.020 D/nativeloader( 5748): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:30:11.021 D/vulkan  ( 5748): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:30:11.021 D/vulkan  ( 5748): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:30:11.021 D/vulkan  ( 5748): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:30:11.022 I/vulkan  ( 5748): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:30:11.022 V/XGL     ( 5748): ----------------------------------------------------------------------
+04-16 16:30:11.022 V/XGL     ( 5748): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:30:11.022 V/XGL     ( 5748): SUMD version revision number   = 1fc295b0d2
+04-16 16:30:11.022 V/XGL     ( 5748): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:30:11.022 V/XGL     ( 5748): ----------------------------------------------------------------------
+04-16 16:30:11.022 V/XGL     ( 5748): Entering: Create
+04-16 16:30:11.032 V/XGL     ( 5748): Exiting: Create
+04-16 16:30:11.047 I/GSC     ( 5748): SID[0] : 7a8c4124979ab702, Kind: 3, time : 8.060 ms
+04-16 16:30:11.055 I/GSC     ( 5748): SID[1] : 24ac4d8737310efd, Kind: 3, time : 6.569 ms
+04-16 16:30:11.096 I/ZkgpuHarnessTest( 5748): suite=Validation path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json
+04-16 16:30:11.100 I/TestRunner( 5748): finished: validationSuitePassesOnSupportedHardware(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:30:11.103 I/TestRunner( 5748): run finished: 1 tests, 0 failed, 0 ignored
+04-16 16:30:11.689 D/io_stats(  625): !@ Read_top(KB): system_server(1122) 20 main(5688) 8 g.zkgpu.harness(5748) 8
+
+==== TESTCASE: smokeSuiteReturnsOk (f8477d7a349d0c4f7da5875ee9f6f0d6a82e5548848f8259) ====
+04-16 16:30:22.245 I/g.zkgpu.harness( 7843): Late-enabling -Xcheck:jni
+04-16 16:30:22.263 I/g.zkgpu.harness( 7843): Using CollectorTypeCMC GC.
+04-16 16:30:22.271 D/nativeloader( 7843): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:30:22.274 D/ActivityThread( 7843): setConscryptValidator
+04-16 16:30:22.274 D/ActivityThread( 7843): setConscryptValidator - put
+04-16 16:30:22.306 W/ActivityThread( 7843): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:30:22.319 D/nativeloader( 7843): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:30:22.328 V/GraphicsEnvironment( 7843): Currently set values for:
+04-16 16:30:22.328 V/GraphicsEnvironment( 7843):   angle_gl_driver_selection_pkgs=[]
+04-16 16:30:22.328 V/GraphicsEnvironment( 7843):   angle_gl_driver_selection_values=[]
+04-16 16:30:22.328 V/GraphicsEnvironment( 7843): org.zkgpu.harness is not listed in per-application setting
+04-16 16:30:22.328 V/GraphicsEnvironment( 7843): ANGLE allowlist from config: 
+04-16 16:30:22.328 V/GraphicsEnvironment( 7843): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:30:22.328 V/GraphicsEnvironment( 7843): App is not on the allowlist for updatable production driver.
+04-16 16:30:22.363 I/AndroidJUnitRunner( 7843): newApplication android.app.Application
+04-16 16:30:22.364 I/AndroidJUnitRunner( 7843): onCreate Bundle[mParcelledData.dataSize=148]
+04-16 16:30:22.364 D/AndroidJUnitRunner( 7843): Use the raw file system for managing file I/O.
+04-16 16:30:22.367 V/TestEventClient( 7843): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:30:22.368 D/AndroidJUnitRunner( 7843): onStart is called.
+04-16 16:30:22.377 I/InstrConnection( 7843): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:30:22.417 I/TestRunner( 7843): run started: 1 tests
+04-16 16:30:22.417 I/TestRunner( 7843): started: smokeSuiteReturnsOk(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:30:22.423 D/nativeloader( 7843): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:30:22.425 D/vulkan  ( 7843): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:30:22.425 D/vulkan  ( 7843): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:30:22.425 D/vulkan  ( 7843): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:30:22.425 I/vulkan  ( 7843): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:30:22.425 V/XGL     ( 7843): ----------------------------------------------------------------------
+04-16 16:30:22.425 V/XGL     ( 7843): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:30:22.425 V/XGL     ( 7843): SUMD version revision number   = 1fc295b0d2
+04-16 16:30:22.425 V/XGL     ( 7843): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:30:22.425 V/XGL     ( 7843): ----------------------------------------------------------------------
+04-16 16:30:22.425 V/XGL     ( 7843): Entering: Create
+04-16 16:30:22.435 V/XGL     ( 7843): Exiting: Create
+04-16 16:30:22.449 I/GSC     ( 7843): SID[0] : 7a8c4124979ab702, Kind: 3, time : 8.366 ms
+04-16 16:30:22.457 I/GSC     ( 7843): SID[1] : 24ac4d8737310efd, Kind: 3, time : 6.290 ms
+04-16 16:30:22.482 I/ZkgpuHarnessTest( 7843): suite=Smoke path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json
+04-16 16:30:22.484 I/TestRunner( 7843): finished: smokeSuiteReturnsOk(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:30:22.488 I/TestRunner( 7843): run finished: 1 tests, 0 failed, 0 ignored
+
+==== TESTCASE: returnedJsonParses (f8477d7a349d0c4f7da5875ee9f6f0d6a82e55485e00d5ab) ====
+04-16 16:30:33.738 I/g.zkgpu.harness( 9962): Late-enabling -Xcheck:jni
+04-16 16:30:33.756 I/g.zkgpu.harness( 9962): Using CollectorTypeCMC GC.
+04-16 16:30:33.763 D/nativeloader( 9962): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-16 16:30:33.766 D/ActivityThread( 9962): setConscryptValidator
+04-16 16:30:33.766 D/ActivityThread( 9962): setConscryptValidator - put
+04-16 16:30:33.793 W/ActivityThread( 9962): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-16 16:30:33.808 D/nativeloader( 9962): Configuring clns-9 for other apk /data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/lib/arm64:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64:/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a:/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-16 16:30:33.814 V/GraphicsEnvironment( 9962): Currently set values for:
+04-16 16:30:33.814 V/GraphicsEnvironment( 9962):   angle_gl_driver_selection_pkgs=[]
+04-16 16:30:33.814 V/GraphicsEnvironment( 9962):   angle_gl_driver_selection_values=[]
+04-16 16:30:33.814 V/GraphicsEnvironment( 9962): org.zkgpu.harness is not listed in per-application setting
+04-16 16:30:33.814 V/GraphicsEnvironment( 9962): ANGLE allowlist from config: 
+04-16 16:30:33.814 V/GraphicsEnvironment( 9962): org.zkgpu.harness is not listed in ANGLE allowlist or settings, returning default
+04-16 16:30:33.815 V/GraphicsEnvironment( 9962): App is not on the allowlist for updatable production driver.
+04-16 16:30:33.847 I/AndroidJUnitRunner( 9962): newApplication android.app.Application
+04-16 16:30:33.847 I/AndroidJUnitRunner( 9962): onCreate Bundle[mParcelledData.dataSize=148]
+04-16 16:30:33.848 D/AndroidJUnitRunner( 9962): Use the raw file system for managing file I/O.
+04-16 16:30:33.850 V/TestEventClient( 9962): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-16 16:30:33.851 D/AndroidJUnitRunner( 9962): onStart is called.
+04-16 16:30:33.858 I/InstrConnection( 9962): Could not send broadcast or register receiver (isolatedProcess?)
+04-16 16:30:33.888 I/TestRunner( 9962): run started: 1 tests
+04-16 16:30:33.888 I/TestRunner( 9962): started: returnedJsonParses(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:30:33.893 D/nativeloader( 9962): Load /data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!classes3.dex): ok
+04-16 16:30:33.896 D/vulkan  ( 9962): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/lib/arm64'
+04-16 16:30:33.896 D/vulkan  ( 9962): searching for layers in '/data/app/~~WKQCw3PXc8qqqcNRA720lA==/org.zkgpu.harness.test-ifMR2KwZRRXcKwi0516QBw==/base.apk!/lib/arm64-v8a'
+04-16 16:30:33.896 D/vulkan  ( 9962): searching for layers in '/data/app/~~MS-qYlLMDXEDYCZscTR9mQ==/org.zkgpu.harness-RnCEjt56zyrY6UkFtbMeAg==/base.apk!/lib/arm64-v8a'
+04-16 16:30:33.896 I/vulkan  ( 9962): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-16 16:30:33.896 V/XGL     ( 9962): ----------------------------------------------------------------------
+04-16 16:30:33.896 V/XGL     ( 9962): SUMD version compiled date     = 2025-06-11 14:47 - KST
+04-16 16:30:33.896 V/XGL     ( 9962): SUMD version revision number   = 1fc295b0d2
+04-16 16:30:33.896 V/XGL     ( 9962): SUMD version info              = Driver version: 24.0.545, git hash: 1fc295b0d2
+04-16 16:30:33.896 V/XGL     ( 9962): ----------------------------------------------------------------------
+04-16 16:30:33.896 V/XGL     ( 9962): Entering: Create
+04-16 16:30:33.906 V/XGL     ( 9962): Exiting: Create
+04-16 16:30:33.920 I/GSC     ( 9962): SID[0] : 7a8c4124979ab702, Kind: 3, time : 8.037 ms
+04-16 16:30:33.929 I/GSC     ( 9962): SID[1] : 24ac4d8737310efd, Kind: 3, time : 6.706 ms
+04-16 16:30:33.954 I/TestRunner( 9962): finished: returnedJsonParses(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-16 16:30:33.958 I/TestRunner( 9962): run finished: 1 tests, 0 failed, 0 ignored
+

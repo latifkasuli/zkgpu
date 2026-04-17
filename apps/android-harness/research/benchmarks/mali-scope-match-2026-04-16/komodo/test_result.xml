@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuites>
+  <testsuite name='' hostname='localhost' tests='2' failures='0' skipped='0' errors='0' time='11.395' timestamp='2026-04-16T05:49:49'>
+    <properties />
+    <testcase name='crossoverStockhamLocalTail' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='7.001' />
+    <testcase name='crossoverStockhamGlobalTail' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='4.394' />
+  </testsuite>
+</testsuites>

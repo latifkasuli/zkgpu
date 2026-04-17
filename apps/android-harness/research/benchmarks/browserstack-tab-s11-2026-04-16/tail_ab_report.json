@@ -1,0 +1,82 @@
+{
+  "benchmark_dir": "apps/android-harness/research/benchmarks/browserstack-tab-s11-2026-04-16",
+  "devices": [
+    {
+      "device": "Samsung_Galaxy_Tab_S11_16.0",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 2.63,
+          "global_gpu_ms": 0.13,
+          "global_win_ratio": 0.9505703422053232
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 3.01,
+          "global_gpu_ms": 0.18,
+          "global_win_ratio": 0.9401993355481727
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 6.16,
+          "global_gpu_ms": 0.42,
+          "global_win_ratio": 0.9318181818181819
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 6.35,
+          "global_gpu_ms": 0.61,
+          "global_win_ratio": 0.9039370078740157
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 9.43,
+          "global_gpu_ms": 1.33,
+          "global_win_ratio": 0.8589607635206786
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 9.85,
+          "global_gpu_ms": 2.41,
+          "global_win_ratio": 0.7553299492385787
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 11.65,
+          "global_gpu_ms": 6.05,
+          "global_win_ratio": 0.48068669527897
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 12.22,
+          "global_gpu_ms": 6.56,
+          "global_win_ratio": 0.4631751227495909
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 28.98,
+          "global_gpu_ms": 8.64,
+          "global_win_ratio": 0.7018633540372671
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 31.5,
+          "global_gpu_ms": 8.41,
+          "global_win_ratio": 0.733015873015873
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    }
+  ]
+}

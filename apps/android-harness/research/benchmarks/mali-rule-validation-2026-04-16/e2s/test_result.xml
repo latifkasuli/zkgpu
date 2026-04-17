@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuites>
+  <testsuite name='' hostname='localhost' tests='10' failures='0' skipped='0' errors='0' time='10.216' timestamp='2026-04-16T08:40:50'>
+    <properties />
+    <testcase name='crossoverStockhamLocalTail' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='2.0' />
+    <testcase name='crossoverStockhamGlobalTail' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='2.0' />
+    <testcase name='crossoverBenchmarkCompletes' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='1.77' />
+    <testcase name='deviceMetadataIsNonEmpty' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.0' />
+    <testcase name='benchmarkSuitePassesWithTimings' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='1.0' />
+    <testcase name='crossoverBenchmarkStockhamFamily' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='2.0' />
+    <testcase name='crossoverBenchmarkFourStepFamily' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='1.426' />
+    <testcase name='validationSuitePassesOnSupportedHardware' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.0' />
+    <testcase name='smokeSuiteReturnsOk' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.0' />
+    <testcase name='returnedJsonParses' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.02' />
+  </testsuite>
+</testsuites>

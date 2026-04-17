@@ -1,0 +1,390 @@
+{
+  "benchmark_dir": "apps/android-harness/research/benchmarks/browserstack-xclipse-cohort-2026-04-16",
+  "devices": [
+    {
+      "device": "Samsung_Galaxy_S22_12.0",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 3.76,
+          "global_gpu_ms": 0.66,
+          "global_win_ratio": 0.8244680851063829
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 4.29,
+          "global_gpu_ms": 0.87,
+          "global_win_ratio": 0.7972027972027972
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 6.66,
+          "global_gpu_ms": 1.71,
+          "global_win_ratio": 0.7432432432432432
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 7.31,
+          "global_gpu_ms": 2.22,
+          "global_win_ratio": 0.6963064295485636
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 10.94,
+          "global_gpu_ms": 4.02,
+          "global_win_ratio": 0.6325411334552102
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 10.54,
+          "global_gpu_ms": 4.95,
+          "global_win_ratio": 0.5303605313092978
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 17.06,
+          "global_gpu_ms": 10.67,
+          "global_win_ratio": 0.37456037514654156
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 15.62,
+          "global_gpu_ms": 12.84,
+          "global_win_ratio": 0.17797695262483992
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 30.81,
+          "global_gpu_ms": 17.04,
+          "global_win_ratio": 0.4469328140214216
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 29.34,
+          "global_gpu_ms": 15.56,
+          "global_win_ratio": 0.4696659850034083
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "Samsung_Galaxy_S22_Ultra_12.0",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 3.86,
+          "global_gpu_ms": 0.66,
+          "global_win_ratio": 0.8290155440414507
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 3.82,
+          "global_gpu_ms": 0.87,
+          "global_win_ratio": 0.7722513089005235
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 7.07,
+          "global_gpu_ms": 1.69,
+          "global_win_ratio": 0.760961810466761
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 8.69,
+          "global_gpu_ms": 2.09,
+          "global_win_ratio": 0.759493670886076
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 12.06,
+          "global_gpu_ms": 4.05,
+          "global_win_ratio": 0.6641791044776121
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 9.08,
+          "global_gpu_ms": 4.89,
+          "global_win_ratio": 0.4614537444933921
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 18.17,
+          "global_gpu_ms": 7.79,
+          "global_win_ratio": 0.5712713263621355
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 17.92,
+          "global_gpu_ms": 8.9,
+          "global_win_ratio": 0.5033482142857143
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 31.58,
+          "global_gpu_ms": 14.78,
+          "global_win_ratio": 0.531982267257758
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 30.93,
+          "global_gpu_ms": 17.6,
+          "global_win_ratio": 0.4309731652117685
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "Samsung_Galaxy_S24_16.0",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 2.65,
+          "global_gpu_ms": 0.43,
+          "global_win_ratio": 0.8377358490566037
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 2.45,
+          "global_gpu_ms": 0.51,
+          "global_win_ratio": 0.7918367346938776
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 4.19,
+          "global_gpu_ms": 0.98,
+          "global_win_ratio": 0.766109785202864
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 4.37,
+          "global_gpu_ms": 1.35,
+          "global_win_ratio": 0.6910755148741419
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 7.51,
+          "global_gpu_ms": 3.29,
+          "global_win_ratio": 0.5619174434087882
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 6.17,
+          "global_gpu_ms": 4.05,
+          "global_win_ratio": 0.34359805510534847
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 10.82,
+          "global_gpu_ms": 7.65,
+          "global_win_ratio": 0.2929759704251386
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 10.03,
+          "global_gpu_ms": 6.36,
+          "global_win_ratio": 0.365902293120638
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 14.34,
+          "global_gpu_ms": 10.5,
+          "global_win_ratio": 0.26778242677824265
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 13.88,
+          "global_gpu_ms": 11.28,
+          "global_win_ratio": 0.18731988472622488
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "Samsung_Galaxy_S26_16.0",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 4.1,
+          "global_gpu_ms": 1.32,
+          "global_win_ratio": 0.6780487804878048
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 4.49,
+          "global_gpu_ms": 1.68,
+          "global_win_ratio": 0.6258351893095769
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 5.42,
+          "global_gpu_ms": 2.8,
+          "global_win_ratio": 0.4833948339483395
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 4.64,
+          "global_gpu_ms": 3.53,
+          "global_win_ratio": 0.23922413793103448
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 7.91,
+          "global_gpu_ms": 3.27,
+          "global_win_ratio": 0.5865992414664981
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 7.88,
+          "global_gpu_ms": 3.9,
+          "global_win_ratio": 0.5050761421319797
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 11.0,
+          "global_gpu_ms": 6.6,
+          "global_win_ratio": 0.4
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 10.94,
+          "global_gpu_ms": 8.61,
+          "global_win_ratio": 0.21297989031078612
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 15.63,
+          "global_gpu_ms": 9.16,
+          "global_win_ratio": 0.41394753678822777
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 17.97,
+          "global_gpu_ms": 12.84,
+          "global_win_ratio": 0.2854757929883138
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    },
+    {
+      "device": "Samsung_Galaxy_S26_Ultra_16.0",
+      "paired_cases": [
+        {
+          "log_n": 18,
+          "direction": "Forward",
+          "local_gpu_ms": 0.29,
+          "global_gpu_ms": 0.22,
+          "global_win_ratio": 0.24137931034482754
+        },
+        {
+          "log_n": 18,
+          "direction": "Inverse",
+          "local_gpu_ms": 0.56,
+          "global_gpu_ms": 0.27,
+          "global_win_ratio": 0.5178571428571429
+        },
+        {
+          "log_n": 19,
+          "direction": "Forward",
+          "local_gpu_ms": 1.26,
+          "global_gpu_ms": 0.49,
+          "global_win_ratio": 0.6111111111111112
+        },
+        {
+          "log_n": 19,
+          "direction": "Inverse",
+          "local_gpu_ms": 1.37,
+          "global_gpu_ms": 0.57,
+          "global_win_ratio": 0.5839416058394161
+        },
+        {
+          "log_n": 20,
+          "direction": "Forward",
+          "local_gpu_ms": 3.14,
+          "global_gpu_ms": 1.08,
+          "global_win_ratio": 0.6560509554140127
+        },
+        {
+          "log_n": 20,
+          "direction": "Inverse",
+          "local_gpu_ms": 3.28,
+          "global_gpu_ms": 1.29,
+          "global_win_ratio": 0.6067073170731707
+        },
+        {
+          "log_n": 21,
+          "direction": "Forward",
+          "local_gpu_ms": 7.18,
+          "global_gpu_ms": 2.78,
+          "global_win_ratio": 0.6128133704735377
+        },
+        {
+          "log_n": 21,
+          "direction": "Inverse",
+          "local_gpu_ms": 7.1,
+          "global_gpu_ms": 3.08,
+          "global_win_ratio": 0.5661971830985916
+        },
+        {
+          "log_n": 22,
+          "direction": "Forward",
+          "local_gpu_ms": 13.99,
+          "global_gpu_ms": 5.83,
+          "global_win_ratio": 0.5832737669764118
+        },
+        {
+          "log_n": 22,
+          "direction": "Inverse",
+          "local_gpu_ms": 14.33,
+          "global_gpu_ms": 6.49,
+          "global_win_ratio": 0.5471039776692254
+        }
+      ],
+      "recommendation": "UNCONDITIONAL @ log21 (global ≥20% win)",
+      "recommended_threshold_log_n": 21
+    }
+  ]
+}

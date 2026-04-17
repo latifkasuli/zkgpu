@@ -1,0 +1,43 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuites>
+  <testsuite name='' hostname='localhost' tests='10' failures='9' skipped='0' errors='0' time='0.111' timestamp='2026-04-16T07:44:44'>
+    <properties />
+    <testcase name='crossoverStockhamLocalTail' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.015'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='crossoverStockhamGlobalTail' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.008'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='crossoverBenchmarkCompletes' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.015'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='deviceMetadataIsNonEmpty' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.006'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='benchmarkSuitePassesWithTimings' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.002'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='crossoverBenchmarkStockhamFamily' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.022'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='crossoverBenchmarkFourStepFamily' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.042'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='validationSuitePassesOnSupportedHardware' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.0'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='smokeSuiteReturnsOk' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.001'>
+      <failure>java.lang.AssertionError: failed to create GPU device: GPU compute unsupported: all 1 enumerated GPU adapter(s) were rejected (1 known-broken); no usable GPU available
+      </failure>
+    </testcase>
+    <testcase name='returnedJsonParses' classname='org.zkgpu.harness.ZkgpuInstrumentedTest' time='0.0' />
+  </testsuite>
+</testsuites>
