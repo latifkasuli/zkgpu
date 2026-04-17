@@ -1,0 +1,16 @@
+[package]
+name = "zkgpu-koalabear"
+description = "KoalaBear (p = 2^31 - 2^24 + 1) field implementation for zkgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zkgpu-core = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+zkgpu-ntt = { workspace = true }
+rand = "0.8"

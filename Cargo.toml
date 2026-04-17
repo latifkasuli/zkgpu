@@ -4,6 +4,7 @@ members = [
     "crates/zkgpu-core",
     "crates/zkgpu-wgpu",
     "crates/zkgpu-babybear",
+    "crates/zkgpu-koalabear",
     "crates/zkgpu-ntt",
     "crates/zkgpu-plonky3",
     "crates/zkgpu-cli",
@@ -26,6 +27,7 @@ rust-version = "1.87.0"
 zkgpu-core = { path = "crates/zkgpu-core" }
 zkgpu-wgpu = { path = "crates/zkgpu-wgpu" }
 zkgpu-babybear = { path = "crates/zkgpu-babybear" }
+zkgpu-koalabear = { path = "crates/zkgpu-koalabear" }
 zkgpu-ntt = { path = "crates/zkgpu-ntt" }
 zkgpu-plonky3 = { path = "crates/zkgpu-plonky3" }
 zkgpu-testkit = { path = "crates/zkgpu-testkit" }
