@@ -27,6 +27,12 @@ pub struct PlannerPolicy {
     pub(super) tail_caps_hint: Option<TailCapsHint>,
     /// Caller-supplied tail override. `Auto` means use the heuristic.
     pub(super) stockham_tail_override: StockhamTailOverride,
+    /// Caller-supplied override for `r8_max_log_leaf`. `None` means use
+    /// the env-var-then-per-family defaults. Precedence (highest first):
+    /// this field, then `ZKGPU_R8_MAX_LOG_LEAF`, then per-family policy.
+    /// Added for the mobile R8 A/B investigation — passing `Some(0)`
+    /// forces R8 off, `Some(u32::MAX)` forces R8 on regardless of family.
+    pub(super) r8_max_log_leaf_override: Option<u32>,
 }
 
 impl PlannerPolicy {
@@ -36,6 +42,7 @@ impl PlannerPolicy {
             four_step_threshold: None,
             tail_caps_hint: None,
             stockham_tail_override: StockhamTailOverride::Auto,
+            r8_max_log_leaf_override: None,
         }
     }
 
@@ -45,6 +52,7 @@ impl PlannerPolicy {
             four_step_threshold: Some(threshold),
             tail_caps_hint: None,
             stockham_tail_override: StockhamTailOverride::Auto,
+            r8_max_log_leaf_override: None,
         }
     }
 
@@ -54,6 +62,7 @@ impl PlannerPolicy {
             four_step_threshold: Some(1),
             tail_caps_hint: None,
             stockham_tail_override: StockhamTailOverride::Auto,
+            r8_max_log_leaf_override: None,
         }
     }
 
@@ -83,10 +92,17 @@ impl PlannerPolicy {
     ///   so the cap is effectively unlimited in practice. Correctness is
     ///   validated by the existing post-landing regression tests.
     ///
-    /// Overridable via env var `ZKGPU_R8_MAX_LOG_LEAF` for investigation.
+    /// Overridable via env var `ZKGPU_R8_MAX_LOG_LEAF` for investigation
+    /// or via `with_r8_max_log_leaf_override()` for per-run overrides
+    /// threaded through from JSON (mobile R8 A/B harness, CI forced runs).
     pub(crate) fn r8_max_log_leaf(&self) -> u32 {
-        // Env var override wins — used for A/B investigation (not a public
-        // knob).
+        // Struct-field override wins first — set by a per-request caller
+        // (e.g. Android R8 A/B test) via SuiteSpec → PlannerPolicy.
+        if let Some(v) = self.r8_max_log_leaf_override {
+            return v;
+        }
+        // Env var override second — used for A/B investigation from a shell
+        // (not a public knob).
         if let Ok(s) = std::env::var("ZKGPU_R8_MAX_LOG_LEAF") {
             if let Ok(v) = s.parse::<u32>() {
                 return v;
@@ -144,6 +160,18 @@ impl PlannerPolicy {
     /// external callers reach this via `WgpuNttPlan`'s public wrapper.
     pub(crate) fn with_stockham_tail_override(mut self, ov: StockhamTailOverride) -> Self {
         self.stockham_tail_override = ov;
+        self
+    }
+
+    /// Apply a per-run override for `r8_max_log_leaf`.
+    ///
+    /// `Some(0)` forces R8 off (pure R4+R2 leaves). `Some(u32::MAX)` forces
+    /// R8 on regardless of the per-(backend, family) default. `None` falls
+    /// back to the env-var/policy chain. Used by the mobile R8 A/B harness
+    /// to compare R8-enabled vs R8-disabled four-step on devices whose
+    /// default is ungated.
+    pub fn with_r8_max_log_leaf_override(mut self, v: Option<u32>) -> Self {
+        self.r8_max_log_leaf_override = v;
         self
     }
 

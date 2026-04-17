@@ -59,6 +59,7 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
             case,
             spec.family_override,
             spec.stockham_tail_override,
+            spec.r8_max_log_leaf_override,
             &dev,
         )
         .await;
@@ -96,7 +97,7 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
 /// Run a single case exposed to JS.
 pub(crate) async fn run_single_case_async(case: &CaseSpec) -> Result<CaseReport, String> {
     let dev = device::clone_device()?;
-    Ok(run_case_inner(case, FamilyOverride::Auto, StockhamTailOverride::Auto, &dev).await)
+    Ok(run_case_inner(case, FamilyOverride::Auto, StockhamTailOverride::Auto, None, &dev).await)
 }
 
 // ---------------------------------------------------------------------------
@@ -107,18 +108,27 @@ async fn run_case_inner(
     case: &CaseSpec,
     family: FamilyOverride,
     tail_override: StockhamTailOverride,
+    r8_override: Option<u32>,
     dev: &Rc<WgpuDevice>,
 ) -> CaseReport {
     let input = make_input(case.log_n, &case.input);
 
     match case.direction {
         TestDirection::Forward => {
-            run_direction(case, &input, NttDirection::Forward, family, tail_override, dev).await
+            run_direction(
+                case, &input, NttDirection::Forward, family, tail_override, r8_override, dev,
+            )
+            .await
         }
         TestDirection::Inverse => {
-            run_direction(case, &input, NttDirection::Inverse, family, tail_override, dev).await
+            run_direction(
+                case, &input, NttDirection::Inverse, family, tail_override, r8_override, dev,
+            )
+            .await
         }
-        TestDirection::Roundtrip => run_roundtrip(case, &input, family, tail_override, dev).await,
+        TestDirection::Roundtrip => {
+            run_roundtrip(case, &input, family, tail_override, r8_override, dev).await
+        }
     }
 }
 
@@ -132,11 +142,12 @@ async fn run_direction(
     direction: NttDirection,
     family: FamilyOverride,
     tail_override: StockhamTailOverride,
+    r8_override: Option<u32>,
     dev: &Rc<WgpuDevice>,
 ) -> CaseReport {
     let expected = cpu_reference(input, direction);
 
-    let mut plan = match make_plan(dev, case.log_n, direction, family, tail_override) {
+    let mut plan = match make_plan(dev, case.log_n, direction, family, tail_override, r8_override) {
         Ok(p) => p,
         Err(e) => return case_error(case, e.to_string()),
     };
@@ -198,14 +209,21 @@ async fn run_roundtrip(
     input: &[BabyBear],
     family: FamilyOverride,
     tail_override: StockhamTailOverride,
+    r8_override: Option<u32>,
     dev: &Rc<WgpuDevice>,
 ) -> CaseReport {
     // Create both plans up-front.
-    let mut forward_plan =
-        match make_plan(dev, case.log_n, NttDirection::Forward, family, tail_override) {
-            Ok(p) => p,
-            Err(e) => return case_error(case, e.to_string()),
-        };
+    let mut forward_plan = match make_plan(
+        dev,
+        case.log_n,
+        NttDirection::Forward,
+        family,
+        tail_override,
+        r8_override,
+    ) {
+        Ok(p) => p,
+        Err(e) => return case_error(case, e.to_string()),
+    };
     // Capture forward-side metadata up-front so it survives a later failure
     // (inverse make_plan or either measurement). Mirrors the testkit twin
     // — without this an inverse make_plan crash drops the very tail strategy
@@ -215,20 +233,26 @@ async fn run_roundtrip(
     let tail_reason = forward_plan.stockham_tail_reason().map(str::to_string);
     let tail_stride_bytes = forward_plan.tail_stride_bytes();
 
-    let mut inverse_plan =
-        match make_plan(dev, case.log_n, NttDirection::Inverse, family, tail_override) {
-            Ok(p) => p,
-            Err(e) => {
-                return case_error_with_tail(
-                    case,
-                    Some(forward_family_name),
-                    tail_strategy,
-                    tail_reason,
-                    tail_stride_bytes,
-                    e.to_string(),
-                )
-            }
-        };
+    let mut inverse_plan = match make_plan(
+        dev,
+        case.log_n,
+        NttDirection::Inverse,
+        family,
+        tail_override,
+        r8_override,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            return case_error_with_tail(
+                case,
+                Some(forward_family_name),
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                e.to_string(),
+            )
+        }
+    };
     let kernel_family = Some(format!(
         "{}/{}",
         forward_family_name,
@@ -492,13 +516,16 @@ fn make_plan(
     direction: NttDirection,
     family: FamilyOverride,
     tail_override: StockhamTailOverride,
+    r8_override: Option<u32>,
 ) -> Result<WgpuNttPlan, zkgpu_core::ZkGpuError> {
     // Always derive from the device caps so the Stockham tail heuristic has
     // full device context, then narrow the family. See the testkit twin for
     // the rationale — `stockham_only()` would drop the caps hint and force
     // `LocalFusedR4` on every device, defeating the new policy.
     let plan_tail = to_plan_tail(tail_override);
-    let base = PlannerPolicy::from_caps(device.caps()).with_public_tail_override(plan_tail);
+    let base = PlannerPolicy::from_caps(device.caps())
+        .with_public_tail_override(plan_tail)
+        .with_r8_max_log_leaf_override(r8_override);
     let policy = match family {
         FamilyOverride::Auto => base,
         FamilyOverride::Stockham => base.with_four_step_disabled(),

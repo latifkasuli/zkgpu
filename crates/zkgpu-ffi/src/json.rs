@@ -16,6 +16,10 @@ pub fn run_request(request: HarnessRequest) -> HarnessResponse {
         if let Some(tail) = request.stockham_tail_override {
             spec.stockham_tail_override = tail;
         }
+        // Same precedence for the R8 leaf-gate override.
+        if let Some(r8) = request.r8_max_log_leaf_override {
+            spec.r8_max_log_leaf_override = Some(r8);
+        }
         run_suite(&spec)
     } else {
         let mut suite = match request.suite {
@@ -40,6 +44,9 @@ pub fn run_request(request: HarnessRequest) -> HarnessResponse {
         }
         if let Some(tail) = request.stockham_tail_override {
             suite.stockham_tail_override = tail;
+        }
+        if let Some(r8) = request.r8_max_log_leaf_override {
+            suite.r8_max_log_leaf_override = Some(r8);
         }
         run_suite(&suite)
     };
@@ -132,6 +139,7 @@ mod tests {
             spec: None,
             family_override: None,
             stockham_tail_override: None,
+            r8_max_log_leaf_override: None,
         });
         assert!(!response.ok);
         assert!(response.report.is_none());
@@ -151,9 +159,11 @@ mod tests {
                 fail_fast: true,
                 family_override: FamilyOverride::Auto,
                 stockham_tail_override: zkgpu_report::StockhamTailOverride::Auto,
+                r8_max_log_leaf_override: None,
             }),
             family_override: None,
             stockham_tail_override: None,
+            r8_max_log_leaf_override: None,
         });
         assert!(!response.ok);
         assert_eq!(
@@ -176,9 +186,11 @@ mod tests {
                 fail_fast: true,
                 family_override: FamilyOverride::Auto,
                 stockham_tail_override: zkgpu_report::StockhamTailOverride::Auto,
+                r8_max_log_leaf_override: None,
             }),
             family_override: None,
             stockham_tail_override: Some(zkgpu_report::StockhamTailOverride::Global),
+            r8_max_log_leaf_override: None,
         };
         let json = serde_json::to_string(&req).expect("serialize");
         let parsed: HarnessRequest = serde_json::from_str(&json).expect("deserialize");

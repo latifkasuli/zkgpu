@@ -33,7 +33,13 @@ pub fn run_suite(spec: &SuiteSpec) -> Result<SuiteReport, TestkitError> {
     let mut cases = Vec::with_capacity(spec.cases.len());
 
     for case in &spec.cases {
-        let report = run_case(&device, case, spec.family_override, spec.stockham_tail_override);
+        let report = run_case(
+            &device,
+            case,
+            spec.family_override,
+            spec.stockham_tail_override,
+            spec.r8_max_log_leaf_override,
+        );
         let failed = !report.passed;
         cases.push(report);
         if spec.fail_fast && failed {
@@ -229,7 +235,9 @@ fn run_soak_case(
         }
     };
 
-    let mut plan = match make_plan(device, case.log_n, direction, family, tail_override) {
+    // Soak harness doesn't expose R8 override yet — pass `None` so the
+    // per-family default kicks in, matching pre-r8-override behavior.
+    let mut plan = match make_plan(device, case.log_n, direction, family, tail_override, None) {
         Ok(plan) => plan,
         Err(err) => return soak_case_error(case, duration, None, err.to_string()),
     };
@@ -296,6 +304,7 @@ fn run_case(
     case: &CaseSpec,
     family: FamilyOverride,
     tail_override: StockhamTailOverride,
+    r8_override: Option<u32>,
 ) -> CaseReport {
     let input = make_input(case.log_n, &case.input);
 
@@ -308,6 +317,7 @@ fn run_case(
             cpu_reference(&input, NttDirection::Forward),
             family,
             tail_override,
+            r8_override,
         ),
         TestDirection::Inverse => run_single_direction_case(
             device,
@@ -317,8 +327,11 @@ fn run_case(
             cpu_reference(&input, NttDirection::Inverse),
             family,
             tail_override,
+            r8_override,
         ),
-        TestDirection::Roundtrip => run_roundtrip_case(device, case, &input, family, tail_override),
+        TestDirection::Roundtrip => {
+            run_roundtrip_case(device, case, &input, family, tail_override, r8_override)
+        }
     }
 }
 
@@ -330,8 +343,9 @@ fn run_single_direction_case(
     expected: Vec<zkgpu_babybear::BabyBear>,
     family: FamilyOverride,
     tail_override: StockhamTailOverride,
+    r8_override: Option<u32>,
 ) -> CaseReport {
-    let mut plan = match make_plan(device, case.log_n, direction, family, tail_override) {
+    let mut plan = match make_plan(device, case.log_n, direction, family, tail_override, r8_override) {
         Ok(plan) => plan,
         Err(err) => return case_error(case, err),
     };
@@ -387,12 +401,19 @@ fn run_roundtrip_case(
     input: &[zkgpu_babybear::BabyBear],
     family: FamilyOverride,
     tail_override: StockhamTailOverride,
+    r8_override: Option<u32>,
 ) -> CaseReport {
-    let mut forward =
-        match make_plan(device, case.log_n, NttDirection::Forward, family, tail_override) {
-            Ok(plan) => plan,
-            Err(err) => return case_error(case, err),
-        };
+    let mut forward = match make_plan(
+        device,
+        case.log_n,
+        NttDirection::Forward,
+        family,
+        tail_override,
+        r8_override,
+    ) {
+        Ok(plan) => plan,
+        Err(err) => return case_error(case, err),
+    };
     // Capture forward-side metadata up-front so it survives a later failure
     // (inverse make_plan or either measurement). Without this, an inverse
     // make_plan crash on Xclipse/Mali/Browser drops the very tail strategy
@@ -402,20 +423,26 @@ fn run_roundtrip_case(
     let tail_reason = forward.stockham_tail_reason().map(str::to_string);
     let tail_stride_bytes = forward.tail_stride_bytes();
 
-    let mut inverse =
-        match make_plan(device, case.log_n, NttDirection::Inverse, family, tail_override) {
-            Ok(plan) => plan,
-            Err(err) => {
-                return case_error_with_tail(
-                    case,
-                    Some(forward_family_name),
-                    tail_strategy,
-                    tail_reason,
-                    tail_stride_bytes,
-                    err,
-                )
-            }
-        };
+    let mut inverse = match make_plan(
+        device,
+        case.log_n,
+        NttDirection::Inverse,
+        family,
+        tail_override,
+        r8_override,
+    ) {
+        Ok(plan) => plan,
+        Err(err) => {
+            return case_error_with_tail(
+                case,
+                Some(forward_family_name),
+                tail_strategy,
+                tail_reason,
+                tail_stride_bytes,
+                err,
+            )
+        }
+    };
     let kernel_family = Some(format!(
         "{}/{}",
         forward_family_name,
@@ -499,6 +526,7 @@ fn make_plan(
     direction: NttDirection,
     family: FamilyOverride,
     tail_override: StockhamTailOverride,
+    r8_override: Option<u32>,
 ) -> Result<WgpuNttPlan, ZkGpuError> {
     // Always derive from the device caps so the Stockham tail heuristic has
     // full device context, then narrow the family. The earlier
@@ -506,7 +534,9 @@ fn make_plan(
     // hint away, which silently downgraded forced-Stockham A/B runs on
     // Xclipse/Mali/Browser to `LocalFusedR4` regardless of the new policy.
     let plan_tail = to_plan_tail(tail_override);
-    let base = PlannerPolicy::from_caps(device.caps()).with_public_tail_override(plan_tail);
+    let base = PlannerPolicy::from_caps(device.caps())
+        .with_public_tail_override(plan_tail)
+        .with_r8_max_log_leaf_override(r8_override);
     let policy = match family {
         FamilyOverride::Auto => base,
         FamilyOverride::Stockham => base.with_four_step_disabled(),

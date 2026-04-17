@@ -85,9 +85,29 @@ object HarnessJson {
     fun crossoverBenchmarkRequestJson(
         family: FamilyChoice,
         tail: TailChoice = TailChoice.Auto,
+    ): String = customBenchmarkRequestJson(
+        logNRange = intArrayOf(18, 19, 20, 21, 22),
+        family = family,
+        tail = tail,
+    )
+
+    /**
+     * Build a forced-A/B benchmark request with caller-picked log_n range
+     * and caller-picked per-planner overrides.
+     *
+     * Used by the R8 A/B harness (Adreno/Mali/Xclipse): pass
+     * `r8MaxLogLeafOverride = 0L` to force R8 leaves off, or
+     * `r8MaxLogLeafOverride = Long.MAX_VALUE` to force them on, and run
+     * both runs to measure the R8-vs-R4 delta on mobile.
+     */
+    fun customBenchmarkRequestJson(
+        logNRange: IntArray,
+        family: FamilyChoice,
+        tail: TailChoice = TailChoice.Auto,
+        r8MaxLogLeafOverride: Long? = null,
     ): String {
         val cases = JSONArray()
-        for (logN in intArrayOf(18, 19, 20, 21, 22)) {
+        for (logN in logNRange) {
             for (dir in arrayOf("Forward", "Inverse")) {
                 val name = "${dir.lowercase()}_log${logN}"
                 cases.put(
@@ -113,6 +133,12 @@ object HarnessJson {
         if (tail.wireValue != null) {
             spec.put("stockham_tail_override", tail.wireValue)
         }
+        if (r8MaxLogLeafOverride != null) {
+            // Rust side reads u32. `u32::MAX` = 4_294_967_295, which exceeds
+            // Int.MAX_VALUE — serialize as JSON number (Long backing) so the
+            // "force-on" cap round-trips correctly.
+            spec.put("r8_max_log_leaf_override", r8MaxLogLeafOverride)
+        }
 
         val obj = JSONObject()
             .put("spec", spec)
@@ -120,6 +146,9 @@ object HarnessJson {
         // the knob without rebuilding the spec — matches the FFI contract.
         if (tail.wireValue != null) {
             obj.put("stockham_tail_override", tail.wireValue)
+        }
+        if (r8MaxLogLeafOverride != null) {
+            obj.put("r8_max_log_leaf_override", r8MaxLogLeafOverride)
         }
         return obj.toString()
     }

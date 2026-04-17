@@ -133,6 +133,123 @@ class ZkgpuInstrumentedTest {
         )
     }
 
+    /**
+     * R8 A/B, R8-on arm: forced Four-Step family with R8 leaves *enabled*
+     * regardless of per-family policy (r8_max_log_leaf_override = u32::MAX).
+     *
+     * Pair with [crossoverFourStepR8Disabled] on the same device to measure
+     * the R8-vs-R4 delta on Adreno / Mali / Xclipse — the families where
+     * the shipped default is "R8 always on" (u32::MAX) based on reasoning
+     * rather than a measured A/B. If the R8-on arm doesn't win by >10% on
+     * any (log_n, direction) cell, the default is conservative-safe but
+     * not a measured win.
+     *
+     * log_n ∈ {18, 20, 22} covers log_leaf ∈ {9, 10, 11} (balanced
+     * row × col split inside Four-Step). log_n=24 would push log_leaf=12
+     * but risks OOM on lower-RAM devices; start with the safer window.
+     */
+    @Test
+    fun crossoverFourStepR8Enabled() {
+        runR8ABBenchmark(
+            r8MaxLogLeafOverride = R8_FORCE_ENABLED,
+            tagPrefix = "R8_AB_ENABLED",
+        )
+    }
+
+    /**
+     * R8 A/B, R8-off arm: forced Four-Step family with R8 leaves *disabled*
+     * (r8_max_log_leaf_override = 0). Every leaf falls back to pure R4+R2.
+     */
+    @Test
+    fun crossoverFourStepR8Disabled() {
+        runR8ABBenchmark(
+            r8MaxLogLeafOverride = R8_FORCE_DISABLED,
+            tagPrefix = "R8_AB_DISABLED",
+        )
+    }
+
+    private fun runR8ABBenchmark(
+        r8MaxLogLeafOverride: Long,
+        tagPrefix: String,
+    ) {
+        val requestJson = HarnessJson.customBenchmarkRequestJson(
+            logNRange = R8_AB_LOG_N,
+            family = FamilyChoice.FourStep,
+            tail = TailChoice.Auto,
+            r8MaxLogLeafOverride = r8MaxLogLeafOverride,
+        )
+        val responseJson = ZkgpuBridge.runRequestJson(requestJson)
+        val file = HarnessStorage.writeLatestReport(context, responseJson)
+        Log.i(
+            TAG,
+            "$tagPrefix path=${file.absolutePath} " +
+                "family_override=FourStep r8_max_log_leaf_override=$r8MaxLogLeafOverride",
+        )
+
+        val response = JSONObject(responseJson)
+        assertTrue(response.optString("error"), response.optBoolean("ok", false))
+
+        val report = response.getJSONObject("report")
+        val summary = report.getJSONObject("summary")
+        assertEquals(0, summary.getInt("failed_cases"))
+        val expectedCases = R8_AB_LOG_N.size * 2
+        assertTrue(
+            "expected $expectedCases R8 A/B cases",
+            summary.getInt("total_cases") == expectedCases,
+        )
+
+        val kernel = report.optJSONObject("kernel")
+        Log.i(
+            TAG,
+            "$tagPrefix kernel.ntt_variant=${kernel?.optString("ntt_variant").orEmpty()}",
+        )
+
+        val device = report.optJSONObject("device")
+        if (device != null) {
+            Log.i(
+                TAG,
+                "$tagPrefix device name=\"${device.optString("name")}\" " +
+                    "backend=${device.optString("backend")} " +
+                    "tier=${device.optString("tier")} " +
+                    "family=${device.optString("gpu_family")} " +
+                    "driver=\"${device.optString("driver_info")}\"",
+            )
+        }
+
+        val cases = report.getJSONArray("cases")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val name = c.optString("name")
+            val kernelFamily = c.optString("kernel_family", "unknown")
+            val timings = c.optJSONObject("timings")
+            val wallNs = timings?.optLong("wall_time_ns", -1) ?: -1L
+            val gpuNs = timings?.optLong("gpu_total_ns", -1) ?: -1L
+            val wallMs = if (wallNs > 0) wallNs / 1_000_000.0 else -1.0
+            val gpuMs = if (gpuNs > 0) gpuNs / 1_000_000.0 else -1.0
+            Log.i(
+                TAG,
+                "$tagPrefix $name: family=$kernelFamily " +
+                    "wall=${"%.2f".format(wallMs)}ms gpu=${"%.2f".format(gpuMs)}ms",
+            )
+
+            // Per-stage timings help attribute the R4↔R8 delta to specific
+            // leaf stages vs the twiddle / transpose shared by both arms.
+            val stages = timings?.optJSONArray("gpu_stage_ns")
+            if (stages != null) {
+                for (s in 0 until stages.length()) {
+                    val stage = stages.getJSONObject(s)
+                    val label = stage.optString("label")
+                    val durNs = stage.optLong("duration_ns", 0)
+                    val durMs = durNs / 1_000_000.0
+                    Log.i(
+                        TAG,
+                        "$tagPrefix $name stage[$s] \"$label\" gpu=${"%.3f".format(durMs)}ms",
+                    )
+                }
+            }
+        }
+    }
+
     private fun runCrossoverBenchmark(
         family: FamilyChoice,
         tagPrefix: String,
@@ -250,6 +367,17 @@ class ZkgpuInstrumentedTest {
 
     companion object {
         private const val TAG = "ZkgpuHarnessTest"
+
+        // R8 A/B knob values. `u32::MAX` on the Rust side; passed as Long
+        // from Kotlin because Int.MAX_VALUE = 2^31-1 < 2^32-1.
+        private const val R8_FORCE_ENABLED = 4_294_967_295L
+        private const val R8_FORCE_DISABLED = 0L
+
+        // log_n windows for the R8 A/B. Balanced row×col Four-Step
+        // splits these to log_leaf {9, 10, 11}. log_n=24 → log_leaf=12
+        // would cover the outer edge but risks OOM on BrowserStack
+        // devices with ~4 GB RAM; omit for the initial sweep.
+        private val R8_AB_LOG_N = intArrayOf(18, 20, 22)
     }
 }
 

@@ -138,6 +138,13 @@ pub struct SuiteSpec {
     /// to Four-Step. Defaults to `Auto` (planner heuristic).
     #[serde(default)]
     pub stockham_tail_override: StockhamTailOverride,
+    /// Per-run override for `r8_max_log_leaf` (Four-Step leaf Radix-8 gate).
+    /// `Some(0)` disables R8 leaves, `Some(u32::MAX)` forces R8 on, `None`
+    /// falls back to the per-(backend, family) default. Wired end-to-end
+    /// for the mobile R8 A/B harness (Adreno/Mali/Xclipse). Ignored unless
+    /// the planner selects Four-Step.
+    #[serde(default)]
+    pub r8_max_log_leaf_override: Option<u32>,
 }
 
 fn default_family_override() -> FamilyOverride {
@@ -388,6 +395,12 @@ pub struct HarnessRequest {
     pub family_override: Option<FamilyOverride>,
     #[serde(default)]
     pub stockham_tail_override: Option<StockhamTailOverride>,
+    /// Top-level R8 override. When `Some`, overwrites
+    /// `spec.r8_max_log_leaf_override` in the FFI json mapper — lets a
+    /// caller flip R8 on/off without rebuilding the whole spec, matching
+    /// the pattern used by `stockham_tail_override`.
+    #[serde(default)]
+    pub r8_max_log_leaf_override: Option<u32>,
 }
 
 /// Response from the test harness.
@@ -473,6 +486,7 @@ pub fn smoke_suite() -> SuiteSpec {
         fail_fast: true,
         family_override: FamilyOverride::Auto,
         stockham_tail_override: StockhamTailOverride::Auto,
+        r8_max_log_leaf_override: None,
     }
 }
 
@@ -557,6 +571,7 @@ pub fn validation_suite() -> SuiteSpec {
         fail_fast: false,
         family_override: FamilyOverride::Auto,
         stockham_tail_override: StockhamTailOverride::Auto,
+        r8_max_log_leaf_override: None,
     }
 }
 
@@ -584,6 +599,7 @@ pub fn benchmark_suite() -> SuiteSpec {
         fail_fast: false,
         family_override: FamilyOverride::Auto,
         stockham_tail_override: StockhamTailOverride::Auto,
+        r8_max_log_leaf_override: None,
     }
 }
 
@@ -655,6 +671,7 @@ mod tests {
             spec: None,
             family_override: None,
             stockham_tail_override: None,
+            r8_max_log_leaf_override: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let parsed: HarnessRequest = serde_json::from_str(&json).unwrap();
