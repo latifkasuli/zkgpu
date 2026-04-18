@@ -11,7 +11,19 @@ use zkgpu_wgpu::{CapabilityProfile, PlannerPolicy, WgpuDevice, WgpuGoldilocksNtt
 #[derive(Serialize)]
 struct BenchmarkReport {
     device: DeviceReport,
+    /// Which prime field the benchmark targeted. Phase E.1.d added
+    /// `--field goldilocks`; emitting this lets JSON consumers
+    /// distinguish BabyBear rows from Goldilocks rows without sniffing
+    /// the `family` string on each `RunReport`.
+    field: String,
+    /// Forced kernel family, if any (`stockham` / `four-step`).
+    /// `None` means either the user didn't force it (auto-policy) or
+    /// the user's choice was silently ignored because `field ==
+    /// Goldilocks`. In the latter case stderr also logs a warning at
+    /// startup — see the `--field goldilocks` guard in `main()`.
     family_override: Option<String>,
+    /// Forced Stockham tail strategy (`local` / `global`). Same
+    /// null-on-ignored-under-Goldilocks convention as `family_override`.
     tail_override: Option<String>,
     runs: Vec<RunReport>,
 }
@@ -831,16 +843,31 @@ fn run_benchmark_mode(device: &WgpuDevice, cli: &CliArgs) {
         }
     }
 
+    // `--force-family` / `--force-tail` are silently ignored under
+    // `--field goldilocks` (see the startup warning in `main()`). Null
+    // them out in the emitted JSON too — otherwise a downstream
+    // consumer reading only the report would conclude a forced-family
+    // / forced-tail experiment actually ran, when the execution path
+    // was always the fixed Goldilocks Stockham plan.
+    let (family_override, tail_override) = match cli.field {
+        Field::BabyBear => (
+            match cli.family_override {
+                FamilyOverride::Auto => None,
+                mode => Some(mode.as_str().to_string()),
+            },
+            match cli.tail_override {
+                TailOverride::Auto => None,
+                tail => Some(tail.as_str().to_string()),
+            },
+        ),
+        Field::Goldilocks => (None, None),
+    };
+
     let report = BenchmarkReport {
         device: device_report(device.caps()),
-        family_override: match cli.family_override {
-            FamilyOverride::Auto => None,
-            mode => Some(mode.as_str().to_string()),
-        },
-        tail_override: match cli.tail_override {
-            TailOverride::Auto => None,
-            tail => Some(tail.as_str().to_string()),
-        },
+        field: cli.field.as_str().to_string(),
+        family_override,
+        tail_override,
         runs,
     };
 
@@ -1017,6 +1044,7 @@ fn print_table(report: &BenchmarkReport) {
         "Device: {} ({}/{}) tier={} buffer={}MB",
         d.name, d.backend, d.device_type, d.tier, d.limits.max_buffer_size_mb
     );
+    println!("Field: {}", report.field);
     println!();
     println!(
         "{:<10} {:<9} {:<10} {:>5} {:>12} {:>12} {:>12} {:>10} {:>10}",
@@ -1242,5 +1270,50 @@ mod tests {
     fn parse_soak_rejects_zero() {
         let err = parse_cli_args(vec!["--soak".to_string(), "0".to_string()]).unwrap_err();
         assert!(err.contains("must be > 0"));
+    }
+
+    /// Phase E.1 post-review: `--force-family` / `--force-tail` are
+    /// silently ignored on the Goldilocks path. The emitted JSON must
+    /// reflect that — otherwise a consumer reading only the report
+    /// would conclude a forced-family / forced-tail experiment actually
+    /// ran. This test runs the exact override-null logic from
+    /// `run_benchmark_mode` without touching the GPU.
+    #[test]
+    fn benchmark_report_overrides_are_null_under_goldilocks() {
+        fn derive_overrides(
+            field: Field,
+            family: FamilyOverride,
+            tail: TailOverride,
+        ) -> (Option<String>, Option<String>) {
+            match field {
+                Field::BabyBear => (
+                    match family {
+                        FamilyOverride::Auto => None,
+                        mode => Some(mode.as_str().to_string()),
+                    },
+                    match tail {
+                        TailOverride::Auto => None,
+                        t => Some(t.as_str().to_string()),
+                    },
+                ),
+                Field::Goldilocks => (None, None),
+            }
+        }
+
+        // BabyBear: overrides propagate
+        assert_eq!(
+            derive_overrides(Field::BabyBear, FamilyOverride::Stockham, TailOverride::Local),
+            (Some("stockham".into()), Some("local".into())),
+        );
+        // Goldilocks: overrides null even when user supplied them
+        assert_eq!(
+            derive_overrides(Field::Goldilocks, FamilyOverride::FourStep, TailOverride::Global),
+            (None, None),
+        );
+        // Goldilocks + Auto: still null (not Some("auto"))
+        assert_eq!(
+            derive_overrides(Field::Goldilocks, FamilyOverride::Auto, TailOverride::Auto),
+            (None, None),
+        );
     }
 }
