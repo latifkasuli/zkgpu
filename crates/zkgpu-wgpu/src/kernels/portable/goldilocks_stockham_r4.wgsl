@@ -47,8 +47,10 @@ struct StockhamR4Params {
     twiddle_offset: u32,  // start index into twiddles_buf for this stage
     i_n_lo: u32,          // ω^(N/4) stored as u32x2 limbs
     i_n_hi: u32,
-    _pad0: u32,
-    _pad1: u32,
+    // Number of threads per row of the 2D-folded dispatch grid.
+    // See the R2 kernel's `row_stride` doc for the WebGPU-limit rationale.
+    row_stride: u32,
+    _pad: u32,
 }
 
 @group(0) @binding(0) var<storage, read>        input_buf:    array<vec2<u32>>;
@@ -58,7 +60,7 @@ struct StockhamR4Params {
 
 @compute @workgroup_size(64)
 fn gl_stockham_r4(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let bfly_idx = gid.x;
+    let bfly_idx = gid.x + gid.y * params.row_stride;
     if (bfly_idx >= params.total_bfly) { return; }
 
     let quarter = params.quarter;

@@ -25,6 +25,16 @@ struct StockhamR2Params {
     half: u32,
     half_total: u32,
     twiddle_offset: u32,
+    // Number of threads per row of the 2D-folded dispatch grid.
+    // Equals `groups_per_row * WORKGROUP_SIZE`. The kernel reconstructs
+    // the flat butterfly index as `gid.x + gid.y * row_stride`. Folding
+    // is required because WebGPU guarantees only
+    // `max_compute_workgroups_per_dimension >= 65535`, which a 1D
+    // dispatch exceeds at `log_n >= 23` (N/2 > 65535 * 64).
+    row_stride: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(0) var<storage, read>        input_buf:    array<vec2<u32>>;
@@ -34,7 +44,7 @@ struct StockhamR2Params {
 
 @compute @workgroup_size(64)
 fn gl_stockham_r2(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let bfly_idx = gid.x;
+    let bfly_idx = gid.x + gid.y * params.row_stride;
     if (bfly_idx >= params.half_total) { return; }
 
     let half = params.half;

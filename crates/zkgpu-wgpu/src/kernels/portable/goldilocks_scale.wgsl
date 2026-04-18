@@ -11,7 +11,12 @@ struct ScaleParams {
     n: u32,
     scalar_lo: u32,
     scalar_hi: u32,
-    _pad: u32,
+    // Number of threads per row of the 2D-folded dispatch grid. Equals
+    // `groups_per_row * WORKGROUP_SIZE`. Needed because the scale kernel
+    // dispatches one thread per element — a 1D grid exceeds WebGPU's
+    // `max_compute_workgroups_per_dimension = 65535` at log_n >= 22
+    // (N / 64 > 65535).
+    row_stride: u32,
 }
 
 @group(0) @binding(0) var<storage, read_write> data: array<vec2<u32>>;
@@ -19,7 +24,7 @@ struct ScaleParams {
 
 @compute @workgroup_size(64)
 fn gl_scale(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
+    let i = gid.x + gid.y * params.row_stride;
     if (i >= params.n) { return; }
     let scalar = vec2<u32>(params.scalar_lo, params.scalar_hi);
     data[i] = gl_mul(data[i], scalar);

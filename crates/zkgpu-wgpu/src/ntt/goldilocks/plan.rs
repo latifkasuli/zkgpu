@@ -19,6 +19,7 @@ use zkgpu_goldilocks::Goldilocks;
 
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
+use crate::dispatch::{plan_linear_dispatch, LinearDispatch};
 use crate::ntt::goldilocks::resolve::{
     resolve_variant, GoldilocksKernelOverride, ResolvedGoldilocksKernel,
 };
@@ -60,7 +61,7 @@ const STOCKHAM_R4_ENTRY: &str = "gl_stockham_r4";
 const SCALE_ENTRY: &str = "gl_scale";
 const WORKGROUP_SIZE: u32 = 64;
 
-// Stage-uniform layout must match `StockhamR2Params` in WGSL.
+// Stage-uniform layout must match `StockhamR2Params` in WGSL. 32 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct StageUniformR2 {
@@ -68,6 +69,10 @@ struct StageUniformR2 {
     half: u32,
     half_total: u32,
     twiddle_offset: u32,
+    row_stride: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 // Stage-uniform layout must match `StockhamR4Params` in WGSL. 32 bytes.
@@ -80,18 +85,18 @@ struct StageUniformR4 {
     twiddle_offset: u32,
     i_n_lo: u32,
     i_n_hi: u32,
-    _pad0: u32,
-    _pad1: u32,
+    row_stride: u32,
+    _pad: u32,
 }
 
-// Scale-uniform layout must match `ScaleParams` in WGSL.
+// Scale-uniform layout must match `ScaleParams` in WGSL. 16 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct ScaleUniform {
     n: u32,
     scalar_lo: u32,
     scalar_hi: u32,
-    _pad: u32,
+    row_stride: u32,
 }
 
 /// Portable Goldilocks NTT plan.
@@ -136,6 +141,17 @@ pub struct WgpuGoldilocksNttPlan {
     /// plans.
     scale_uniform: Option<wgpu::Buffer>,
 
+    /// 2D-folded dispatch shape for the Stockham stages. Same shape is
+    /// reused across every stage — all R2 (or R4) stages have the same
+    /// butterfly count, so a single plan suffices.
+    stockham_dispatch: LinearDispatch,
+
+    /// 2D-folded dispatch shape for the inverse-scale kernel. `None`
+    /// for forward plans. Distinct from `stockham_dispatch` because the
+    /// scale kernel runs one thread per element (N total) rather than
+    /// one per butterfly (N/2 or N/4).
+    scale_dispatch: Option<LinearDispatch>,
+
     // R2 path (used when log_n is odd).
     stockham_r2_bgl: Arc<wgpu::BindGroupLayout>,
     stockham_r2_pipeline: Arc<wgpu::ComputePipeline>,
@@ -179,18 +195,35 @@ impl WgpuGoldilocksNttPlan {
         // Now safe: log_n in [1, 31], so `1u32 << log_n` fits in u32.
         let n = 1u32 << log_n;
 
-        // Buffer-budget preflight: the plan holds one N-element scratch
-        // buffer, and the caller's buf is another. Twiddles are N-1
-        // elements. Four of these need to fit under the device's
-        // `max_buffer_size` ceiling (roughly; we check the dominant
-        // 2 × N × 8-byte working set since twiddles are the same
-        // order of magnitude).
-        let elem_bytes = 8u64; // Goldilocks = 8 bytes per element (u64)
-        let working_set = 2u64 * (n as u64) * elem_bytes;
-        let buf_limit = device.caps.max_buffer_size;
-        if working_set > buf_limit {
+        // Buffer-budget preflight. Two checks, mirroring the BabyBear
+        // `WgpuNttPlan` convention:
+        //
+        //   1. Per-buffer: each N-sized buffer is bound via
+        //      `as_entire_binding()`, so its size must fit under
+        //      `max_storage_buffer_size() = min(max_buffer_size,
+        //      max_storage_buffer_binding_size)`. The binding cap is
+        //      sometimes tighter than the raw buffer cap on
+        //      mobile/integrated adapters, so we check both here by
+        //      querying the effective minimum.
+        //   2. Aggregate: the plan holds three N-sized buffers
+        //      simultaneously (user buf + scratch + twiddles), so the
+        //      total working set is 3·N·8. We cap that against
+        //      `max_buffer_size` as a proxy for device-total memory;
+        //      wgpu doesn't expose total GPU memory directly.
+        let elem_bytes = 8u64; // Goldilocks = 8 bytes per element.
+        let per_buffer = (n as u64) * elem_bytes;
+        let storage_limit = device.caps.max_storage_buffer_size();
+        if per_buffer > storage_limit {
             return Err(ZkGpuError::BufferSize {
-                requested: working_set,
+                requested: per_buffer,
+                limit: storage_limit,
+            });
+        }
+        let aggregate = 3u64 * per_buffer;
+        let buf_limit = device.caps.max_buffer_size;
+        if aggregate > buf_limit {
+            return Err(ZkGpuError::BufferSize {
+                requested: aggregate,
                 limit: buf_limit,
             });
         }
@@ -203,6 +236,19 @@ impl WgpuGoldilocksNttPlan {
         // parity complexity that isn't warranted until a concrete
         // odd-log_n workload justifies it.
         let uses_r4 = log_n % 2 == 0;
+
+        // Plan the 2D-folded dispatch once — it's constant per plan
+        // (all Stockham stages have the same butterfly count). The
+        // shader reconstructs the flat butterfly index as
+        // `gid.x + gid.y * row_stride`, avoiding the WebGPU baseline
+        // limit `max_compute_workgroups_per_dimension >= 65535` that
+        // a raw 1D dispatch exceeds at `log_n >= 23` (R2) or
+        // `log_n >= 24` (R4).
+        let max_wg_per_dim = device.caps.max_compute_workgroups_per_dimension;
+        let stockham_bfly = if uses_r4 { n / 4 } else { n / 2 };
+        let stockham_dispatch =
+            plan_linear_dispatch(stockham_bfly, WORKGROUP_SIZE, max_wg_per_dim)?;
+        let stockham_row_stride = stockham_dispatch.groups_per_row * WORKGROUP_SIZE;
 
         // ---- Twiddles + stage uniforms -------------------------------
         let (twiddles, stage_uniforms) = if uses_r4 {
@@ -224,16 +270,12 @@ impl WgpuGoldilocksNttPlan {
                         twiddle_offset,
                         i_n_lo,
                         i_n_hi,
-                        _pad0: 0,
-                        _pad1: 0,
+                        row_stride: stockham_row_stride,
+                        _pad: 0,
                     },
                     "goldilocks stockham r4 stage uniform",
                 );
                 uniforms.push(uniform);
-                // 3 twiddles per butterfly, `quarter` butterflies per stage
-                // (regardless of n_groups because stages always have N/4
-                // butterflies each in aggregate — but per-group butterflies
-                // = quarter, and tw1/tw2/tw3 are laid out per-j, not per-g).
                 twiddle_offset += 3 * quarter;
             }
             (tw, uniforms)
@@ -251,6 +293,10 @@ impl WgpuGoldilocksNttPlan {
                         half,
                         half_total,
                         twiddle_offset,
+                        row_stride: stockham_row_stride,
+                        _pad0: 0,
+                        _pad1: 0,
+                        _pad2: 0,
                     },
                     "goldilocks stockham r2 stage uniform",
                 );
@@ -265,9 +311,18 @@ impl WgpuGoldilocksNttPlan {
         let scratch_buf = device.alloc_zeros::<Goldilocks>(n as usize)?;
 
         // ---- Scale uniform (inverse only) ---------------------------
-        let scale_uniform = match direction {
-            NttDirection::Forward => None,
+        // The scale kernel dispatches one thread per *element* (N total),
+        // not per butterfly, so it needs its own 2D-folded dispatch
+        // plan. Without this, log_n >= 22 exceeds
+        // `max_compute_workgroups_per_dimension >= 65535` on a raw 1D
+        // grid (N/64 > 65535 at log_n = 22).
+        let (scale_uniform, scale_dispatch) = match direction {
+            NttDirection::Forward => (None, None),
             NttDirection::Inverse => {
+                let scale_dispatch =
+                    plan_linear_dispatch(n, WORKGROUP_SIZE, max_wg_per_dim)?;
+                let scale_row_stride =
+                    scale_dispatch.groups_per_row * WORKGROUP_SIZE;
                 // n_inv = (n as field element)^{-1}, packed as (lo, hi).
                 let n_field = <Goldilocks as GpuField>::from_u64(n as u64);
                 let n_inv = n_field.inverse().ok_or_else(|| {
@@ -278,16 +333,17 @@ impl WgpuGoldilocksNttPlan {
                 let n_inv_u64: u64 = n_inv.to_repr();
                 let scalar_lo = n_inv_u64 as u32;
                 let scalar_hi = (n_inv_u64 >> 32) as u32;
-                Some(create_uniform(
+                let uniform = create_uniform(
                     device.raw_device(),
                     &ScaleUniform {
                         n,
                         scalar_lo,
                         scalar_hi,
-                        _pad: 0,
+                        row_stride: scale_row_stride,
                     },
                     "goldilocks scale uniform",
-                ))
+                );
+                (Some(uniform), Some(scale_dispatch))
             }
         };
 
@@ -407,6 +463,8 @@ impl WgpuGoldilocksNttPlan {
             scratch_buf,
             stage_uniforms,
             scale_uniform,
+            stockham_dispatch,
+            scale_dispatch,
             stockham_r2_bgl,
             stockham_r2_pipeline,
             stockham_r4_bgl,
@@ -454,22 +512,25 @@ impl WgpuGoldilocksNttPlan {
         // Dispatch geometry depends on radix:
         //   R2: N/2 butterflies per stage, log_n stages.
         //   R4: N/4 butterflies per stage, log_n/2 stages.
-        let (num_stages, butterflies_per_stage, bgl, pipeline) = if self.uses_r4 {
+        //
+        // Dispatch shape (`stockham_dispatch`) was computed once at plan
+        // construction via `plan_linear_dispatch` and threaded into the
+        // per-stage uniform's `row_stride` field so the shader can
+        // reconstruct the flat butterfly index.
+        let (num_stages, bgl, pipeline) = if self.uses_r4 {
             (
                 self.log_n / 2,
-                self.n / 4,
                 &self.stockham_r4_bgl,
                 &self.stockham_r4_pipeline,
             )
         } else {
             (
                 self.log_n,
-                self.n / 2,
                 &self.stockham_r2_bgl,
                 &self.stockham_r2_pipeline,
             )
         };
-        let num_groups = butterflies_per_stage.div_ceil(WORKGROUP_SIZE);
+        let dispatch = self.stockham_dispatch;
 
         let mut encoder = device.raw_device().create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
@@ -522,7 +583,7 @@ impl WgpuGoldilocksNttPlan {
             pass.set_pipeline(pipeline);
             for bg in &bind_groups {
                 pass.set_bind_group(0, bg, &[]);
-                pass.dispatch_workgroups(num_groups, 1, 1);
+                pass.dispatch_workgroups(dispatch.x, dispatch.y, 1);
             }
         }
 
@@ -561,14 +622,16 @@ impl WgpuGoldilocksNttPlan {
                     },
                 ],
             });
-            let scale_groups = self.n.div_ceil(WORKGROUP_SIZE);
+            let scale_dispatch = self
+                .scale_dispatch
+                .expect("inverse plan must have scale dispatch");
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("goldilocks inverse scale"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.scale_pipeline);
             pass.set_bind_group(0, &scale_bg, &[]);
-            pass.dispatch_workgroups(scale_groups, 1, 1);
+            pass.dispatch_workgroups(scale_dispatch.x, scale_dispatch.y, 1);
         }
 
         device.raw_queue().submit(Some(encoder.finish()));

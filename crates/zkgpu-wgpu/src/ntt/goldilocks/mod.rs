@@ -1,11 +1,16 @@
 //! Goldilocks GPU NTT module.
 //!
-//! # Status after Phase B.2
+//! # Status after Phase B.3
 //!
 //! - [`plan::WgpuGoldilocksNttPlan`] — concrete, portable-u32x2 Stockham
-//!   radix-2 NTT plan for [`zkgpu_goldilocks::Goldilocks`]. Forward +
-//!   inverse, up to `MAX_GOLDILOCKS_LOG_N = 31`. Canary-validated on
-//!   local Metal against [`zkgpu_ntt::ntt_cpu_reference::<Goldilocks>`].
+//!   NTT plan for [`zkgpu_goldilocks::Goldilocks`]. Dispatches the R4
+//!   kernel when `log_n` is even, falls back to R2 when odd. Forward +
+//!   inverse, up to `MAX_GOLDILOCKS_LOG_N = 31`. 2D-folded dispatch via
+//!   [`crate::dispatch::plan_linear_dispatch`] so large `log_n` respect
+//!   WebGPU's baseline `max_compute_workgroups_per_dimension = 65535`.
+//!   Canary-validated on Metal + Vulkan against
+//!   [`zkgpu_ntt::ntt_cpu_reference::<Goldilocks>`] at log_n ∈
+//!   {3,4,5,6,10,18} and GPU-determinism at log_n = 20.
 //! - [`resolve`] — kernel-variant resolver (Auto / Portable /
 //!   NativeVulkan). `Auto` always resolves to `PortableU32x2` until an
 //!   allowlist of proven `(backend, gpu_family, driver)` fingerprints
