@@ -13,3 +13,4 @@ zkgpu-core = { workspace = true }
 [dev-dependencies]
 zkgpu-babybear = { workspace = true }
 zkgpu-koalabear = { workspace = true }
+zkgpu-goldilocks = { workspace = true }

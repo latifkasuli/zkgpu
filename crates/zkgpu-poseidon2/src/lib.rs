@@ -122,17 +122,20 @@ impl PlaceholderConstants {
     /// Produce an external-round constants array of length
     /// `2 * rounds_f_half`, filling each `[F; W]` from sequential
     /// counter values.
-    pub fn external<F: GpuField<Repr = u32>, const W: usize>(
+    ///
+    /// Uses [`GpuField::from_u64`] so the generic bound is just `GpuField`
+    /// — this is what lets Goldilocks (`Repr = u64`) flow through the
+    /// same Poseidon2 permutation as BabyBear / KoalaBear (`Repr = u32`).
+    pub fn external<F: GpuField, const W: usize>(
         rounds_f_half: usize,
-        seed: u32,
+        seed: u64,
     ) -> Vec<[F; W]> {
-        let mut counter: u32 = seed.saturating_add(1);
+        let mut counter: u64 = seed.saturating_add(1);
         let mut out = Vec::with_capacity(2 * rounds_f_half);
         for _ in 0..(2 * rounds_f_half) {
             let mut row = [F::ZERO; W];
             for slot in row.iter_mut() {
-                let val = counter % F::MODULUS;
-                *slot = F::from_repr(val);
+                *slot = F::from_u64(counter);
                 counter = counter.wrapping_add(1);
             }
             out.push(row);
@@ -143,31 +146,27 @@ impl PlaceholderConstants {
     /// Internal-round constants (length `rounds_p`), seeded to follow
     /// the external constants in the counter sequence so both halves
     /// of the permutation stay distinct-per-round.
-    pub fn internal<F: GpuField<Repr = u32>>(
-        rounds_p: usize,
-        seed: u32,
-    ) -> Vec<F> {
-        let mut counter: u32 = seed.saturating_add(1);
+    pub fn internal<F: GpuField>(rounds_p: usize, seed: u64) -> Vec<F> {
+        let mut counter: u64 = seed.saturating_add(1);
         let mut out = Vec::with_capacity(rounds_p);
         for _ in 0..rounds_p {
-            let val = counter % F::MODULUS;
-            out.push(F::from_repr(val));
+            out.push(F::from_u64(counter));
             counter = counter.wrapping_add(1);
         }
         out
     }
 
-    /// Internal diagonal: `diagonal[i] = F::from_repr(i + 1)`.
-    pub fn diagonal<F: GpuField<Repr = u32>, const W: usize>() -> [F; W] {
+    /// Internal diagonal: `diagonal[i] = F::from_u64((i + 1) as u64)`.
+    pub fn diagonal<F: GpuField, const W: usize>() -> [F; W] {
         let mut out = [F::ZERO; W];
         for (i, slot) in out.iter_mut().enumerate() {
-            *slot = F::from_repr((i as u32 + 1) % F::MODULUS);
+            *slot = F::from_u64((i as u64) + 1);
         }
         out
     }
 }
 
-impl<F: GpuField<Repr = u32>, const W: usize> Poseidon2Params<F, W> {
+impl<F: GpuField, const W: usize> Poseidon2Params<F, W> {
     /// Construct params with all fields supplied explicitly. Useful for
     /// plugging in external (e.g. Plonky3) constants later.
     pub fn new(
@@ -199,7 +198,7 @@ impl<F: GpuField<Repr = u32>, const W: usize> Poseidon2Params<F, W> {
     }
 }
 
-impl<F: GpuField<Repr = u32>> Poseidon2Params<F, WIDTH> {
+impl<F: GpuField> Poseidon2Params<F, WIDTH> {
     /// BabyBear defaults: α = 7, rounds 4 / 13 / 4 (external / internal /
     /// external), placeholder constants.
     pub fn babybear_default() -> Self {
@@ -233,6 +232,34 @@ impl<F: GpuField<Repr = u32>> Poseidon2Params<F, WIDTH> {
             PlaceholderConstants::diagonal::<F, WIDTH>(),
         )
     }
+
+    /// Goldilocks defaults: α = 7, rounds 4 / 22 / 4, placeholder constants.
+    ///
+    /// 7 is coprime to `p - 1 = 2^32 · 3 · 5 · 17 · 257 · 65537` (none
+    /// of those factors equals 7), so `x → x^7` is a genuine permutation
+    /// in Goldilocks. Plonky3's Goldilocks Poseidon2 uses `rounds_p = 22`
+    /// at the native width=8; for the structural width-16 instance here
+    /// we use the same 22 — it's a superset of what Plonky3 would need
+    /// for a width-8 parameterisation, so the security-budget argument
+    /// isn't weakened.
+    ///
+    /// **Note.** Plonky3's production Goldilocks Poseidon2 is width=8
+    /// (each element is already 64 bits, so 8·64 = 512 bits matches
+    /// BabyBear's 16·32 = 512). Shipping a width=8 variant is the right
+    /// next step for a real adapter; this width=16 instance exists to
+    /// prove the trait-level flow, not to claim Plonky3 compatibility.
+    pub fn goldilocks_default() -> Self {
+        let rounds_f_half = 4;
+        let rounds_p = 22;
+        Self::new(
+            7,
+            rounds_f_half,
+            rounds_p,
+            PlaceholderConstants::external::<F, WIDTH>(rounds_f_half, 0),
+            PlaceholderConstants::internal::<F>(rounds_p, 1_000),
+            PlaceholderConstants::diagonal::<F, WIDTH>(),
+        )
+    }
 }
 
 /// Poseidon2 permutation instance. Wraps [`Poseidon2Params`] and exposes
@@ -242,7 +269,7 @@ pub struct Poseidon2<F: GpuField, const W: usize> {
     params: Poseidon2Params<F, W>,
 }
 
-impl<F: GpuField<Repr = u32>, const W: usize> Poseidon2<F, W> {
+impl<F: GpuField, const W: usize> Poseidon2<F, W> {
     pub fn new(params: Poseidon2Params<F, W>) -> Self {
         Self { params }
     }
@@ -387,15 +414,22 @@ mod tests {
     use super::*;
 
     /// Generic-over-F smoke test. The whole point of this crate is that
-    /// the permutation compiles and runs against any `GpuField<Repr = u32>`.
-    /// If either assertion fails on a new field, `GpuField` has picked up
-    /// a field-specific assumption somewhere.
-    fn permutation_smoke<F: GpuField<Repr = u32>>(params: Poseidon2Params<F, WIDTH>) {
+    /// the permutation compiles and runs against any [`GpuField`]. If
+    /// either assertion fails on a new field, `GpuField` has picked up a
+    /// field-specific assumption somewhere.
+    ///
+    /// The `F::Repr: PartialEq + Debug` bound is only needed for
+    /// `assert_eq!` on arrays of repr values; both `u32` and `u64`
+    /// satisfy it trivially.
+    fn permutation_smoke<F: GpuField>(params: Poseidon2Params<F, WIDTH>)
+    where
+        F::Repr: PartialEq + std::fmt::Debug,
+    {
         let perm = Poseidon2::new(params);
 
         // 1. Deterministic: same input → same output.
         let mut a = [F::ZERO; WIDTH];
-        a[0] = F::from_repr(1);
+        a[0] = F::from_u64(1);
         let mut b = a;
         perm.permute(&mut a);
         perm.permute(&mut b);
@@ -404,7 +438,7 @@ mod tests {
         // 2. Non-trivial: permutation must move state away from identity
         //    for a non-zero input.
         let mut state = [F::ZERO; WIDTH];
-        state[0] = F::from_repr(1);
+        state[0] = F::from_u64(1);
         let original = state;
         perm.permute(&mut state);
         assert_ne!(
@@ -415,9 +449,9 @@ mod tests {
 
         // 3. Injectivity sample: two distinct inputs → distinct outputs.
         let mut s1 = [F::ZERO; WIDTH];
-        s1[0] = F::from_repr(1);
+        s1[0] = F::from_u64(1);
         let mut s2 = [F::ZERO; WIDTH];
-        s2[0] = F::from_repr(2);
+        s2[0] = F::from_u64(2);
         perm.permute(&mut s1);
         perm.permute(&mut s2);
         assert_ne!(
@@ -437,6 +471,16 @@ mod tests {
     fn koalabear_permutation_smoke() {
         use zkgpu_koalabear::KoalaBear;
         permutation_smoke::<KoalaBear>(Poseidon2Params::koalabear_default());
+    }
+
+    /// Phase-2 cross-crate exit check: the same Poseidon2 permutation
+    /// runs over a `GpuField<Repr = u64>` (Goldilocks) without any
+    /// crate-level specialisation. If this test breaks, the generic
+    /// bounds in this crate collapsed back to 32-bit reprs.
+    #[test]
+    fn goldilocks_permutation_smoke() {
+        use zkgpu_goldilocks::Goldilocks;
+        permutation_smoke::<Goldilocks>(Poseidon2Params::goldilocks_default());
     }
 
     #[test]

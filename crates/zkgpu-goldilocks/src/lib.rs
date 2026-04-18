@@ -564,4 +564,121 @@ mod tests {
         ntt_cpu_reference::<Goldilocks>(&mut data, NttDirection::Inverse);
         assert_eq!(data, original, "log15 NTT roundtrip failed");
     }
+
+    // --- Differential fuzz tests ---
+    //
+    // Curated tests above are good at catching specific boundary bugs,
+    // but they don't give statistical confidence against the broad
+    // middle of the input space. These tests draw thousands of random
+    // inputs and cross-check every result against `u128` big-int
+    // arithmetic — the ground truth. With `N = 10_000` inputs and no
+    // observed mismatches, we can bound the probability of an
+    // undetected systematic reduction bug to very small on any
+    // randomly-sampleable class of inputs.
+
+    const FUZZ_COUNT: usize = 10_000;
+
+    /// Deterministic-PRNG helper so fuzz tests are reproducible. SplitMix64
+    /// — small, well-distributed for this purpose, doesn't pull a crate.
+    struct SplitMix64(u64);
+
+    impl SplitMix64 {
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
+        fn next_u64(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+        fn next_u128(&mut self) -> u128 {
+            ((self.next_u64() as u128) << 64) | self.next_u64() as u128
+        }
+        fn next_canonical(&mut self) -> u64 {
+            self.next_u64() % P
+        }
+    }
+
+    #[test]
+    fn reduce_128_differential_fuzz() {
+        let mut rng = SplitMix64::new(0xFEED_FACE_CAFE_BABE);
+        for i in 0..FUZZ_COUNT {
+            let x = rng.next_u128();
+            let expected = (x % P as u128) as u64;
+            let got = reduce_128(x);
+            assert_eq!(
+                got, expected,
+                "reduce_128 mismatch at iter {i}: input={x:#x}, got={got}, expected={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn mul_differential_fuzz() {
+        let mut rng = SplitMix64::new(0xA1B2_C3D4_E5F6_0718);
+        for i in 0..FUZZ_COUNT {
+            let a = rng.next_canonical();
+            let b = rng.next_canonical();
+            let expected = ((a as u128) * (b as u128) % P as u128) as u64;
+            let got = (Goldilocks(a) * Goldilocks(b)).0;
+            assert_eq!(
+                got, expected,
+                "mul mismatch at iter {i}: a={a}, b={b}, got={got}, expected={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn add_differential_fuzz() {
+        let mut rng = SplitMix64::new(0x0123_4567_89AB_CDEF);
+        for i in 0..FUZZ_COUNT {
+            let a = rng.next_canonical();
+            let b = rng.next_canonical();
+            let expected = ((a as u128 + b as u128) % P as u128) as u64;
+            let got = (Goldilocks(a) + Goldilocks(b)).0;
+            assert_eq!(
+                got, expected,
+                "add mismatch at iter {i}: a={a}, b={b}, got={got}, expected={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn sub_differential_fuzz() {
+        let mut rng = SplitMix64::new(0xDEAD_BEEF_DEAD_BEEF);
+        for i in 0..FUZZ_COUNT {
+            let a = rng.next_canonical();
+            let b = rng.next_canonical();
+            // (a - b) mod p, via u128 signed-offset math. Adding p into a
+            // u128 first keeps everything non-negative before the modulo.
+            let expected = ((a as u128 + P as u128 - b as u128) % P as u128) as u64;
+            let got = (Goldilocks(a) - Goldilocks(b)).0;
+            assert_eq!(
+                got, expected,
+                "sub mismatch at iter {i}: a={a}, b={b}, got={got}, expected={expected}"
+            );
+        }
+    }
+
+    /// A combined roundtrip fuzz: for each sampled `a` draw a random
+    /// non-zero `b`, compute `a * b * b^{-1}`, and assert it equals `a`.
+    /// Exercises `mul` and `inv` together across 10 000 inputs.
+    #[test]
+    fn mul_inv_roundtrip_fuzz() {
+        let mut rng = SplitMix64::new(0xCAFE_0BAD_FEED_DEAD);
+        for i in 0..FUZZ_COUNT {
+            let a_raw = rng.next_canonical();
+            let mut b_raw = rng.next_canonical();
+            if b_raw == 0 {
+                b_raw = 1; // inversion is defined on F_p^*
+            }
+            let a = Goldilocks::new(a_raw);
+            let b = Goldilocks::new(b_raw);
+            let b_inv = b.inv().expect("non-zero b must invert");
+            let got = a * b * b_inv;
+            assert_eq!(got, a, "round-trip mismatch at iter {i}: a={a_raw}, b={b_raw}");
+        }
+    }
 }
