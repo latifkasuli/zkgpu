@@ -35,6 +35,11 @@ pollster = { workspace = true }
 [dev-dependencies]
 env_logger = { workspace = true }
 criterion = { workspace = true }
+# Goldilocks (u64) CPU reference, for GPU differential tests of the
+# portable u32x2 arithmetic primitives. Dev-only — never reaches the
+# shipping crate surface.
+zkgpu-goldilocks = { workspace = true }
+pollster = { workspace = true }
 
 [[bench]]
 name = "ntt_bench"

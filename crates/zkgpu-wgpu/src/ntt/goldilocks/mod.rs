@@ -37,4 +37,5 @@
 //! the portable limb kernel as the mandatory baseline and treats
 //! native int64 as a proven-on-a-specific-(backend, driver) fast path.
 
+pub(crate) mod arith_test;
 pub(crate) mod resolve;
