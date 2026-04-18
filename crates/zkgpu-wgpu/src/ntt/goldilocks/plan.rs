@@ -1,11 +1,16 @@
 //! [`WgpuGoldilocksNttPlan`] — portable u32x2 Goldilocks NTT on the GPU.
 //!
-//! Phase B.2 deliverable. Implements a radix-2 Stockham DIF auto-sort
-//! NTT over Goldilocks using the u32x2 WGSL arithmetic primitives
-//! validated in Phase B.1. Global-only (no local-fused tail), one
-//! butterfly per thread, log_n ping-pong stages between the caller's
-//! buffer and an internal scratch buffer. Inverse direction applies
-//! the `goldilocks_scale` kernel at the end to divide by n.
+//! Phase B.3 deliverable. Implements a Stockham DIF auto-sort NTT over
+//! Goldilocks using the u32x2 WGSL arithmetic primitives validated in
+//! Phase B.1. The plan dispatches the radix-4 kernel when `log_n` is
+//! even and falls back to radix-2 when odd. Global-only (no local-fused
+//! tail), one butterfly per thread, ping-pong stages between the
+//! caller's buffer and an internal scratch buffer. Inverse direction
+//! applies the `goldilocks_scale` kernel at the end to divide by n.
+//!
+//! Dispatches are 2D-folded via [`crate::dispatch::plan_linear_dispatch`]
+//! so large `log_n` honors WebGPU's baseline
+//! `max_compute_workgroups_per_dimension = 65535`.
 //!
 //! Not wired into the main [`crate::WgpuNttPlan`] dispatch — BabyBear
 //! and Goldilocks plans live side by side for now. Phase E of the
