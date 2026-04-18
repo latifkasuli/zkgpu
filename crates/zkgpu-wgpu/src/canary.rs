@@ -21,7 +21,7 @@ use zkgpu_ntt::ntt_cpu_reference;
 
 use crate::async_util::map_buffer_read;
 use crate::caps::CapabilityProfile;
-use crate::ntt::twiddles::precompute_local_r4_twiddles;
+use crate::ntt::babybear_twiddles::precompute_local_r4_twiddles;
 
 /// Portable local radix-4 DIF NTT shader.
 const NTT_LOCAL_R4_WGSL: &str =

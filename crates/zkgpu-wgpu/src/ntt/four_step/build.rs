@@ -12,7 +12,7 @@ use super::params::{
 
 use super::super::common::{bgl_storage_entry, bgl_uniform_entry};
 use super::super::planner::{FourStepPlanConfig, WORKGROUP_SIZE};
-use super::super::twiddles::{
+use super::super::babybear_twiddles::{
     precompute_fourstep_twiddles, precompute_single_r2_twiddles,
     precompute_stockham_r4_twiddles, precompute_stockham_r8_twiddles,
 };

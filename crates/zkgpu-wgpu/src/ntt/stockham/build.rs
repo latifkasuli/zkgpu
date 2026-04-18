@@ -8,7 +8,7 @@ use crate::dispatch::plan_linear_dispatch;
 use super::StockhamPlan;
 use super::super::common::{bgl_storage_entry, bgl_uniform_entry};
 use super::super::planner::{StockhamPlanConfig, WORKGROUP_SIZE};
-use super::super::twiddles::{
+use super::super::babybear_twiddles::{
     precompute_local_r4_twiddles, precompute_stockham_r4_twiddles, shoup_quotient,
 };
 

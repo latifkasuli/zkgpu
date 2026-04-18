@@ -37,6 +37,20 @@ pub struct CapabilityProfile {
     pub has_mappable_primary_buffers: bool,
     pub has_pipeline_cache: bool,
 
+    /// Whether the adapter advertises `wgpu::Features::SHADER_INT64`.
+    ///
+    /// Detection is free — adapter introspection is always performed —
+    /// but the feature is **not** requested at device-creation time
+    /// unless the `goldilocks-vulkan-int64` Cargo feature is enabled
+    /// *and* the Goldilocks kernel resolver has elected the native
+    /// path. See `ntt/goldilocks/resolve.rs` for the full policy.
+    ///
+    /// Per the March 2026 WGSL CRD and current WebGPU REC this flag is
+    /// always `false` on browser / wasm targets — there is no
+    /// `shader-int64` feature in the web spec. Used only to gate
+    /// native Vulkan fast-path kernels for Goldilocks (Phase D).
+    pub has_shader_int64: bool,
+
     /// Whether adding `TextureUsages::TRANSIENT` to render attachments
     /// reduces memory usage on this adapter.
     ///
@@ -91,6 +105,12 @@ impl CapabilityProfile {
             features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES);
         let has_mappable = features.contains(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS);
         let has_pipeline_cache = features.contains(wgpu::Features::PIPELINE_CACHE);
+        // SHADER_INT64 is native-only (Vulkan / DX12-DXC / Metal 2.3+)
+        // per the wgpu docs and always absent on browser-WebGPU. We
+        // only *detect* here; actual feature requesting is gated by
+        // the `goldilocks-vulkan-int64` Cargo feature in
+        // `required_features`.
+        let has_shader_int64 = features.contains(wgpu::Features::SHADER_INT64);
 
         let tier = classify_tier(
             info.backend,
@@ -127,6 +147,7 @@ impl CapabilityProfile {
             has_timestamp_query_inside_passes: has_timestamp_inside,
             has_mappable_primary_buffers: has_mappable,
             has_pipeline_cache,
+            has_shader_int64,
             transient_saves_memory: info.transient_saves_memory,
             max_buffer_size: 0,
             max_storage_buffer_binding_size: 0,
@@ -198,6 +219,19 @@ impl CapabilityProfile {
         }
         if self.has_pipeline_cache {
             f |= wgpu::Features::PIPELINE_CACHE;
+        }
+        // SHADER_INT64 is only requested when BOTH:
+        //   1. The `goldilocks-vulkan-int64` Cargo feature is enabled
+        //      — i.e. the native-int64 SPIR-V modules are actually
+        //      compiled into this build, and
+        //   2. The adapter advertises it.
+        // Otherwise we leave it out: requesting an unused feature can
+        // silently trigger slower driver paths on some devices and,
+        // more importantly, breaks the "browser path depends on
+        // nothing native-only" invariant.
+        #[cfg(feature = "goldilocks-vulkan-int64")]
+        if self.has_shader_int64 {
+            f |= wgpu::Features::SHADER_INT64;
         }
         f
     }
@@ -400,6 +434,7 @@ mod tests {
             has_timestamp_query_inside_passes: false,
             has_mappable_primary_buffers: has_mpb,
             has_pipeline_cache: false,
+            has_shader_int64: false,
             transient_saves_memory: false,
             max_buffer_size: 0,
             max_storage_buffer_binding_size: 0,

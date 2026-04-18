@@ -6,6 +6,7 @@ mod buffer;
 mod canary;
 mod device;
 mod dispatch;
+mod field_codec;
 mod ntt;
 mod pipeline_cache;
 mod pipeline_registry;

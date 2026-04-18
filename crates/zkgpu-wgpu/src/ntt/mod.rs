@@ -2,7 +2,13 @@ mod common;
 mod four_step;
 mod planner;
 pub(crate) mod stockham;
-pub(crate) mod twiddles;
+// Renamed from `twiddles` as part of the Goldilocks Phase-A scaffolding —
+// the existing precomputation module is BabyBear-only. A sibling
+// `goldilocks_twiddles` module will land in Phase B with the portable
+// u32x2 kernels. See `crates/zkgpu-wgpu/src/ntt/goldilocks/` for the
+// Goldilocks-side planning / resolver surface.
+pub(crate) mod babybear_twiddles;
+pub(crate) mod goldilocks;
 
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{NttDirection, NttPlan, ZkGpuError};

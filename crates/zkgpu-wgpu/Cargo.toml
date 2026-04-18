@@ -7,6 +7,15 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+# Opt-in native-Vulkan int64 kernels for Goldilocks. When off (the
+# default), only the portable `u32x2` WGSL variant is compiled in and
+# the `SHADER_INT64` device feature is never requested. Turn this on
+# for a Vulkan native build when you have field-measured evidence
+# that int64 is faster on the target (backend, gpu_family, driver).
+goldilocks-vulkan-int64 = []
+
 [dependencies]
 zkgpu-core = { workspace = true }
 wgpu = { workspace = true }
