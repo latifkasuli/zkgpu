@@ -20,7 +20,7 @@ use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuDevice, NttDirection};
 use zkgpu_ntt::ntt_cpu_reference;
 use zkgpu_report::{
-    CaseReport, CaseSpec, DeviceReport, FamilyOverride, KernelReport, StageTimingReport,
+    CaseReport, CaseSpec, DeviceReport, FamilyOverride, Field, KernelReport, StageTimingReport,
     StockhamTailOverride, SuiteReport, SuiteSpec, SuiteSummary, TestDirection, TimingReport,
 };
 use zkgpu_wgpu::{
@@ -48,6 +48,20 @@ use crate::validation::compare_vectors;
 pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, String> {
     if spec.cases.is_empty() {
         return Err("suite must contain at least one case".to_string());
+    }
+
+    // Phase E.1.d boundary: the native testkit routes `Field::Goldilocks`
+    // through `WgpuGoldilocksNttPlan`, but the browser runner has no
+    // async Goldilocks execute path yet (Phase E.2). Reject up front so
+    // a caller that sends `{"field": "goldilocks"}` over the FFI /
+    // web-worker channel sees an explicit failure instead of a silent
+    // BabyBear run with a misreported `kernel.field`.
+    if spec.field != Field::BabyBear {
+        return Err(format!(
+            "web runner only supports Field::BabyBear today \
+             (got {:?}); Goldilocks browser wiring lands in Phase E.2",
+            spec.field,
+        ));
     }
 
     let dev = device::clone_device()?;
@@ -81,7 +95,10 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
         suite: spec.kind,
         device: device_report,
         kernel: KernelReport {
-            field: "BabyBear".to_string(),
+            // Source from the spec so a future Goldilocks browser path
+            // produces correctly-labeled reports. Today the early
+            // rejection above guarantees this is always `"BabyBear"`.
+            field: spec.field.display_name().to_string(),
             ntt_variant: kernel_variant,
             stockham_tail_strategy: tail_variant,
         },
@@ -678,6 +695,44 @@ mod tests {
         );
         assert_eq!(report.tail_stride_bytes, Some(8));
         assert!(report.error.is_some());
+    }
+
+    /// Phase E.1 post-review: Goldilocks must be rejected at the suite
+    /// boundary until browser Goldilocks wiring lands (E.2). The check
+    /// runs before any device acquisition so the failure is structural,
+    /// not GPU-dependent — exercisable on native without wasm/web.
+    #[test]
+    fn run_suite_async_rejects_goldilocks_field() {
+        use zkgpu_report::{SuiteKind, SuiteSpec};
+        let spec = SuiteSpec {
+            kind: SuiteKind::Smoke,
+            cases: vec![CaseSpec {
+                name: "gl_case".into(),
+                log_n: 10,
+                direction: TestDirection::Forward,
+                input: InputPattern::Sequential,
+                iterations: 1,
+                warmup_iterations: 0,
+                profile_gpu_timestamps: false,
+            }],
+            fail_fast: true,
+            field: Field::Goldilocks,
+            family_override: FamilyOverride::Auto,
+            stockham_tail_override: StockhamTailOverride::Auto,
+            r8_max_log_leaf_override: None,
+        };
+        // pollster keeps the test pure-sync and GPU-free — the rejection
+        // fires before `device::clone_device` is ever called.
+        let err = pollster::block_on(run_suite_async(&spec))
+            .expect_err("Goldilocks must be rejected");
+        assert!(
+            err.contains("Goldilocks") || err.contains("goldilocks"),
+            "error should name Goldilocks: {err}"
+        );
+        assert!(
+            err.contains("E.2") || err.contains("browser"),
+            "error should point at the deferred phase: {err}"
+        );
     }
 
     #[test]

@@ -30,3 +30,4 @@ console_error_panic_hook = "0.1"
 wasm-bindgen-test = "0.3"
 web-sys = { version = "0.3", features = ["console"] }
 serde_json = { workspace = true }
+pollster = { workspace = true }
