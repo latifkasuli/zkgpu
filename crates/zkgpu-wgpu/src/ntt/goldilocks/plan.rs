@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 
-use zkgpu_core::{GpuBuffer, GpuDevice, GpuField, NttDirection, ZkGpuError};
+use zkgpu_core::{GpuBuffer, GpuDevice, GpuField, NttDirection, NttPlan, ZkGpuError};
 use zkgpu_goldilocks::Goldilocks;
 
 use crate::buffer::WgpuBuffer;
@@ -652,6 +652,32 @@ impl WgpuGoldilocksNttPlan {
     }
 }
 
+/// Generic NTT interface for harness consumers.
+///
+/// Mirrors the BabyBear impl in [`crate::ntt::WgpuNttPlan`]. The
+/// inherent methods (`execute`, `log_n`, `direction`) are kept as well
+/// so existing code that calls them directly on `WgpuGoldilocksNttPlan`
+/// continues to compile — the trait impl just delegates.
+///
+/// Phase E harness wiring routes Goldilocks suites through this impl.
+impl NttPlan<Goldilocks, WgpuDevice> for WgpuGoldilocksNttPlan {
+    fn execute(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<Goldilocks>,
+    ) -> Result<(), ZkGpuError> {
+        WgpuGoldilocksNttPlan::execute(self, device, buf)
+    }
+
+    fn log_n(&self) -> u32 {
+        self.log_n
+    }
+
+    fn direction(&self) -> NttDirection {
+        self.direction
+    }
+}
+
 // --- Host-side twiddle precomputation -----------------------------------
 
 /// Precompute the flat twiddle array for a Stockham radix-2 NTT.
@@ -1026,5 +1052,16 @@ mod tests {
             reason == "AutoPortableDefault" || reason == "BrowserWgslNoInt64",
             "unexpected reason: {reason}"
         );
+    }
+
+    /// Phase E wiring gate: [`WgpuGoldilocksNttPlan`] must satisfy the
+    /// generic [`NttPlan`] trait (including its `MaybeSendSync` bound)
+    /// so the testkit can store plans as `Box<dyn NttPlan<...>>` or route
+    /// them through a field-generic function. Compile-time only — if the
+    /// trait bound breaks, the fn signature stops type-checking.
+    #[test]
+    fn plan_implements_ntt_plan_trait() {
+        fn assert_impls_ntt_plan<P: NttPlan<Goldilocks, WgpuDevice>>() {}
+        assert_impls_ntt_plan::<WgpuGoldilocksNttPlan>();
     }
 }
