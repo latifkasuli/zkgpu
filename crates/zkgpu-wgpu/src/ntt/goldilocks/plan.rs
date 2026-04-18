@@ -40,26 +40,48 @@ const STOCKHAM_R2_WGSL: &str = concat!(
     include_str!("../../kernels/portable/goldilocks_stockham_r2.wgsl"),
 );
 
+/// WGSL source: helpers + Stockham R4 body.
+const STOCKHAM_R4_WGSL: &str = concat!(
+    include_str!("../../kernels/portable/goldilocks_arith_helpers.wgsl"),
+    include_str!("../../kernels/portable/goldilocks_stockham_r4.wgsl"),
+);
+
 /// WGSL source: helpers + scale body.
 const SCALE_WGSL: &str = concat!(
     include_str!("../../kernels/portable/goldilocks_arith_helpers.wgsl"),
     include_str!("../../kernels/portable/goldilocks_scale.wgsl"),
 );
 
-const STOCKHAM_BGL_LABEL: &str = "Goldilocks Stockham R2 BGL";
+const STOCKHAM_R2_BGL_LABEL: &str = "Goldilocks Stockham R2 BGL";
+const STOCKHAM_R4_BGL_LABEL: &str = "Goldilocks Stockham R4 BGL";
 const SCALE_BGL_LABEL: &str = "Goldilocks scale BGL";
-const STOCKHAM_ENTRY: &str = "gl_stockham_r2";
+const STOCKHAM_R2_ENTRY: &str = "gl_stockham_r2";
+const STOCKHAM_R4_ENTRY: &str = "gl_stockham_r4";
 const SCALE_ENTRY: &str = "gl_scale";
 const WORKGROUP_SIZE: u32 = 64;
 
 // Stage-uniform layout must match `StockhamR2Params` in WGSL.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct StageUniform {
+struct StageUniformR2 {
     n: u32,
     half: u32,
     half_total: u32,
     twiddle_offset: u32,
+}
+
+// Stage-uniform layout must match `StockhamR4Params` in WGSL. 32 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct StageUniformR4 {
+    n: u32,
+    quarter: u32,
+    total_bfly: u32,
+    twiddle_offset: u32,
+    i_n_lo: u32,
+    i_n_hi: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 // Scale-uniform layout must match `ScaleParams` in WGSL.
@@ -91,22 +113,37 @@ pub struct WgpuGoldilocksNttPlan {
     log_n: u32,
     n: u32,
 
-    /// Precomputed twiddles for this direction, uploaded once.
+    /// `true` when this plan uses the Radix-4 Stockham kernel (log_n
+    /// even); `false` when it falls back to Radix-2 (log_n odd).
+    uses_r4: bool,
+
+    /// Precomputed twiddles for this direction, uploaded once. Layout
+    /// differs per radix:
+    ///   - R2: `N - 1` entries, one twiddle per butterfly per stage.
+    ///   - R4: `3 · (N/4) · log4_n` entries, three twiddles per
+    ///     butterfly (tw1, tw2, tw3) laid out consecutively.
     twiddles_buf: WgpuBuffer<Goldilocks>,
 
     /// Ping-pong scratch buffer, length N.
     scratch_buf: WgpuBuffer<Goldilocks>,
 
-    /// One uniform per Stockham stage. Written during construction;
-    /// read-only at execute-time.
+    /// One uniform per Stockham stage. For R4, size is
+    /// `size_of::<StageUniformR4>()`; for R2,
+    /// `size_of::<StageUniformR2>()`.
     stage_uniforms: Vec<wgpu::Buffer>,
 
     /// Uniform for the post-inverse scale kernel. `None` for forward
     /// plans.
     scale_uniform: Option<wgpu::Buffer>,
 
-    stockham_bgl: Arc<wgpu::BindGroupLayout>,
-    stockham_pipeline: Arc<wgpu::ComputePipeline>,
+    // R2 path (used when log_n is odd).
+    stockham_r2_bgl: Arc<wgpu::BindGroupLayout>,
+    stockham_r2_pipeline: Arc<wgpu::ComputePipeline>,
+
+    // R4 path (used when log_n is even).
+    stockham_r4_bgl: Arc<wgpu::BindGroupLayout>,
+    stockham_r4_pipeline: Arc<wgpu::ComputePipeline>,
+
     scale_bgl: Arc<wgpu::BindGroupLayout>,
     scale_pipeline: Arc<wgpu::ComputePipeline>,
 
@@ -161,32 +198,71 @@ impl WgpuGoldilocksNttPlan {
         let resolved = resolve_variant(GoldilocksKernelOverride::Auto, device.caps())
             .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
 
-        // ---- Twiddles ------------------------------------------------
-        let twiddles = precompute_stockham_r2_twiddles(log_n, direction);
+        // R4 is dispatched only when log_n is even. Odd log_n keeps the
+        // B.2 R2 path because a mixed R4+R2 dispatch adds bind-group and
+        // parity complexity that isn't warranted until a concrete
+        // odd-log_n workload justifies it.
+        let uses_r4 = log_n % 2 == 0;
+
+        // ---- Twiddles + stage uniforms -------------------------------
+        let (twiddles, stage_uniforms) = if uses_r4 {
+            let tw = precompute_stockham_r4_twiddles(log_n, direction);
+            let i_n_u64 = compute_i_n::<Goldilocks>(log_n, direction).to_repr();
+            let i_n_lo = i_n_u64 as u32;
+            let i_n_hi = (i_n_u64 >> 32) as u32;
+            let total_bfly = n / 4;
+            let mut uniforms = Vec::with_capacity((log_n / 2) as usize);
+            let mut twiddle_offset: u32 = 0;
+            for s in 0..(log_n / 2) {
+                let quarter = n >> (2 * s + 2);
+                let uniform = create_uniform(
+                    device.raw_device(),
+                    &StageUniformR4 {
+                        n,
+                        quarter,
+                        total_bfly,
+                        twiddle_offset,
+                        i_n_lo,
+                        i_n_hi,
+                        _pad0: 0,
+                        _pad1: 0,
+                    },
+                    "goldilocks stockham r4 stage uniform",
+                );
+                uniforms.push(uniform);
+                // 3 twiddles per butterfly, `quarter` butterflies per stage
+                // (regardless of n_groups because stages always have N/4
+                // butterflies each in aggregate — but per-group butterflies
+                // = quarter, and tw1/tw2/tw3 are laid out per-j, not per-g).
+                twiddle_offset += 3 * quarter;
+            }
+            (tw, uniforms)
+        } else {
+            let tw = precompute_stockham_r2_twiddles(log_n, direction);
+            let half_total = n / 2;
+            let mut uniforms = Vec::with_capacity(log_n as usize);
+            let mut twiddle_offset: u32 = 0;
+            for s in 0..log_n {
+                let half = n >> (s + 1);
+                let uniform = create_uniform(
+                    device.raw_device(),
+                    &StageUniformR2 {
+                        n,
+                        half,
+                        half_total,
+                        twiddle_offset,
+                    },
+                    "goldilocks stockham r2 stage uniform",
+                );
+                uniforms.push(uniform);
+                twiddle_offset += half;
+            }
+            (tw, uniforms)
+        };
         let twiddles_buf = device.upload::<Goldilocks>(&twiddles)?;
 
         // ---- Scratch -------------------------------------------------
         let scratch_buf = device.alloc_zeros::<Goldilocks>(n as usize)?;
-
-        // ---- Stage uniforms -----------------------------------------
-        let mut stage_uniforms = Vec::with_capacity(log_n as usize);
-        let mut twiddle_offset: u32 = 0;
-        let half_total = n / 2;
-        for s in 0..log_n {
-            let half = n >> (s + 1);
-            let uniform = create_uniform(
-                device.raw_device(),
-                &StageUniform {
-                    n,
-                    half,
-                    half_total,
-                    twiddle_offset,
-                },
-                "goldilocks stockham r2 stage uniform",
-            );
-            stage_uniforms.push(uniform);
-            twiddle_offset += half;
-        }
 
         // ---- Scale uniform (inverse only) ---------------------------
         let scale_uniform = match direction {
@@ -216,15 +292,22 @@ impl WgpuGoldilocksNttPlan {
         };
 
         // ---- Pipelines + bind group layouts -------------------------
+        //
+        // We build both R2 and R4 pipelines up front even though this
+        // plan instance only dispatches one of them (based on `uses_r4`).
+        // The registry dedupes across plans, so a future log_n-odd plan
+        // in the same process pays no extra compile cost.
         let registry = device.pipeline_registry();
-        let stockham_module = registry.get_or_create_module(
+
+        // R2 pipeline
+        let r2_module = registry.get_or_create_module(
             device.raw_device(),
             STOCKHAM_R2_WGSL,
             "goldilocks_stockham_r2",
         );
-        let stockham_bgl = registry.get_or_create_bgl(
+        let stockham_r2_bgl = registry.get_or_create_bgl(
             device.raw_device(),
-            STOCKHAM_BGL_LABEL,
+            STOCKHAM_R2_BGL_LABEL,
             &[
                 bgl_storage_entry(0, true),
                 bgl_storage_entry(1, false),
@@ -232,21 +315,55 @@ impl WgpuGoldilocksNttPlan {
                 bgl_uniform_entry(3),
             ],
         );
-        let stockham_layout =
+        let r2_layout =
             device
                 .raw_device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Goldilocks Stockham R2 pipeline layout"),
-                    bind_group_layouts: &[Some(&stockham_bgl)],
+                    bind_group_layouts: &[Some(&stockham_r2_bgl)],
                     immediate_size: 0,
                 });
-        let stockham_pipeline = registry.get_or_create_pipeline(
+        let stockham_r2_pipeline = registry.get_or_create_pipeline(
             device.raw_device(),
             STOCKHAM_R2_WGSL,
-            STOCKHAM_ENTRY,
-            STOCKHAM_BGL_LABEL,
-            &stockham_layout,
-            &stockham_module,
+            STOCKHAM_R2_ENTRY,
+            STOCKHAM_R2_BGL_LABEL,
+            &r2_layout,
+            &r2_module,
+            None,
+        );
+
+        // R4 pipeline
+        let r4_module = registry.get_or_create_module(
+            device.raw_device(),
+            STOCKHAM_R4_WGSL,
+            "goldilocks_stockham_r4",
+        );
+        let stockham_r4_bgl = registry.get_or_create_bgl(
+            device.raw_device(),
+            STOCKHAM_R4_BGL_LABEL,
+            &[
+                bgl_storage_entry(0, true),
+                bgl_storage_entry(1, false),
+                bgl_storage_entry(2, true),
+                bgl_uniform_entry(3),
+            ],
+        );
+        let r4_layout =
+            device
+                .raw_device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Goldilocks Stockham R4 pipeline layout"),
+                    bind_group_layouts: &[Some(&stockham_r4_bgl)],
+                    immediate_size: 0,
+                });
+        let stockham_r4_pipeline = registry.get_or_create_pipeline(
+            device.raw_device(),
+            STOCKHAM_R4_WGSL,
+            STOCKHAM_R4_ENTRY,
+            STOCKHAM_R4_BGL_LABEL,
+            &r4_layout,
+            &r4_module,
             None,
         );
 
@@ -285,12 +402,15 @@ impl WgpuGoldilocksNttPlan {
             direction,
             log_n,
             n,
+            uses_r4,
             twiddles_buf,
             scratch_buf,
             stage_uniforms,
             scale_uniform,
-            stockham_bgl,
-            stockham_pipeline,
+            stockham_r2_bgl,
+            stockham_r2_pipeline,
+            stockham_r4_bgl,
+            stockham_r4_pipeline,
             scale_bgl,
             scale_pipeline,
             resolved,
@@ -331,8 +451,25 @@ impl WgpuGoldilocksNttPlan {
             )));
         }
 
-        let half_total = self.n / 2;
-        let num_groups = half_total.div_ceil(WORKGROUP_SIZE);
+        // Dispatch geometry depends on radix:
+        //   R2: N/2 butterflies per stage, log_n stages.
+        //   R4: N/4 butterflies per stage, log_n/2 stages.
+        let (num_stages, butterflies_per_stage, bgl, pipeline) = if self.uses_r4 {
+            (
+                self.log_n / 2,
+                self.n / 4,
+                &self.stockham_r4_bgl,
+                &self.stockham_r4_pipeline,
+            )
+        } else {
+            (
+                self.log_n,
+                self.n / 2,
+                &self.stockham_r2_bgl,
+                &self.stockham_r2_pipeline,
+            )
+        };
+        let num_groups = butterflies_per_stage.div_ceil(WORKGROUP_SIZE);
 
         let mut encoder = device.raw_device().create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
@@ -344,16 +481,16 @@ impl WgpuGoldilocksNttPlan {
         // Each stage alternates which of (buf, scratch) plays
         // input/output. Bind groups reference those concrete buffers,
         // so we have to build them per-execute.
-        let mut bind_groups: Vec<wgpu::BindGroup> = Vec::with_capacity(self.log_n as usize);
-        for s in 0..self.log_n {
+        let mut bind_groups: Vec<wgpu::BindGroup> = Vec::with_capacity(num_stages as usize);
+        for s in 0..num_stages {
             let (in_buf, out_buf) = if s % 2 == 0 {
                 (&buf.inner, &self.scratch_buf.inner)
             } else {
                 (&self.scratch_buf.inner, &buf.inner)
             };
             let bg = device.raw_device().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("goldilocks stockham r2 stage bg"),
-                layout: &self.stockham_bgl,
+                label: Some("goldilocks stockham stage bg"),
+                layout: bgl,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -382,16 +519,19 @@ impl WgpuGoldilocksNttPlan {
                 label: Some("goldilocks ntt stages"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.stockham_pipeline);
+            pass.set_pipeline(pipeline);
             for bg in &bind_groups {
                 pass.set_bind_group(0, bg, &[]);
                 pass.dispatch_workgroups(num_groups, 1, 1);
             }
         }
 
-        // --- If log_n is odd, final result lives in scratch; copy ----
-        // back into buf so the caller always sees output there.
-        if self.log_n % 2 == 1 {
+        // --- If `num_stages` is odd, final result lives in scratch;
+        // copy back into buf so the caller always sees output there.
+        //
+        // For R2: num_stages = log_n, so odd iff log_n is odd.
+        // For R4: num_stages = log_n/2, so odd iff log_n ≡ 2 (mod 4).
+        if num_stages % 2 == 1 {
             encoder.copy_buffer_to_buffer(
                 &self.scratch_buf.inner,
                 0,
@@ -486,6 +626,78 @@ fn precompute_stockham_r2_twiddles(
         }
     }
     tw
+}
+
+/// Precompute Stockham radix-4 twiddles.
+///
+/// Layout: per R4 stage `s` (`0 ≤ s < log_n/2`), three twiddles per
+/// butterfly laid out consecutively:
+///   `tw1(j) = ω^(j · n_groups)`
+///   `tw2(j) = ω^(j · n_groups · 2)`
+///   `tw3(j) = ω^(j · n_groups · 3)`
+/// for `j = 0..quarter` where `n_groups = 4^s` and
+/// `quarter = N / 4^(s+1)`.
+///
+/// Total length = `3 · sum over s of quarter(s) = 3 · (N/4 + N/16 + ...)`.
+/// For `log_n = 2k`, the sum is `(N - 1) / 3`, so the total is exactly
+/// `N - 1`. The buffer layout is strictly per-stage (tw offsets don't
+/// overlap across stages).
+///
+/// Caller must only invoke this with even `log_n`.
+fn precompute_stockham_r4_twiddles(
+    log_n: u32,
+    direction: NttDirection,
+) -> Vec<Goldilocks> {
+    debug_assert!(
+        log_n % 2 == 0,
+        "R4 twiddles only valid for even log_n; plan must fall back to R2"
+    );
+    let n = 1u32 << log_n;
+    let omega = Goldilocks::root_of_unity(log_n);
+    let omega = match direction {
+        NttDirection::Forward => omega,
+        NttDirection::Inverse => omega
+            .inv()
+            .expect("root of unity must be invertible"),
+    };
+
+    // Upper bound: 3 * sum of quarters.
+    let mut tw = Vec::with_capacity(n as usize);
+    for s in 0..(log_n / 2) {
+        let n_groups = 1u64 << (2 * s);
+        let quarter = n >> (2 * s + 2);
+        let step = omega.pow(n_groups);
+        // Emit (tw1, tw2, tw3) per j, with w = ω^(j · n_groups).
+        let mut w = Goldilocks::new(1);
+        for _ in 0..quarter {
+            let w2 = w * w;
+            let w3 = w2 * w;
+            tw.push(w);
+            tw.push(w2);
+            tw.push(w3);
+            w = w * step;
+        }
+    }
+    tw
+}
+
+/// Compute `i_N = ω^(N/4)`, the primitive 4th root of unity in the
+/// Goldilocks field. Used by the R4 kernel as its √-1 analogue.
+///
+/// For the inverse NTT, the direction-adjusted ω is `ω^(-1)`, so
+/// `i_N_inverse = (ω^(-1))^(N/4) = (ω^(N/4))^(-1) = -i_N_forward`.
+/// Both are valid primitive 4th roots; the R4 kernel uses whichever
+/// matches the direction-adjusted twiddles.
+fn compute_i_n<F: GpuField>(log_n: u32, direction: NttDirection) -> F {
+    let omega = F::root_of_unity(log_n);
+    let omega = match direction {
+        NttDirection::Forward => omega,
+        NttDirection::Inverse => omega
+            .inverse()
+            .expect("root of unity must be invertible"),
+    };
+    // ω^(N/4) = ω^(2^(log_n - 2))
+    omega.pow(1u64 << (log_n - 2))
 }
 
 // --- Binding-entry helpers (local to this module to keep the plan
@@ -635,6 +847,96 @@ mod tests {
             err,
             Err(ZkGpuError::InvalidNttSize(_)) | Err(ZkGpuError::BufferSize { .. })
         ));
+    }
+
+    /// B.3 acceptance gate: the R4 path at log_n = 18 must bit-match
+    /// the CPU reference. 262 144 elements; ~50–100 ms CPU reference,
+    /// a few ms GPU. Runs on both Metal and Vulkan.
+    #[test]
+    fn goldilocks_gpu_forward_matches_cpu_log18() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let log_n = 18u32;
+        let n = 1u32 << log_n;
+        // Deterministic SplitMix64 inputs so any mismatch is
+        // bit-reproducible from the seed.
+        let mut rng_state: u64 = 0xCAFE_BABE_DEAD_BEEF;
+        let mut next = || {
+            rng_state = rng_state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = rng_state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+        let input: Vec<Goldilocks> = (0..n).map(|_| Goldilocks::new(next())).collect();
+
+        let mut cpu = input.clone();
+        ntt_cpu_reference::<Goldilocks>(&mut cpu, NttDirection::Forward);
+
+        let mut plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward).unwrap();
+        let mut gpu_buf = device.upload::<Goldilocks>(&input).unwrap();
+        plan.execute(&device, &mut gpu_buf).unwrap();
+        let gpu = gpu_buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(gpu.len(), cpu.len());
+        if gpu != cpu {
+            // Report the first mismatch for debuggability.
+            let first_mismatch = gpu
+                .iter()
+                .zip(cpu.iter())
+                .position(|(a, b)| a != b)
+                .unwrap();
+            panic!(
+                "log18 forward mismatch at index {first_mismatch}: \
+                 gpu={} cpu={}",
+                gpu[first_mismatch].0, cpu[first_mismatch].0
+            );
+        }
+    }
+
+    /// B.3 acceptance gate: GPU determinism at log_n = 20. Two forward
+    /// runs of the same input must produce bit-identical output. Catches
+    /// race conditions in the ping-pong dispatch and any nondeterministic
+    /// scheduling in the R4 kernel.
+    ///
+    /// 1 M elements. No CPU reference (too slow for tight inner loops) —
+    /// just checks GPU vs. GPU.
+    #[test]
+    fn goldilocks_gpu_determinism_log20() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let log_n = 20u32;
+        let n = 1u32 << log_n;
+        // Skip if the plan would fail the buffer-size preflight on the
+        // current adapter — log 20 needs ~16 MB × 2 = 32 MB working set
+        // which is fine on any real GPU, but a software adapter could
+        // reject it.
+        let input: Vec<Goldilocks> = (0..n as u64).map(Goldilocks::new).collect();
+
+        let mut plan =
+            match WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward) {
+                Ok(p) => p,
+                Err(ZkGpuError::BufferSize { .. }) => {
+                    eprintln!("skipping determinism_log20: adapter buffer cap too small");
+                    return;
+                }
+                Err(e) => panic!("plan construction failed: {e}"),
+            };
+
+        let mut buf1 = device.upload::<Goldilocks>(&input).unwrap();
+        plan.execute(&device, &mut buf1).unwrap();
+        let out1 = buf1.read_to_vec_blocking().unwrap();
+
+        let mut buf2 = device.upload::<Goldilocks>(&input).unwrap();
+        plan.execute(&device, &mut buf2).unwrap();
+        let out2 = buf2.read_to_vec_blocking().unwrap();
+
+        assert_eq!(out1, out2, "log20 forward NTT not deterministic across runs");
     }
 
     /// Plan reports the resolved variant, reason, and storage ABI —
