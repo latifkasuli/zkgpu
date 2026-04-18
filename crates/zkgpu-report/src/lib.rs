@@ -49,6 +49,71 @@ pub enum FamilyOverride {
     FourStep,
 }
 
+/// Which prime field the test run targets.
+///
+/// Threaded through [`SuiteSpec`] and [`SoakSpec`] so a single harness
+/// can route cases to the per-field GPU plan. Phase E wiring —
+/// BabyBear is the default for backward compatibility with pre-E
+/// specs (which have no `field` key).
+///
+/// Parse/display strings are the lowercase family names — `"babybear"`
+/// and `"goldilocks"` — matching the existing `FamilyOverride` CLI
+/// convention.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Field {
+    BabyBear,
+    Goldilocks,
+}
+
+impl Field {
+    /// Lowercase canonical name, used for CLI flags and JSON `kernel.field`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::BabyBear => "babybear",
+            Self::Goldilocks => "goldilocks",
+        }
+    }
+
+    /// Display-cased name, used for human-readable report output.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::BabyBear => "BabyBear",
+            Self::Goldilocks => "Goldilocks",
+        }
+    }
+}
+
+impl Default for Field {
+    fn default() -> Self {
+        Self::BabyBear
+    }
+}
+
+impl core::fmt::Display for Field {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl core::str::FromStr for Field {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Accept the canonical lowercase form plus the display-cased form
+        // for convenience (e.g. `--field Goldilocks`).
+        match s {
+            "babybear" | "BabyBear" | "baby_bear" => Ok(Self::BabyBear),
+            "goldilocks" | "Goldilocks" => Ok(Self::Goldilocks),
+            other => Err(format!(
+                "unknown field `{other}` (expected `babybear` or `goldilocks`)"
+            )),
+        }
+    }
+}
+
+fn default_field() -> Field {
+    Field::BabyBear
+}
+
 /// Override the Stockham tail-phase strategy (the final LOG_BLOCK stages).
 ///
 /// - `Auto`: use the planner's device-driven heuristic.
@@ -132,6 +197,10 @@ pub struct SuiteSpec {
     pub kind: SuiteKind,
     pub cases: Vec<CaseSpec>,
     pub fail_fast: bool,
+    /// Which prime field the suite targets. Defaults to `BabyBear` for
+    /// backward compatibility with pre-Phase-E specs that omit the key.
+    #[serde(default = "default_field")]
+    pub field: Field,
     #[serde(default = "default_family_override")]
     pub family_override: FamilyOverride,
     /// Stockham tail-phase override. Ignored when `family_override` resolves
@@ -311,6 +380,10 @@ pub struct SoakSpec {
     /// Whether to validate first and last iteration against CPU reference.
     #[serde(default = "default_true")]
     pub validate: bool,
+    /// Which prime field the soak targets. Defaults to `BabyBear` for
+    /// backward compatibility with pre-Phase-E specs that omit the key.
+    #[serde(default = "default_field")]
+    pub field: Field,
     #[serde(default = "default_family_override")]
     pub family_override: FamilyOverride,
     /// Stockham tail-phase override. Defaults to `Auto`.
@@ -484,6 +557,7 @@ pub fn smoke_suite() -> SuiteSpec {
             ),
         ],
         fail_fast: true,
+        field: Field::BabyBear,
         family_override: FamilyOverride::Auto,
         stockham_tail_override: StockhamTailOverride::Auto,
         r8_max_log_leaf_override: None,
@@ -569,6 +643,7 @@ pub fn validation_suite() -> SuiteSpec {
             ),
         ],
         fail_fast: false,
+        field: Field::BabyBear,
         family_override: FamilyOverride::Auto,
         stockham_tail_override: StockhamTailOverride::Auto,
         r8_max_log_leaf_override: None,
@@ -597,6 +672,7 @@ pub fn benchmark_suite() -> SuiteSpec {
             benchmark_case("benchmark_forward_log20", 20),
         ],
         fail_fast: false,
+        field: Field::BabyBear,
         family_override: FamilyOverride::Auto,
         stockham_tail_override: StockhamTailOverride::Auto,
         r8_max_log_leaf_override: None,
@@ -638,6 +714,7 @@ fn soak_spec(duration_secs: u32) -> SoakSpec {
             soak_case("soak_inverse_log20", 20, TestDirection::Inverse),
         ],
         validate: true,
+        field: Field::BabyBear,
         family_override: FamilyOverride::Auto,
         stockham_tail_override: StockhamTailOverride::Auto,
     }
@@ -724,5 +801,60 @@ mod tests {
         let parsed: SoakSample = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.iteration, 42);
         assert_eq!(parsed.gpu_total_ns, Some(3_200_000));
+    }
+
+    // ----- Phase E.1.b: Field enum -----
+
+    #[test]
+    fn field_parses_both_casings_and_snake() {
+        use core::str::FromStr;
+        assert_eq!(Field::from_str("babybear").unwrap(), Field::BabyBear);
+        assert_eq!(Field::from_str("BabyBear").unwrap(), Field::BabyBear);
+        assert_eq!(Field::from_str("baby_bear").unwrap(), Field::BabyBear);
+        assert_eq!(Field::from_str("goldilocks").unwrap(), Field::Goldilocks);
+        assert_eq!(Field::from_str("Goldilocks").unwrap(), Field::Goldilocks);
+        assert!(Field::from_str("mersenne31").is_err());
+    }
+
+    #[test]
+    fn field_display_is_lowercase_canonical() {
+        assert_eq!(Field::BabyBear.to_string(), "babybear");
+        assert_eq!(Field::Goldilocks.to_string(), "goldilocks");
+    }
+
+    /// Existing on-disk specs predate the `field` key. Default must be
+    /// `BabyBear` so they continue to deserialize unchanged.
+    #[test]
+    fn suite_spec_without_field_defaults_to_babybear() {
+        // Minimal pre-Phase-E JSON: no `field`, no `r8_max_log_leaf_override`,
+        // no `stockham_tail_override`. All must default.
+        let json = r#"{
+            "kind": "Smoke",
+            "cases": [],
+            "fail_fast": true,
+            "family_override": "Auto"
+        }"#;
+        let parsed: SuiteSpec = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.field, Field::BabyBear);
+    }
+
+    #[test]
+    fn soak_spec_without_field_defaults_to_babybear() {
+        let json = r#"{
+            "duration_secs": 30,
+            "cases": [],
+            "family_override": "Auto"
+        }"#;
+        let parsed: SoakSpec = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.field, Field::BabyBear);
+    }
+
+    #[test]
+    fn suite_spec_with_goldilocks_round_trips() {
+        let mut spec = smoke_suite();
+        spec.field = Field::Goldilocks;
+        let json = serde_json::to_string(&spec).unwrap();
+        let parsed: SuiteSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.field, Field::Goldilocks);
     }
 }

@@ -693,6 +693,10 @@ fn run_soak_mode(cli: &CliArgs, duration_secs: u32) {
         duration_secs,
         cases,
         validate: true,
+        // Soak stays on BabyBear until Phase E.1.d wires `--field` into
+        // the soak subcommand. Harmless default — existing soak runs are
+        // BabyBear-only anyway.
+        field: zkgpu_report::Field::BabyBear,
         family_override,
         // CLI soak doesn't expose a tail override today; default to Auto so
         // the heuristic picks per-device. Add a flag later if we need to

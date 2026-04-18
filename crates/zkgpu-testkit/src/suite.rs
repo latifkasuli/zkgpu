@@ -1,7 +1,7 @@
 // Re-export from zkgpu-report for backward compatibility.
 pub use zkgpu_report::{
-    benchmark_suite, smoke_suite, validation_suite, FamilyOverride, InputPattern, SuiteKind,
-    SuiteSpec,
+    benchmark_suite, smoke_suite, validation_suite, FamilyOverride, Field, InputPattern,
+    SuiteKind, SuiteSpec,
 };
 
 #[cfg(test)]

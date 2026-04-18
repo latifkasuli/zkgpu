@@ -16,8 +16,8 @@ pub use report::{
 };
 pub use runner::{run_benchmark_suite, run_smoke_suite, run_soak_suite, run_suite, run_validation_suite};
 pub use suite::{
-    benchmark_suite, smoke_suite, validation_suite, FamilyOverride, InputPattern, SuiteKind,
-    SuiteSpec,
+    benchmark_suite, smoke_suite, validation_suite, FamilyOverride, Field, InputPattern,
+    SuiteKind, SuiteSpec,
 };
 pub use benchmark::compute_soak_stats;
 pub use zkgpu_report::{
