@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 zkgpu-core = { workspace = true }
 zkgpu-wgpu = { workspace = true }
 zkgpu-babybear = { workspace = true }
+zkgpu-goldilocks = { workspace = true }
 zkgpu-ntt = { workspace = true }
 zkgpu-report = { workspace = true }
 wgpu = { workspace = true }

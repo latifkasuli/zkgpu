@@ -2,8 +2,6 @@
 //!
 //! Mirrors `zkgpu-testkit/src/validation.rs`.
 
-use zkgpu_babybear::BabyBear;
-
 pub(crate) struct ValidationOutcome {
     pub passed: bool,
     pub mismatch_count: u32,
@@ -12,7 +10,14 @@ pub(crate) struct ValidationOutcome {
     pub first_mismatch_cpu: Option<String>,
 }
 
-pub(crate) fn compare_vectors(gpu: &[BabyBear], cpu: &[BabyBear]) -> ValidationOutcome {
+/// Field-generic vector comparison.
+///
+/// Phase E.2.b generified to `T: PartialEq + Display` so the Goldilocks
+/// browser path can reuse it. Matches the testkit generification.
+pub(crate) fn compare_vectors<T>(gpu: &[T], cpu: &[T]) -> ValidationOutcome
+where
+    T: PartialEq + core::fmt::Display,
+{
     let mut mismatch_count = 0u32;
     let mut first = None;
 

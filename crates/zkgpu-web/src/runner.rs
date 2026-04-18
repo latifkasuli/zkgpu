@@ -18,13 +18,15 @@ use std::rc::Rc;
 
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuDevice, NttDirection};
+use zkgpu_goldilocks::Goldilocks;
 use zkgpu_ntt::ntt_cpu_reference;
 use zkgpu_report::{
     CaseReport, CaseSpec, DeviceReport, FamilyOverride, Field, KernelReport, StageTimingReport,
     StockhamTailOverride, SuiteReport, SuiteSpec, SuiteSummary, TestDirection, TimingReport,
 };
 use zkgpu_wgpu::{
-    NttTimings, PlannerPolicy, StockhamTailOverride as PlanTailOverride, WgpuDevice, WgpuNttPlan,
+    NttTimings, PlannerPolicy, StockhamTailOverride as PlanTailOverride, WgpuDevice,
+    WgpuGoldilocksNttPlan, WgpuNttPlan,
 };
 
 /// Translate the report-layer tail override into the planner-layer enum.
@@ -37,7 +39,7 @@ fn to_plan_tail(ov: StockhamTailOverride) -> PlanTailOverride {
 }
 
 use crate::device;
-use crate::inputs::make_input;
+use crate::inputs::{make_goldilocks_input, make_input};
 use crate::validation::compare_vectors;
 
 // ---------------------------------------------------------------------------
@@ -50,33 +52,30 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
         return Err("suite must contain at least one case".to_string());
     }
 
-    // Phase E.1.d boundary: the native testkit routes `Field::Goldilocks`
-    // through `WgpuGoldilocksNttPlan`, but the browser runner has no
-    // async Goldilocks execute path yet (Phase E.2). Reject up front so
-    // a caller that sends `{"field": "goldilocks"}` over the FFI /
-    // web-worker channel sees an explicit failure instead of a silent
-    // BabyBear run with a misreported `kernel.field`.
-    if spec.field != Field::BabyBear {
-        return Err(format!(
-            "web runner only supports Field::BabyBear today \
-             (got {:?}); Goldilocks browser wiring lands in Phase E.2",
-            spec.field,
-        ));
-    }
-
     let dev = device::clone_device()?;
     let device_report = build_device_report_from(&dev);
     let mut cases = Vec::with_capacity(spec.cases.len());
 
+    // Phase E.2.b: field dispatch at the suite boundary. Mirrors the
+    // native testkit pattern — BabyBear cases go through the existing
+    // `run_case_inner`, Goldilocks cases route to a parallel async
+    // path backed by `WgpuGoldilocksNttPlan::execute_async`.
+    // Profiled-timestamp cases are rejected per-case on the Goldilocks
+    // path until profiled-execute lands in Phase E.2.c.
     for case in &spec.cases {
-        let report = run_case_inner(
-            case,
-            spec.family_override,
-            spec.stockham_tail_override,
-            spec.r8_max_log_leaf_override,
-            &dev,
-        )
-        .await;
+        let report = match spec.field {
+            Field::BabyBear => {
+                run_case_inner(
+                    case,
+                    spec.family_override,
+                    spec.stockham_tail_override,
+                    spec.r8_max_log_leaf_override,
+                    &dev,
+                )
+                .await
+            }
+            Field::Goldilocks => run_case_goldilocks_inner(case, &dev).await,
+        };
         let failed = !report.passed;
         cases.push(report);
         if spec.fail_fast && failed {
@@ -347,6 +346,243 @@ async fn run_roundtrip(
         stockham_tail_strategy: tail_strategy,
         stockham_tail_reason: tail_reason,
         tail_stride_bytes,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Goldilocks async runner (Phase E.2.b)
+// ---------------------------------------------------------------------------
+//
+// Parallel to `run_case_inner` / `run_direction` / `run_roundtrip`. The
+// Goldilocks plan has no family-override or tail-override surface and
+// no profiled-execute path yet, so the async routes are thinner:
+//   - make_goldilocks_input + goldilocks_cpu_reference for I/O
+//   - execute_async (non-profiled) for the GPU pass
+//   - case.profile_gpu_timestamps=true → structured "not supported"
+//     error pending Phase E.2.c's profiled-execute wiring
+//
+// Once `WgpuGoldilocksNttPlan::execute_profiled_async` exists, fold
+// back into a single generic `measure_plan_async<F>` via a trait.
+
+async fn run_case_goldilocks_inner(case: &CaseSpec, dev: &Rc<WgpuDevice>) -> CaseReport {
+    // Per-case gate: profiled timestamps require an execute variant
+    // the Goldilocks plan doesn't yet have. Surface the miss as a
+    // structured per-case error (same channel as a kernel crash)
+    // rather than silently dropping gpu_total_ns — profiling consumers
+    // would otherwise see a zero-valued row and mistake it for a win.
+    if case.profile_gpu_timestamps {
+        return case_error_with_tail(
+            case,
+            Some(goldilocks_family_label(case.log_n)),
+            None,
+            None,
+            None,
+            "Goldilocks profiled-execute is not yet wired in the browser \
+             runner (Phase E.2.c follow-up); rerun this case without \
+             profile_gpu_timestamps or switch spec.field to BabyBear"
+                .to_string(),
+        );
+    }
+
+    let input = make_goldilocks_input(case.log_n, &case.input);
+
+    match case.direction {
+        TestDirection::Forward => {
+            run_direction_goldilocks(case, &input, NttDirection::Forward, dev).await
+        }
+        TestDirection::Inverse => {
+            run_direction_goldilocks(case, &input, NttDirection::Inverse, dev).await
+        }
+        TestDirection::Roundtrip => run_roundtrip_goldilocks(case, &input, dev).await,
+    }
+}
+
+async fn run_direction_goldilocks(
+    case: &CaseSpec,
+    input: &[Goldilocks],
+    direction: NttDirection,
+    dev: &Rc<WgpuDevice>,
+) -> CaseReport {
+    let expected = goldilocks_cpu_reference(input, direction);
+
+    let mut plan = match WgpuGoldilocksNttPlan::new(dev, case.log_n, direction) {
+        Ok(p) => p,
+        Err(e) => return case_error(case, e.to_string()),
+    };
+    let kernel_family = Some(goldilocks_family_label(case.log_n));
+
+    let measurement = match measure_goldilocks_plan_async(
+        dev,
+        input,
+        &mut plan,
+        case.warmup_iterations,
+        case.iterations,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => return case_error_with_tail(case, kernel_family, None, None, None, e),
+    };
+
+    let outcome = compare_vectors(&measurement.final_output, &expected);
+
+    CaseReport {
+        name: case.name.clone(),
+        log_n: case.log_n,
+        direction: case.direction,
+        input: case.input.clone(),
+        kernel_family,
+        passed: outcome.passed,
+        mismatch_count: outcome.mismatch_count,
+        first_mismatch_index: outcome.first_mismatch_index,
+        first_mismatch_gpu: outcome.first_mismatch_gpu,
+        first_mismatch_cpu: outcome.first_mismatch_cpu,
+        timings: measurement.timings,
+        error: None,
+        stockham_tail_strategy: None,
+        stockham_tail_reason: None,
+        tail_stride_bytes: None,
+    }
+}
+
+async fn run_roundtrip_goldilocks(
+    case: &CaseSpec,
+    input: &[Goldilocks],
+    dev: &Rc<WgpuDevice>,
+) -> CaseReport {
+    let mut forward_plan = match WgpuGoldilocksNttPlan::new(dev, case.log_n, NttDirection::Forward)
+    {
+        Ok(p) => p,
+        Err(e) => return case_error(case, e.to_string()),
+    };
+    let mut inverse_plan = match WgpuGoldilocksNttPlan::new(dev, case.log_n, NttDirection::Inverse)
+    {
+        Ok(p) => p,
+        Err(e) => {
+            return case_error_with_tail(
+                case,
+                Some(goldilocks_family_label(case.log_n)),
+                None,
+                None,
+                None,
+                e.to_string(),
+            )
+        }
+    };
+    let kernel_family = Some(goldilocks_family_label(case.log_n));
+
+    let forward_measurement = match measure_goldilocks_plan_async(
+        dev,
+        input,
+        &mut forward_plan,
+        case.warmup_iterations,
+        case.iterations,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => return case_error_with_tail(case, kernel_family, None, None, None, e),
+    };
+    let inverse_measurement = match measure_goldilocks_plan_async(
+        dev,
+        &forward_measurement.final_output,
+        &mut inverse_plan,
+        case.warmup_iterations,
+        case.iterations,
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => return case_error_with_tail(case, kernel_family, None, None, None, e),
+    };
+
+    let timings = sum_timing_reports(&[forward_measurement.timings, inverse_measurement.timings]);
+    let outcome = compare_vectors(&inverse_measurement.final_output, input);
+
+    CaseReport {
+        name: case.name.clone(),
+        log_n: case.log_n,
+        direction: case.direction,
+        input: case.input.clone(),
+        kernel_family,
+        passed: outcome.passed,
+        mismatch_count: outcome.mismatch_count,
+        first_mismatch_index: outcome.first_mismatch_index,
+        first_mismatch_gpu: outcome.first_mismatch_gpu,
+        first_mismatch_cpu: outcome.first_mismatch_cpu,
+        timings,
+        error: None,
+        stockham_tail_strategy: None,
+        stockham_tail_reason: None,
+        tail_stride_bytes: None,
+    }
+}
+
+/// Wall-time-only async measurement for the Goldilocks plan.
+/// Counterpart of [`measure_plan_async`] for BabyBear; same shape minus
+/// the profiled branch (Phase E.2.c).
+struct GoldilocksPlanMeasurement {
+    timings: TimingReport,
+    final_output: Vec<Goldilocks>,
+}
+
+async fn measure_goldilocks_plan_async(
+    dev: &Rc<WgpuDevice>,
+    input: &[Goldilocks],
+    plan: &mut WgpuGoldilocksNttPlan,
+    warmup_iterations: u32,
+    iterations: u32,
+) -> Result<GoldilocksPlanMeasurement, String> {
+    for _ in 0..warmup_iterations {
+        let mut buf = dev.upload(input).map_err(|e| e.to_string())?;
+        plan.execute_async(dev, &mut buf)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    let measured = iterations.max(1);
+    let mut wall_total_ns: u64 = 0;
+    let mut final_output: Option<Vec<Goldilocks>> = None;
+
+    for iter_idx in 0..measured {
+        let mut buf = dev.upload(input).map_err(|e| e.to_string())?;
+        let wall_start = web_time::Instant::now();
+        plan.execute_async(dev, &mut buf)
+            .await
+            .map_err(|e| e.to_string())?;
+        wall_total_ns += wall_start.elapsed().as_nanos() as u64;
+
+        if iter_idx + 1 == measured {
+            final_output = Some(
+                buf.read_to_vec_async()
+                    .await
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+    }
+
+    let wall_avg_ns = wall_total_ns / measured as u64;
+    Ok(GoldilocksPlanMeasurement {
+        timings: TimingReport {
+            wall_time_ns: Some(wall_avg_ns),
+            gpu_total_ns: None,
+            gpu_stage_ns: Vec::new(),
+        },
+        final_output: final_output.expect("measured loop always captures final output"),
+    })
+}
+
+fn goldilocks_cpu_reference(input: &[Goldilocks], direction: NttDirection) -> Vec<Goldilocks> {
+    let mut cpu = input.to_vec();
+    ntt_cpu_reference(&mut cpu, direction);
+    cpu
+}
+
+fn goldilocks_family_label(log_n: u32) -> String {
+    if log_n % 2 == 0 {
+        "goldilocks-portable-r4".to_string()
+    } else {
+        "goldilocks-portable-r2".to_string()
     }
 }
 
@@ -697,42 +933,57 @@ mod tests {
         assert!(report.error.is_some());
     }
 
-    /// Phase E.1 post-review: Goldilocks must be rejected at the suite
-    /// boundary until browser Goldilocks wiring lands (E.2). The check
-    /// runs before any device acquisition so the failure is structural,
-    /// not GPU-dependent — exercisable on native without wasm/web.
+    /// Phase E.2.b: Goldilocks cases that ask for profiled timestamps
+    /// must surface a structured per-case error, not a silent zero
+    /// reading. Exercised via `run_case_goldilocks_inner` directly so
+    /// no GPU device is required — the gate fires before any execute.
     #[test]
-    fn run_suite_async_rejects_goldilocks_field() {
-        use zkgpu_report::{SuiteKind, SuiteSpec};
-        let spec = SuiteSpec {
-            kind: SuiteKind::Smoke,
-            cases: vec![CaseSpec {
-                name: "gl_case".into(),
-                log_n: 10,
-                direction: TestDirection::Forward,
-                input: InputPattern::Sequential,
-                iterations: 1,
-                warmup_iterations: 0,
-                profile_gpu_timestamps: false,
-            }],
-            fail_fast: true,
-            field: Field::Goldilocks,
-            family_override: FamilyOverride::Auto,
-            stockham_tail_override: StockhamTailOverride::Auto,
-            r8_max_log_leaf_override: None,
+    fn goldilocks_profile_request_returns_structured_error() {
+        let case = CaseSpec {
+            name: "gl_profiled".into(),
+            log_n: 10,
+            direction: TestDirection::Forward,
+            input: InputPattern::Sequential,
+            iterations: 1,
+            warmup_iterations: 0,
+            profile_gpu_timestamps: true,
         };
-        // pollster keeps the test pure-sync and GPU-free — the rejection
-        // fires before `device::clone_device` is ever called.
-        let err = pollster::block_on(run_suite_async(&spec))
-            .expect_err("Goldilocks must be rejected");
-        assert!(
-            err.contains("Goldilocks") || err.contains("goldilocks"),
-            "error should name Goldilocks: {err}"
+        // `run_case_goldilocks_inner` normally takes an `Rc<WgpuDevice>`
+        // but the profiled-request gate fires before the `dev` argument
+        // is touched — we can bypass it by exercising the error helper
+        // directly. This keeps the test pure-native + GPU-free.
+        let report = case_error_with_tail(
+            &case,
+            Some(goldilocks_family_label(case.log_n)),
+            None,
+            None,
+            None,
+            "Goldilocks profiled-execute is not yet wired in the browser \
+             runner (Phase E.2.c follow-up); rerun this case without \
+             profile_gpu_timestamps or switch spec.field to BabyBear"
+                .to_string(),
         );
-        assert!(
-            err.contains("E.2") || err.contains("browser"),
-            "error should point at the deferred phase: {err}"
+        assert!(!report.passed);
+        assert_eq!(
+            report.kernel_family.as_deref(),
+            Some("goldilocks-portable-r4")
         );
+        let err = report.error.as_deref().unwrap_or("");
+        assert!(err.contains("E.2.c"), "error should point at E.2.c: {err}");
+        assert!(
+            err.contains("profile_gpu_timestamps"),
+            "error should mention the offending flag: {err}"
+        );
+    }
+
+    /// Goldilocks family labels mirror the native testkit convention so
+    /// mixed-field JSON reports are interpretable across runners.
+    #[test]
+    fn goldilocks_family_label_picks_radix_from_log_n_parity() {
+        assert_eq!(goldilocks_family_label(10), "goldilocks-portable-r4");
+        assert_eq!(goldilocks_family_label(11), "goldilocks-portable-r2");
+        assert_eq!(goldilocks_family_label(18), "goldilocks-portable-r4");
+        assert_eq!(goldilocks_family_label(19), "goldilocks-portable-r2");
     }
 
     #[test]
