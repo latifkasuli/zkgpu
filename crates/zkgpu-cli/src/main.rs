@@ -3,8 +3,10 @@ use std::time::Instant;
 use serde::Serialize;
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuBuffer, GpuDevice, NttDirection, NttPlan};
+use zkgpu_goldilocks::Goldilocks;
 use zkgpu_ntt::ntt_cpu_reference;
-use zkgpu_wgpu::{CapabilityProfile, PlannerPolicy, WgpuDevice, WgpuNttPlan};
+use zkgpu_report::Field;
+use zkgpu_wgpu::{CapabilityProfile, PlannerPolicy, WgpuDevice, WgpuGoldilocksNttPlan, WgpuNttPlan};
 
 #[derive(Serialize)]
 struct BenchmarkReport {
@@ -159,6 +161,11 @@ enum CliMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliArgs {
     json_mode: bool,
+    /// Which prime field the CLI targets. Phase E.1.d — default
+    /// `Field::BabyBear` keeps pre-Phase-E invocations working
+    /// unchanged. `--field goldilocks` routes to the portable u32x2
+    /// Stockham plan (`WgpuGoldilocksNttPlan`).
+    field: Field,
     family_override: FamilyOverride,
     tail_override: TailOverride,
     sizes: Vec<u32>,
@@ -449,24 +456,172 @@ fn run_benchmark(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Goldilocks benchmark path (Phase E.1.d)
+// ---------------------------------------------------------------------------
+//
+// Thinner than the BabyBear `run_benchmark` because the Goldilocks plan
+// has no profiled-execute variant (Phase E.2) and no family / tail split
+// (R2 vs R4 is a `log_n`-parity choice, not a runtime override). Reports
+// wall-time-only — `gpu_kernel_us` mirrors `gpu_e2e_us` to keep the
+// JSON schema stable, and `gpu_hw_total_ns` / `gpu_hw_stages` stay
+// `None` so downstream consumers can detect the non-profiled rows.
+
+fn make_goldilocks_data(log_n: u32) -> Vec<Goldilocks> {
+    let n = 1usize << log_n;
+    (0..n as u64).map(Goldilocks::new).collect()
+}
+
+fn bench_cpu_goldilocks(data: &[Goldilocks], direction: NttDirection) -> f64 {
+    for _ in 0..WARM_UP_ITERS {
+        let mut d = data.to_vec();
+        ntt_cpu_reference(&mut d, direction);
+    }
+
+    let mut total = std::time::Duration::ZERO;
+    for _ in 0..BENCH_ITERS {
+        let mut d = data.to_vec();
+        let start = Instant::now();
+        ntt_cpu_reference(&mut d, direction);
+        total += start.elapsed();
+    }
+    total.as_secs_f64() * 1_000_000.0 / BENCH_ITERS as f64
+}
+
+fn bench_gpu_goldilocks(
+    device: &WgpuDevice,
+    data: &[Goldilocks],
+    plan: &mut WgpuGoldilocksNttPlan,
+) -> f64 {
+    for _ in 0..WARM_UP_ITERS {
+        let mut buf = device.upload(data).expect("upload failed");
+        plan.execute(device, &mut buf).expect("execute failed");
+    }
+
+    let mut total = std::time::Duration::ZERO;
+    for _ in 0..BENCH_ITERS {
+        let mut buf = device.upload(data).expect("upload failed");
+        let start = Instant::now();
+        plan.execute(device, &mut buf).expect("execute failed");
+        total += start.elapsed();
+    }
+    total.as_secs_f64() * 1_000_000.0 / BENCH_ITERS as f64
+}
+
+fn validate_goldilocks(
+    device: &WgpuDevice,
+    data: &[Goldilocks],
+    cpu_data: &[Goldilocks],
+    plan: &mut WgpuGoldilocksNttPlan,
+) -> String {
+    let mut buf = device.upload(data).expect("upload failed");
+    plan.execute(device, &mut buf).expect("execute failed");
+    let gpu = buf.read_to_vec().expect("readback failed");
+    let n = gpu.len();
+    let mismatches = gpu.iter().zip(cpu_data.iter()).filter(|(g, c)| g != c).count();
+    if mismatches == 0 {
+        format!("PASS ({n} elements)")
+    } else {
+        format!("FAIL ({mismatches}/{n} mismatches)")
+    }
+}
+
+fn run_benchmark_goldilocks(
+    device: &WgpuDevice,
+    log_n: u32,
+    direction: NttDirection,
+) -> RunReport {
+    let dir_str = match direction {
+        NttDirection::Forward => "forward",
+        NttDirection::Inverse => "inverse",
+    };
+    let n = 1u64 << log_n;
+    let data = make_goldilocks_data(log_n);
+
+    eprintln!("  {dir_str} 2^{log_n} = {n}  [goldilocks]");
+
+    let mut plan = WgpuGoldilocksNttPlan::new(device, log_n, direction)
+        .expect("goldilocks plan creation failed");
+    // Kernel-variant labeling mirrors the testkit's
+    // `goldilocks_family_label` so JSON reports align across tools.
+    let family = if log_n % 2 == 0 {
+        "goldilocks-portable-r4".to_string()
+    } else {
+        "goldilocks-portable-r2".to_string()
+    };
+
+    let cpu_us = bench_cpu_goldilocks(&data, direction);
+    let gpu_e2e_us = bench_gpu_goldilocks(device, &data, &mut plan);
+
+    let mut cpu_data = data.clone();
+    ntt_cpu_reference(&mut cpu_data, direction);
+    let validation = validate_goldilocks(device, &data, &cpu_data, &mut plan);
+
+    eprintln!(
+        "    family={}  cpu={:.0}us  e2e={:.0}us  {}",
+        family, cpu_us, gpu_e2e_us, &validation,
+    );
+
+    RunReport {
+        log_n,
+        n,
+        direction: dir_str.to_string(),
+        family,
+        // Goldilocks plan emits a single stage sequence per direction;
+        // reporting `0` here (vs. 1) would imply "no dispatches" which is
+        // wrong. Use the actual per-plan dispatch count: log_n stages for
+        // R2, log_n/2 for R4, plus 1 for the inverse scale.
+        dispatches: goldilocks_dispatch_count(log_n, direction),
+        cpu_reference_us: cpu_us,
+        gpu_e2e_us,
+        // Mirror e2e into kernel since we don't split kernel vs. submit
+        // on the Goldilocks path. Operators comparing BabyBear and
+        // Goldilocks rows should read the per-field `family` label to
+        // know whether `gpu_kernel_us` is a distinct measurement.
+        gpu_kernel_us: gpu_e2e_us,
+        gpu_hw_total_ns: None,
+        gpu_hw_stages: None,
+        validation,
+    }
+}
+
+fn goldilocks_dispatch_count(log_n: u32, direction: NttDirection) -> u32 {
+    let stages = if log_n % 2 == 0 { log_n / 2 } else { log_n };
+    let scale = match direction {
+        NttDirection::Forward => 0,
+        NttDirection::Inverse => 1,
+    };
+    stages + scale
+}
+
 fn usage() -> &'static str {
-    "Usage: zkgpu [--json] [--force-family auto|stockham|four-step] \\
+    "Usage: zkgpu [--json] [--field babybear|goldilocks] \\
+               [--force-family auto|stockham|four-step] \\
                [--force-tail auto|local|global] [--soak SECS] [log_n...]
 
 Modes:
   (default)      Short benchmark: warmup + 5 measured iterations per size
   --soak SECS    Sustained soak: run each size for SECS seconds, recording
                  per-iteration samples for thermal characterization
+                 (BabyBear only; Goldilocks soak lands in Phase E.2)
 
 Overrides:
+  --field          Which prime field to target (default: babybear).
+                   'babybear'   -> 32-bit field; full benchmark / soak surface.
+                   'goldilocks' -> 64-bit portable u32x2 Stockham plan;
+                                    validation + wall-time benchmark only,
+                                    no profiled timings yet, no --force-family
+                                    or --force-tail (both silently ignored).
   --force-family   Pin the NTT family (default: auto = device-policy pick).
                    'stockham' disables four-step; 'four-step' forces it.
+                   BabyBear only.
   --force-tail     Pin the Stockham tail strategy (default: auto).
                    'local'  -> LocalFusedR4 (legacy tail kernel)
                    'global' -> GlobalOnlyR4 (extends global R4 chain through
                                the tail; the configuration PR 1 made possible).
                    Only applies when the plan is Stockham. A Four-Step plan
                    has no Stockham tail and silently ignores this flag.
+                   BabyBear only.
 
 Examples:
   zkgpu
@@ -476,7 +631,9 @@ Examples:
   zkgpu --force-family stockham --force-tail local --json 18 19 20 21 22
   zkgpu --force-family stockham --force-tail global --json 18 19 20 21 22
   zkgpu --soak 30 18 20
-  zkgpu --soak 60 --json 20"
+  zkgpu --soak 60 --json 20
+  zkgpu --field goldilocks 10 18
+  zkgpu --field goldilocks --json 10 14 18 20"
 }
 
 fn parse_cli_args<I>(args: I) -> Result<CliArgs, String>
@@ -484,6 +641,7 @@ where
     I: IntoIterator<Item = String>,
 {
     let mut json_mode = false;
+    let mut field = Field::BabyBear;
     let mut family_override = FamilyOverride::Auto;
     let mut tail_override = TailOverride::Auto;
     let mut sizes = Vec::new();
@@ -494,6 +652,20 @@ where
         match arg.as_str() {
             "--json" => json_mode = true,
             "--help" | "-h" => return Err(usage().to_string()),
+            "--field" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "--field requires a value".to_string())?;
+                field = value.parse::<Field>().map_err(|e| {
+                    format!("invalid --field value '{value}': {e}")
+                })?;
+            }
+            _ if arg.starts_with("--field=") => {
+                let value = &arg["--field=".len()..];
+                field = value.parse::<Field>().map_err(|e| {
+                    format!("invalid --field value '{value}': {e}")
+                })?;
+            }
             "--soak" => {
                 let value = iter
                     .next()
@@ -575,6 +747,7 @@ where
 
     Ok(CliArgs {
         json_mode,
+        field,
         family_override,
         tail_override,
         sizes,
@@ -601,8 +774,21 @@ fn main() {
     let caps = device.caps();
 
     eprintln!("Device: {caps}");
+    eprintln!("Field: {}", cli.field.as_str());
     eprintln!("Family override: {}", cli.family_override.as_str());
     eprintln!("Tail override: {}", cli.tail_override.as_str());
+    // BabyBear-only flags are silently ignored on the Goldilocks path
+    // (see `--field` in usage). Warn the operator so no-op runs aren't
+    // mistaken for successful A/B matrices.
+    if cli.field == Field::Goldilocks
+        && (cli.family_override != FamilyOverride::Auto
+            || cli.tail_override != TailOverride::Auto)
+    {
+        eprintln!(
+            "warning: --force-family / --force-tail ignored under --field goldilocks \
+             (the Goldilocks plan has no four-step or local-fused-tail variant)"
+        );
+    }
 
     match cli.mode {
         CliMode::Benchmark => run_benchmark_mode(&device, &cli),
@@ -621,20 +807,28 @@ fn run_benchmark_mode(device: &WgpuDevice, cli: &CliArgs) {
 
     for &log_n in &cli.sizes {
         eprintln!("\n--- NTT 2^{log_n} ---");
-        runs.push(run_benchmark(
-            device,
-            log_n,
-            NttDirection::Forward,
-            cli.family_override,
-            cli.tail_override,
-        ));
-        runs.push(run_benchmark(
-            device,
-            log_n,
-            NttDirection::Inverse,
-            cli.family_override,
-            cli.tail_override,
-        ));
+        match cli.field {
+            Field::BabyBear => {
+                runs.push(run_benchmark(
+                    device,
+                    log_n,
+                    NttDirection::Forward,
+                    cli.family_override,
+                    cli.tail_override,
+                ));
+                runs.push(run_benchmark(
+                    device,
+                    log_n,
+                    NttDirection::Inverse,
+                    cli.family_override,
+                    cli.tail_override,
+                ));
+            }
+            Field::Goldilocks => {
+                runs.push(run_benchmark_goldilocks(device, log_n, NttDirection::Forward));
+                runs.push(run_benchmark_goldilocks(device, log_n, NttDirection::Inverse));
+            }
+        }
     }
 
     let report = BenchmarkReport {
@@ -693,10 +887,12 @@ fn run_soak_mode(cli: &CliArgs, duration_secs: u32) {
         duration_secs,
         cases,
         validate: true,
-        // Soak stays on BabyBear until Phase E.1.d wires `--field` into
-        // the soak subcommand. Harmless default — existing soak runs are
-        // BabyBear-only anyway.
-        field: zkgpu_report::Field::BabyBear,
+        // Phase E.1.d: pass the user's `--field` choice through. The
+        // testkit's `run_soak_suite` rejects `Goldilocks` with a
+        // structured error until profiled-execute lands (Phase E.2), so
+        // the user sees an immediate failure instead of a silent switch
+        // to BabyBear or wall-time-only degradation.
+        field: cli.field,
         family_override,
         // CLI soak doesn't expose a tail override today; default to Auto so
         // the heuristic picks per-device. Add a flag later if we need to
@@ -888,9 +1084,51 @@ mod tests {
     fn parse_defaults() {
         let parsed = parse_cli_args(Vec::<String>::new()).unwrap();
         assert!(!parsed.json_mode);
+        assert_eq!(parsed.field, Field::BabyBear);
         assert_eq!(parsed.family_override, FamilyOverride::Auto);
         assert_eq!(parsed.sizes, DEFAULT_SIZES);
         assert_eq!(parsed.mode, CliMode::Benchmark);
+    }
+
+    // === Phase E.1.d: --field parsing ===
+
+    #[test]
+    fn parse_field_goldilocks_split_form() {
+        let parsed = parse_cli_args(vec![
+            "--field".to_string(),
+            "goldilocks".to_string(),
+            "10".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(parsed.field, Field::Goldilocks);
+        assert_eq!(parsed.sizes, vec![10]);
+    }
+
+    #[test]
+    fn parse_field_goldilocks_equals_form() {
+        let parsed = parse_cli_args(vec!["--field=goldilocks".to_string()]).unwrap();
+        assert_eq!(parsed.field, Field::Goldilocks);
+    }
+
+    #[test]
+    fn parse_field_babybear_explicit() {
+        let parsed = parse_cli_args(vec!["--field=babybear".to_string()]).unwrap();
+        assert_eq!(parsed.field, Field::BabyBear);
+    }
+
+    #[test]
+    fn parse_field_rejects_unknown() {
+        let err = parse_cli_args(vec!["--field=mersenne31".to_string()]).unwrap_err();
+        assert!(
+            err.contains("mersenne31"),
+            "error should echo the unknown field: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_field_requires_value() {
+        let err = parse_cli_args(vec!["--field".to_string()]).unwrap_err();
+        assert!(err.contains("--field"), "expected error about --field: {err}");
     }
 
     #[test]
