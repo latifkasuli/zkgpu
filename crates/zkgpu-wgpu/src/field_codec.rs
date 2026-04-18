@@ -15,45 +15,44 @@
 //! pair of 32-bit limbs — canonically `vec2<u32>` on the shader side.
 //!
 //! `FieldStorageAbi` is the single knob that tells the rest of the
-//! crate which layout to assume for a given plan. It's deliberately
-//! non-generic over the field itself: the plan carries the ABI
-//! explicitly so shaders, buffers, and upload/download code can agree
-//! without threading a type parameter through every layer.
+//! crate which layout to assume for a given plan. It is deliberately
+//! scoped to the layouts the Goldilocks plan needs today — if a
+//! future BabyBear/KoalaBear path starts carrying this enum, add a
+//! `NativeU32` variant at that point (don't speculate now).
 
 /// How a field element is stored in a GPU storage buffer.
 ///
-/// Chosen per-plan, not per-field: Goldilocks plans may ship both a
-/// portable `Limb32x2Le` variant and (eventually, under the
-/// `goldilocks-vulkan-int64` Cargo feature) a `NativeRepr` variant that
-/// relies on `wgpu::Features::SHADER_INT64`.
+/// Scope: currently only the Goldilocks plan carries this. Both
+/// variants use **8 bytes per element**; they differ only in how the
+/// shader interprets those bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldStorageAbi {
-    /// The shader sees the same bytes as `F::Repr` — one u32 for
-    /// BabyBear / KoalaBear; the native 64-bit shader type for a
-    /// future native-int64 Goldilocks variant.
-    NativeRepr,
+    /// Native `u64` per element. Used by the future native-int64
+    /// Goldilocks variant (behind `goldilocks-vulkan-int64`). Requires
+    /// `wgpu::Features::SHADER_INT64` at device creation.
+    NativeU64,
 
-    /// The shader sees one `vec2<u32>` per element, laid out
-    /// little-endian: `[lo32, hi32]` so that
-    /// `value = lo + (hi << 32)`.
-    ///
-    /// Element byte width is always 8. Uniform encoding for any
-    /// 64-bit constant (twiddles, inverse-scale factors, etc.) uses
-    /// the same two-word layout in the same order.
+    /// One `vec2<u32>` per element, laid out little-endian:
+    /// `[lo32, hi32]` so `value = lo + (hi << 32)`. Used by the
+    /// portable Goldilocks kernel path. Works on every WebGPU target
+    /// including browser / wasm.
     Limb32x2Le,
 }
 
 impl FieldStorageAbi {
-    /// Byte width of a single element in this ABI. Always a multiple
-    /// of 4 so bind-group alignment rules are satisfied without
-    /// additional padding.
+    /// Byte width of a single element in this ABI.
+    ///
+    /// Both current variants are 8 bytes (a `u64` and a `vec2<u32>`
+    /// are the same size). The method stays for forward compatibility
+    /// — if a `NativeU32` variant is added for BabyBear/KoalaBear,
+    /// the caller's storage-sizing code still works unchanged.
     ///
     /// Dead in Phase A; the Goldilocks plan (Phase B) is the first
     /// caller — it needs this to size the on-GPU scratch buffers.
     #[allow(dead_code)]
     pub const fn element_size_bytes(self) -> u32 {
         match self {
-            Self::NativeRepr => 4,
+            Self::NativeU64 => 8,
             Self::Limb32x2Le => 8,
         }
     }
@@ -66,7 +65,7 @@ impl FieldStorageAbi {
     #[allow(dead_code)]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::NativeRepr => "NativeRepr",
+            Self::NativeU64 => "NativeU64",
             Self::Limb32x2Le => "Limb32x2Le",
         }
     }

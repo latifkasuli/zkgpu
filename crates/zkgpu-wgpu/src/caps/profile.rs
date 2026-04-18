@@ -39,16 +39,16 @@ pub struct CapabilityProfile {
 
     /// Whether the adapter advertises `wgpu::Features::SHADER_INT64`.
     ///
-    /// Detection is free — adapter introspection is always performed —
-    /// but the feature is **not** requested at device-creation time
-    /// unless the `goldilocks-vulkan-int64` Cargo feature is enabled
-    /// *and* the Goldilocks kernel resolver has elected the native
-    /// path. See `ntt/goldilocks/resolve.rs` for the full policy.
+    /// **Detection only in Phase A** — this bool is populated from
+    /// adapter introspection but never causes the feature to be
+    /// requested at device creation. Phase D (native Goldilocks
+    /// kernels) owns the device-construction path that actually
+    /// requests the feature, so no code path in Phase A's default
+    /// build changes behaviour based on it.
     ///
     /// Per the March 2026 WGSL CRD and current WebGPU REC this flag is
     /// always `false` on browser / wasm targets — there is no
-    /// `shader-int64` feature in the web spec. Used only to gate
-    /// native Vulkan fast-path kernels for Goldilocks (Phase D).
+    /// `shader-int64` feature in the web spec.
     pub has_shader_int64: bool,
 
     /// Whether adding `TextureUsages::TRANSIENT` to render attachments
@@ -220,19 +220,16 @@ impl CapabilityProfile {
         if self.has_pipeline_cache {
             f |= wgpu::Features::PIPELINE_CACHE;
         }
-        // SHADER_INT64 is only requested when BOTH:
-        //   1. The `goldilocks-vulkan-int64` Cargo feature is enabled
-        //      — i.e. the native-int64 SPIR-V modules are actually
-        //      compiled into this build, and
-        //   2. The adapter advertises it.
-        // Otherwise we leave it out: requesting an unused feature can
-        // silently trigger slower driver paths on some devices and,
-        // more importantly, breaks the "browser path depends on
-        // nothing native-only" invariant.
-        #[cfg(feature = "goldilocks-vulkan-int64")]
-        if self.has_shader_int64 {
-            f |= wgpu::Features::SHADER_INT64;
-        }
+        // SHADER_INT64 is **never** requested here, even when
+        // `goldilocks-vulkan-int64` is enabled. Phase A is detection-
+        // only; requesting the feature at device creation would change
+        // behaviour for every `WgpuDevice::new()` caller in an
+        // experimental build, including BabyBear workloads that have
+        // nothing to do with Goldilocks. Phase D (native Goldilocks
+        // kernels) is where this feature actually becomes required,
+        // and it will own the device-construction path for plans that
+        // elect the native variant — either a fresh device with
+        // SHADER_INT64 requested, or an explicit constructor.
         f
     }
 

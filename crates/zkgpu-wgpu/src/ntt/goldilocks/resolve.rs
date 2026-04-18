@@ -87,7 +87,7 @@ impl GoldilocksKernelVariant {
     pub(crate) const fn storage_abi(self) -> FieldStorageAbi {
         match self {
             Self::PortableU32x2 => FieldStorageAbi::Limb32x2Le,
-            Self::NativeInt64Vulkan => FieldStorageAbi::NativeRepr,
+            Self::NativeInt64Vulkan => FieldStorageAbi::NativeU64,
         }
     }
 }
@@ -234,7 +234,7 @@ pub(crate) fn resolve_variant(
             }
             Ok(ResolvedGoldilocksKernel {
                 variant: GoldilocksKernelVariant::NativeInt64Vulkan,
-                storage_abi: FieldStorageAbi::NativeRepr,
+                storage_abi: FieldStorageAbi::NativeU64,
                 reason: GoldilocksKernelReason::ForcedNativeVulkan,
             })
         }
@@ -391,7 +391,7 @@ mod tests {
             ),
             (
                 GoldilocksKernelVariant::NativeInt64Vulkan,
-                FieldStorageAbi::NativeRepr,
+                FieldStorageAbi::NativeU64,
             ),
         ] {
             assert_eq!(v.storage_abi(), expected);
