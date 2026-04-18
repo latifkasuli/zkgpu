@@ -22,6 +22,7 @@ use std::sync::Arc;
 use zkgpu_core::{GpuBuffer, GpuDevice, GpuField, NttDirection, NttPlan, ZkGpuError};
 use zkgpu_goldilocks::Goldilocks;
 
+use crate::async_util;
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 use crate::dispatch::{plan_linear_dispatch, LinearDispatch};
@@ -496,12 +497,56 @@ impl WgpuGoldilocksNttPlan {
         self.resolved.storage_abi.label()
     }
 
-    /// Execute the NTT in place on `buf`.
+    /// Execute the NTT in place on `buf` (blocking).
     ///
     /// `buf` must have length `2^log_n`. Scratch is internal to the
     /// plan. Result lands back in `buf` (extra scratch→buf copy is
     /// inserted automatically for odd log_n).
+    ///
+    /// Blocks on `device.poll(wait_indefinitely)`. For browser / async
+    /// callers use [`execute_async`](Self::execute_async).
     pub fn execute(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<Goldilocks>,
+    ) -> Result<(), ZkGpuError> {
+        self.encode_and_submit(device, buf)?;
+
+        // Force GPU completion before the caller can do a map-based
+        // readback on UMA targets — same sync point as arith_test.rs.
+        device
+            .raw_device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
+
+        Ok(())
+    }
+
+    /// Async variant of [`execute`](Self::execute). Browser-safe.
+    ///
+    /// Phase E.2.a — mirrors `WgpuNttPlan::execute_kernels_async`: the
+    /// encode path is identical to the sync version, only the
+    /// post-submit synchronisation differs. On native the async helper
+    /// still drives `device.poll(wait_indefinitely)` internally; on
+    /// wasm it's a no-op (map_async downstream handles sync). Callers
+    /// get non-blocking behaviour on the browser event loop.
+    pub async fn execute_async(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<Goldilocks>,
+    ) -> Result<(), ZkGpuError> {
+        self.encode_and_submit(device, buf)?;
+        async_util::wait_for_submission(device.raw_device(), device.raw_queue()).await
+    }
+
+    /// Build the compute-pass command buffer and submit it to the GPU.
+    ///
+    /// Shared encode path for both [`execute`](Self::execute) and
+    /// [`execute_async`](Self::execute_async). Returns as soon as
+    /// `queue.submit` completes — the caller is responsible for the
+    /// completion wait (sync `device.poll` vs async
+    /// `async_util::wait_for_submission`).
+    fn encode_and_submit(
         &mut self,
         device: &WgpuDevice,
         buf: &mut WgpuBuffer<Goldilocks>,
@@ -640,14 +685,6 @@ impl WgpuGoldilocksNttPlan {
         }
 
         device.raw_queue().submit(Some(encoder.finish()));
-
-        // Force GPU completion before the caller can do a map-based
-        // readback on UMA targets — same sync point as arith_test.rs.
-        device
-            .raw_device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
-
         Ok(())
     }
 }
@@ -1063,5 +1100,76 @@ mod tests {
     fn plan_implements_ntt_plan_trait() {
         fn assert_impls_ntt_plan<P: NttPlan<Goldilocks, WgpuDevice>>() {}
         assert_impls_ntt_plan::<WgpuGoldilocksNttPlan>();
+    }
+
+    /// Phase E.2.a canary: `execute_async` must produce bit-identical
+    /// output to the sync `execute` on the same input. Only the
+    /// post-submit synchronization path differs, but refactoring
+    /// `encode_and_submit` is exactly the kind of change this test
+    /// catches if the async path silently drops a bind-group or stage.
+    #[test]
+    fn execute_async_matches_sync_execute() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        // Pick log_n=6 (R4) so we exercise the full R4 + scratch-swap +
+        // inverse-scale path without a long runtime.
+        let log_n = 6u32;
+        let n = 1u32 << log_n;
+        let input = sequential_input(n);
+
+        // Sync path
+        let mut sync_plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward).unwrap();
+        let mut sync_buf = device.upload::<Goldilocks>(&input).unwrap();
+        sync_plan.execute(&device, &mut sync_buf).unwrap();
+        let sync_out = sync_buf.read_to_vec_blocking().unwrap();
+
+        // Async path — drive with pollster on native. On wasm this test
+        // won't run anyway (the cfg-gated `async_util::wait_for_submission`
+        // is a no-op there, but we'd need a wasm-bindgen-test harness).
+        let mut async_plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward).unwrap();
+        let mut async_buf = device.upload::<Goldilocks>(&input).unwrap();
+        pollster::block_on(async_plan.execute_async(&device, &mut async_buf)).unwrap();
+        let async_out = async_buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(
+            sync_out, async_out,
+            "execute_async must match sync execute bit-for-bit at log_n={log_n}"
+        );
+    }
+
+    /// Inverse direction (exercises the scale pass post-Stockham) must
+    /// also match between sync and async paths. Separate test to keep
+    /// failure attribution clean — a broken scale-pass async shouldn't
+    /// look like a broken forward path.
+    #[test]
+    fn execute_async_matches_sync_execute_inverse() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let log_n = 6u32;
+        let n = 1u32 << log_n;
+        let input = sequential_input(n);
+
+        let mut sync_plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Inverse).unwrap();
+        let mut sync_buf = device.upload::<Goldilocks>(&input).unwrap();
+        sync_plan.execute(&device, &mut sync_buf).unwrap();
+        let sync_out = sync_buf.read_to_vec_blocking().unwrap();
+
+        let mut async_plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Inverse).unwrap();
+        let mut async_buf = device.upload::<Goldilocks>(&input).unwrap();
+        pollster::block_on(async_plan.execute_async(&device, &mut async_buf)).unwrap();
+        let async_out = async_buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(
+            sync_out, async_out,
+            "inverse execute_async must match sync at log_n={log_n}"
+        );
     }
 }
