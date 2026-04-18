@@ -98,16 +98,39 @@ pub async fn run_suite(request_json: &str) -> String {
 }
 
 /// Run a single test case by JSON spec. Returns JSON `CaseReport`.
+///
+/// Accepts two JSON shapes, tried in this order:
+///   1. `SingleCaseRequest` envelope: `{"case": {...}, "field": "goldilocks"}`
+///      (Phase E.2.b+) — lets a browser caller pick the target field
+///      for a one-off case, matching `run_suite`'s `spec.field`.
+///   2. Legacy bare `CaseSpec`: `{"name": ..., "log_n": ..., ...}`
+///      (pre-E.2) — assumed `Field::BabyBear` for backward
+///      compatibility with existing JS consumers.
+///
+/// Ambiguity is impossible: `SingleCaseRequest` has a top-level `case`
+/// key that bare `CaseSpec` lacks.
 #[wasm_bindgen]
 pub async fn run_case(case_json: &str) -> String {
-    let case: zkgpu_report::CaseSpec = match serde_json::from_str(case_json) {
-        Ok(c) => c,
-        Err(e) => {
-            return to_error_json(&format!("invalid case spec JSON: {e}"));
+    // Try envelope first — the envelope's required `case` key makes this
+    // non-ambiguous against a bare CaseSpec. On failure, fall back to
+    // parsing the legacy bare shape and assume BabyBear.
+    let (case, field) = if let Ok(req) =
+        serde_json::from_str::<zkgpu_report::SingleCaseRequest>(case_json)
+    {
+        (req.case, req.field)
+    } else {
+        match serde_json::from_str::<zkgpu_report::CaseSpec>(case_json) {
+            Ok(c) => (c, zkgpu_report::Field::BabyBear),
+            Err(e) => {
+                return to_error_json(&format!(
+                    "invalid case spec JSON (tried SingleCaseRequest envelope \
+                     and bare CaseSpec): {e}"
+                ));
+            }
         }
     };
 
-    match runner::run_single_case_async(&case).await {
+    match runner::run_single_case_async(&case, field).await {
         Ok(report) => serde_json::to_string(&report).unwrap_or_else(|e| {
             to_error_json(&format!("failed to serialize case report: {e}"))
         }),

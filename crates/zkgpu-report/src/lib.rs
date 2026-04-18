@@ -484,6 +484,25 @@ pub struct HarnessResponse {
     pub error: Option<String>,
 }
 
+/// Single-case request envelope.
+///
+/// Phase E.2 post-review: the browser `run_case` API originally accepted
+/// a bare [`CaseSpec`], which has no `field` key — so browser callers
+/// couldn't request a one-off Goldilocks case even after `run_suite`
+/// started supporting `spec.field = Goldilocks`. This envelope lifts
+/// that limitation while staying backward-compatible: callers that send
+/// the legacy bare-`CaseSpec` JSON still parse correctly on the
+/// browser-side (the wasm entry point tries both shapes).
+///
+/// `field` defaults to `BabyBear` so a pre-E.2 envelope without the key
+/// keeps the old behaviour.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleCaseRequest {
+    pub case: CaseSpec,
+    #[serde(default = "default_field")]
+    pub field: Field,
+}
+
 /// Version information for the harness.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionResponse {
@@ -847,6 +866,64 @@ mod tests {
         }"#;
         let parsed: SoakSpec = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.field, Field::BabyBear);
+    }
+
+    // ----- Phase E.2.b post-review (P3): SingleCaseRequest envelope -----
+
+    /// Envelope roundtrip: the new `{"case":{...},"field":"goldilocks"}`
+    /// shape must serialize and parse cleanly, and the default for
+    /// `field` must stay `BabyBear` so an envelope without the key
+    /// mirrors legacy behaviour.
+    #[test]
+    fn single_case_request_envelope_roundtrips() {
+        let req = SingleCaseRequest {
+            case: CaseSpec::new(
+                "gl_single",
+                10,
+                TestDirection::Forward,
+                InputPattern::Sequential,
+            ),
+            field: Field::Goldilocks,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: SingleCaseRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.field, Field::Goldilocks);
+        assert_eq!(parsed.case.log_n, 10);
+    }
+
+    #[test]
+    fn single_case_request_defaults_to_babybear() {
+        // Minimal envelope with no `field` key — legacy compat.
+        let json = r#"{
+            "case": {
+                "name": "bb_default",
+                "log_n": 6,
+                "direction": "Forward",
+                "input": "Sequential"
+            }
+        }"#;
+        let parsed: SingleCaseRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.field, Field::BabyBear);
+        assert_eq!(parsed.case.log_n, 6);
+    }
+
+    /// The wasm `run_case` entry point parses legacy bare `CaseSpec`
+    /// JSON (pre-E.2 callers) as a fallback. This test locks the
+    /// non-ambiguity: a bare `CaseSpec` must NOT parse as a
+    /// `SingleCaseRequest` (which would silently hijack the field).
+    #[test]
+    fn bare_case_spec_does_not_parse_as_envelope() {
+        let bare = r#"{
+            "name": "legacy",
+            "log_n": 6,
+            "direction": "Forward",
+            "input": "Sequential"
+        }"#;
+        // Envelope parse MUST fail — no `case` key.
+        assert!(serde_json::from_str::<SingleCaseRequest>(bare).is_err());
+        // Bare CaseSpec parse MUST succeed.
+        let cs: CaseSpec = serde_json::from_str(bare).unwrap();
+        assert_eq!(cs.name, "legacy");
     }
 
     #[test]

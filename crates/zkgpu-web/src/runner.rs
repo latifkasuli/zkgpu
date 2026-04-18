@@ -111,9 +111,25 @@ pub(crate) async fn run_suite_async(spec: &SuiteSpec) -> Result<SuiteReport, Str
 }
 
 /// Run a single case exposed to JS.
-pub(crate) async fn run_single_case_async(case: &CaseSpec) -> Result<CaseReport, String> {
+///
+/// Phase E.2.b post-review: takes an explicit [`Field`] so browser
+/// callers can request a one-off Goldilocks case, matching the suite
+/// API's `spec.field` surface. Prior `CaseSpec`-only variants of this
+/// function routed unconditionally to BabyBear, which broke parity
+/// with [`run_suite_async`]. The wasm entry point in `lib.rs` accepts
+/// both the new envelope (`{case, field}`) and the legacy bare
+/// `CaseSpec` (assumed BabyBear) for backward compatibility.
+pub(crate) async fn run_single_case_async(
+    case: &CaseSpec,
+    field: Field,
+) -> Result<CaseReport, String> {
     let dev = device::clone_device()?;
-    Ok(run_case_inner(case, FamilyOverride::Auto, StockhamTailOverride::Auto, None, &dev).await)
+    Ok(match field {
+        Field::BabyBear => {
+            run_case_inner(case, FamilyOverride::Auto, StockhamTailOverride::Auto, None, &dev).await
+        }
+        Field::Goldilocks => run_case_goldilocks_inner(case, &dev).await,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -365,25 +381,13 @@ async fn run_roundtrip(
 // back into a single generic `measure_plan_async<F>` via a trait.
 
 async fn run_case_goldilocks_inner(case: &CaseSpec, dev: &Rc<WgpuDevice>) -> CaseReport {
-    // Per-case gate: profiled timestamps require an execute variant
-    // the Goldilocks plan doesn't yet have. Surface the miss as a
-    // structured per-case error (same channel as a kernel crash)
-    // rather than silently dropping gpu_total_ns — profiling consumers
-    // would otherwise see a zero-valued row and mistake it for a win.
-    if case.profile_gpu_timestamps {
-        return case_error_with_tail(
-            case,
-            Some(goldilocks_family_label(case.log_n)),
-            None,
-            None,
-            None,
-            "Goldilocks profiled-execute is not yet wired in the browser \
-             runner (Phase E.2.c follow-up); rerun this case without \
-             profile_gpu_timestamps or switch spec.field to BabyBear"
-                .to_string(),
-        );
-    }
-
+    // `case.profile_gpu_timestamps` is intentionally ignored on the
+    // Goldilocks path — mirrors the native testkit's
+    // `measure_goldilocks_plan`, which wall-times and reports
+    // `gpu_total_ns: None` regardless of the flag. Keeping parity lets
+    // a shared `SuiteSpec` produce semantically identical reports on
+    // either runner. When E.2.c adds `execute_profiled_async` we flip
+    // to honouring the flag on both sides in the same commit.
     let input = make_goldilocks_input(case.log_n, &case.input);
 
     match case.direction {
@@ -933,48 +937,15 @@ mod tests {
         assert!(report.error.is_some());
     }
 
-    /// Phase E.2.b: Goldilocks cases that ask for profiled timestamps
-    /// must surface a structured per-case error, not a silent zero
-    /// reading. Exercised via `run_case_goldilocks_inner` directly so
-    /// no GPU device is required — the gate fires before any execute.
-    #[test]
-    fn goldilocks_profile_request_returns_structured_error() {
-        let case = CaseSpec {
-            name: "gl_profiled".into(),
-            log_n: 10,
-            direction: TestDirection::Forward,
-            input: InputPattern::Sequential,
-            iterations: 1,
-            warmup_iterations: 0,
-            profile_gpu_timestamps: true,
-        };
-        // `run_case_goldilocks_inner` normally takes an `Rc<WgpuDevice>`
-        // but the profiled-request gate fires before the `dev` argument
-        // is touched — we can bypass it by exercising the error helper
-        // directly. This keeps the test pure-native + GPU-free.
-        let report = case_error_with_tail(
-            &case,
-            Some(goldilocks_family_label(case.log_n)),
-            None,
-            None,
-            None,
-            "Goldilocks profiled-execute is not yet wired in the browser \
-             runner (Phase E.2.c follow-up); rerun this case without \
-             profile_gpu_timestamps or switch spec.field to BabyBear"
-                .to_string(),
-        );
-        assert!(!report.passed);
-        assert_eq!(
-            report.kernel_family.as_deref(),
-            Some("goldilocks-portable-r4")
-        );
-        let err = report.error.as_deref().unwrap_or("");
-        assert!(err.contains("E.2.c"), "error should point at E.2.c: {err}");
-        assert!(
-            err.contains("profile_gpu_timestamps"),
-            "error should mention the offending flag: {err}"
-        );
-    }
+    // Phase E.2.b post-review (P2): `profile_gpu_timestamps=true` on a
+    // Goldilocks case must degrade to wall-only timing on the browser
+    // runner, matching the native testkit's `measure_goldilocks_plan`
+    // which ignores the flag and returns `gpu_total_ns: None`. An
+    // earlier draft of this path returned a structured per-case error;
+    // that diverged from native and made shared `SuiteSpec` specs
+    // behave differently on the two runners. The GPU-backed parity
+    // check lives in `tests/browser_smoke.rs` where a wasm-bindgen-test
+    // can actually run the browser path.
 
     /// Goldilocks family labels mirror the native testkit convention so
     /// mixed-field JSON reports are interpretable across runners.
