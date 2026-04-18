@@ -2,7 +2,8 @@ use std::time::{Duration, Instant};
 
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuBuffer, GpuDevice, NttPlan};
-use zkgpu_wgpu::{GpuTiming, NttTimings, WgpuDevice, WgpuNttPlan};
+use zkgpu_goldilocks::Goldilocks;
+use zkgpu_wgpu::{GpuTiming, NttTimings, WgpuDevice, WgpuGoldilocksNttPlan, WgpuNttPlan};
 
 use crate::report::{StageTimingReport, TimingReport};
 use zkgpu_report::{SoakSample, SoakStats};
@@ -352,6 +353,73 @@ pub fn compute_soak_stats(samples: &[SoakSample], actual_duration: Duration) -> 
 }
 
 /// Compute the k-th percentile from a sorted slice (nearest-rank method).
+// ---------------------------------------------------------------------------
+// Goldilocks measurement path (Phase E.1.c)
+// ---------------------------------------------------------------------------
+//
+// Kept as a parallel function rather than generifying `measure_plan` because:
+//   * The Goldilocks plan has no profiled-execute variant yet (only sync
+//     `execute`), so the BabyBear path's `profile_gpu_timestamps` branch has
+//     no Goldilocks equivalent — forcing it through the same signature
+//     would be a lie.
+//   * Soak profiling for Goldilocks is an explicit Phase E.2 follow-up;
+//     flagging it here with a second monomorphic function keeps the gap
+//     visible to reviewers.
+// When a profiled-execute Goldilocks path lands, this can fold back into
+// a generic `measure_plan` via a small `MeasurablePlan` trait.
+
+pub struct GoldilocksPlanMeasurement {
+    pub timings: TimingReport,
+    pub final_output: Vec<Goldilocks>,
+}
+
+/// Wall-time-only measurement for the Goldilocks NTT plan.
+///
+/// Counterpart of [`measure_plan`] for BabyBear. No GPU timestamps — the
+/// `gpu_total_ns` / `gpu_stage_ns` fields of the returned `TimingReport`
+/// are always unset until [`WgpuGoldilocksNttPlan`] grows a profiled
+/// execute.
+pub fn measure_goldilocks_plan(
+    device: &WgpuDevice,
+    data: &[Goldilocks],
+    plan: &mut WgpuGoldilocksNttPlan,
+    warmup_iterations: u32,
+    iterations: u32,
+) -> Result<GoldilocksPlanMeasurement, zkgpu_core::ZkGpuError> {
+    let measured = iterations.max(1);
+
+    for _ in 0..warmup_iterations {
+        let mut buf = device.upload(data)?;
+        plan.execute(device, &mut buf)?;
+    }
+
+    let mut wall_total = Duration::ZERO;
+    let mut final_output = None;
+
+    for iter_idx in 0..measured {
+        let mut buf = device.upload(data)?;
+        let start = Instant::now();
+        plan.execute(device, &mut buf)?;
+        wall_total += start.elapsed();
+
+        if iter_idx + 1 == measured {
+            final_output = Some(buf.read_to_vec()?);
+        }
+    }
+
+    let wall_avg_ns = (wall_total.as_secs_f64() * 1_000_000_000.0 / measured as f64) as u64;
+
+    Ok(GoldilocksPlanMeasurement {
+        timings: TimingReport {
+            wall_time_ns: Some(wall_avg_ns),
+            gpu_total_ns: None,
+            gpu_stage_ns: Vec::new(),
+        },
+        final_output: final_output
+            .expect("measured loop always captures the final GPU output"),
+    })
+}
+
 fn percentile(sorted: &[u64], pct: u32) -> u64 {
     if sorted.is_empty() {
         return 0;

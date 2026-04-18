@@ -1,14 +1,20 @@
 use std::time::Duration;
 
 use zkgpu_core::{NttDirection, ZkGpuError};
+use zkgpu_goldilocks::Goldilocks;
 use zkgpu_ntt::ntt_cpu_reference;
-use zkgpu_report::{SoakCaseReport, SoakSpec, SoakSuiteReport, StockhamTailOverride};
-use zkgpu_wgpu::{PlannerPolicy, StockhamTailOverride as PlanTailOverride, WgpuDevice, WgpuNttPlan};
+use zkgpu_report::{Field, SoakCaseReport, SoakSpec, SoakSuiteReport, StockhamTailOverride};
+use zkgpu_wgpu::{
+    PlannerPolicy, StockhamTailOverride as PlanTailOverride, WgpuDevice,
+    WgpuGoldilocksNttPlan, WgpuNttPlan,
+};
 
-use crate::benchmark::{measure_plan, measure_plan_soak, sum_timing_reports};
+use crate::benchmark::{
+    measure_goldilocks_plan, measure_plan, measure_plan_soak, sum_timing_reports,
+};
 use crate::case::{CaseSpec, TestDirection};
 use crate::device::build_device_report;
-use crate::inputs::make_input;
+use crate::inputs::{make_goldilocks_input, make_input};
 use crate::report::{CaseReport, KernelReport, SuiteReport, SuiteSummary, TimingReport};
 use crate::suite::{benchmark_suite, smoke_suite, validation_suite, FamilyOverride, SuiteSpec};
 use crate::validation::compare_vectors;
@@ -33,13 +39,21 @@ pub fn run_suite(spec: &SuiteSpec) -> Result<SuiteReport, TestkitError> {
     let mut cases = Vec::with_capacity(spec.cases.len());
 
     for case in &spec.cases {
-        let report = run_case(
-            &device,
-            case,
-            spec.family_override,
-            spec.stockham_tail_override,
-            spec.r8_max_log_leaf_override,
-        );
+        // Phase E.1.c: field dispatch at the suite boundary. Reuses the
+        // same case list across fields; per-field plumbing diverges only
+        // inside `run_case_*`. Non-field-relevant overrides (family,
+        // stockham_tail, r8) are BabyBear-only — the Goldilocks plan
+        // has no equivalent today and silently accepts everything.
+        let report = match spec.field {
+            Field::BabyBear => run_case(
+                &device,
+                case,
+                spec.family_override,
+                spec.stockham_tail_override,
+                spec.r8_max_log_leaf_override,
+            ),
+            Field::Goldilocks => run_case_goldilocks(&device, case),
+        };
         let failed = !report.passed;
         cases.push(report);
         if spec.fail_fast && failed {
@@ -58,7 +72,7 @@ pub fn run_suite(spec: &SuiteSpec) -> Result<SuiteReport, TestkitError> {
         suite: spec.kind,
         device: device_report,
         kernel: KernelReport {
-            field: "BabyBear".to_string(),
+            field: spec.field.display_name().to_string(),
             ntt_variant: kernel_variant,
             stockham_tail_strategy: tail_variant,
         },
@@ -92,6 +106,18 @@ pub fn run_benchmark_suite() -> Result<SuiteReport, TestkitError> {
 pub fn run_soak_suite(spec: &SoakSpec) -> Result<SoakSuiteReport, TestkitError> {
     if spec.cases.is_empty() {
         return Err(TestkitError::EmptySuite);
+    }
+
+    // Soak requires per-iteration GPU timestamps via
+    // `execute_kernels_profiled`. The Goldilocks plan only has a sync
+    // `execute` today; profiled-execute is a Phase E.2 follow-up. Reject
+    // Goldilocks soak with a clear structural error rather than silently
+    // falling back to wall-only stats (which would ruin the soak's
+    // thermal-drift signal).
+    if spec.field == Field::Goldilocks {
+        return Err(TestkitError::Backend(ZkGpuError::BackendError(Box::new(
+            GoldilocksSoakUnsupported,
+        ))));
     }
 
     let device = WgpuDevice::new().map_err(|e| TestkitError::DeviceInit(e.to_string()))?;
@@ -131,7 +157,7 @@ pub fn run_soak_suite(spec: &SoakSpec) -> Result<SoakSuiteReport, TestkitError> 
         suite: zkgpu_report::SuiteKind::Soak,
         device: device_report,
         kernel: KernelReport {
-            field: "BabyBear".to_string(),
+            field: spec.field.display_name().to_string(),
             ntt_variant: kernel_variant,
             stockham_tail_strategy: tail_variant,
         },
@@ -511,6 +537,172 @@ fn run_roundtrip_case(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Goldilocks runner path (Phase E.1.c)
+// ---------------------------------------------------------------------------
+//
+// Kept as a parallel path to [`run_case`] rather than unified through a
+// generic plan/buffer trait. Goldilocks-specific behavior:
+//   - No `family_override` / `stockham_tail_override` / `r8_override`
+//     plumbing — the Goldilocks plan picks R2 vs R4 from `log_n` parity
+//     and has no Four-Step equivalent in Phase E.1.
+//   - No profiled-execute path yet, so `gpu_total_ns` / `gpu_stage_ns`
+//     in the returned `TimingReport` are always `None` / empty.
+//   - `kernel_family` reports `"goldilocks-portable-r4"` or `"-r2"` so
+//     downstream `derive_kernel_variant` can distinguish Goldilocks
+//     runs from BabyBear in mixed-field reports (future scope).
+fn run_case_goldilocks(device: &WgpuDevice, case: &CaseSpec) -> CaseReport {
+    let input = make_goldilocks_input(case.log_n, &case.input);
+
+    match case.direction {
+        TestDirection::Forward => run_single_direction_goldilocks(
+            device,
+            case,
+            &input,
+            NttDirection::Forward,
+            goldilocks_cpu_reference(&input, NttDirection::Forward),
+        ),
+        TestDirection::Inverse => run_single_direction_goldilocks(
+            device,
+            case,
+            &input,
+            NttDirection::Inverse,
+            goldilocks_cpu_reference(&input, NttDirection::Inverse),
+        ),
+        TestDirection::Roundtrip => run_roundtrip_goldilocks(device, case, &input),
+    }
+}
+
+fn run_single_direction_goldilocks(
+    device: &WgpuDevice,
+    case: &CaseSpec,
+    input: &[Goldilocks],
+    direction: NttDirection,
+    expected: Vec<Goldilocks>,
+) -> CaseReport {
+    let mut plan = match WgpuGoldilocksNttPlan::new(device, case.log_n, direction) {
+        Ok(plan) => plan,
+        Err(err) => return case_error(case, err),
+    };
+    let kernel_family = Some(goldilocks_family_label(case.log_n));
+
+    let measurement = match measure_goldilocks_plan(
+        device,
+        input,
+        &mut plan,
+        case.warmup_iterations,
+        case.iterations,
+    ) {
+        Ok(m) => m,
+        Err(err) => {
+            return case_error_with_tail(case, kernel_family, None, None, None, err);
+        }
+    };
+    let outcome = compare_vectors(&measurement.final_output, &expected);
+
+    CaseReport {
+        name: case.name.clone(),
+        log_n: case.log_n,
+        direction: case.direction,
+        input: case.input.clone(),
+        kernel_family,
+        passed: outcome.passed,
+        mismatch_count: outcome.mismatch_count,
+        first_mismatch_index: outcome.first_mismatch_index,
+        first_mismatch_gpu: outcome.first_mismatch_gpu,
+        first_mismatch_cpu: outcome.first_mismatch_cpu,
+        timings: measurement.timings,
+        error: None,
+        // Tail metadata is Stockham-BabyBear-specific; Goldilocks R2/R4
+        // has a single global-only dispatch strategy per stage with no
+        // local-fused-tail alternative to distinguish.
+        stockham_tail_strategy: None,
+        stockham_tail_reason: None,
+        tail_stride_bytes: None,
+    }
+}
+
+fn run_roundtrip_goldilocks(
+    device: &WgpuDevice,
+    case: &CaseSpec,
+    input: &[Goldilocks],
+) -> CaseReport {
+    let mut forward = match WgpuGoldilocksNttPlan::new(device, case.log_n, NttDirection::Forward) {
+        Ok(plan) => plan,
+        Err(err) => return case_error(case, err),
+    };
+    let mut inverse = match WgpuGoldilocksNttPlan::new(device, case.log_n, NttDirection::Inverse) {
+        Ok(plan) => plan,
+        Err(err) => {
+            return case_error_with_tail(
+                case,
+                Some(goldilocks_family_label(case.log_n)),
+                None,
+                None,
+                None,
+                err,
+            );
+        }
+    };
+    let kernel_family = Some(goldilocks_family_label(case.log_n));
+
+    let forward_measurement = match measure_goldilocks_plan(
+        device,
+        input,
+        &mut forward,
+        case.warmup_iterations,
+        case.iterations,
+    ) {
+        Ok(m) => m,
+        Err(err) => {
+            return case_error_with_tail(case, kernel_family, None, None, None, err);
+        }
+    };
+    let inverse_measurement = match measure_goldilocks_plan(
+        device,
+        &forward_measurement.final_output,
+        &mut inverse,
+        case.warmup_iterations,
+        case.iterations,
+    ) {
+        Ok(m) => m,
+        Err(err) => {
+            return case_error_with_tail(case, kernel_family, None, None, None, err);
+        }
+    };
+    let timings = sum_timing_reports(&[forward_measurement.timings, inverse_measurement.timings]);
+    let outcome = compare_vectors(&inverse_measurement.final_output, input);
+
+    CaseReport {
+        name: case.name.clone(),
+        log_n: case.log_n,
+        direction: case.direction,
+        input: case.input.clone(),
+        kernel_family,
+        passed: outcome.passed,
+        mismatch_count: outcome.mismatch_count,
+        first_mismatch_index: outcome.first_mismatch_index,
+        first_mismatch_gpu: outcome.first_mismatch_gpu,
+        first_mismatch_cpu: outcome.first_mismatch_cpu,
+        timings,
+        error: None,
+        stockham_tail_strategy: None,
+        stockham_tail_reason: None,
+        tail_stride_bytes: None,
+    }
+}
+
+/// Label surfaced as `CaseReport.kernel_family` for Goldilocks runs.
+/// Tracks R2 vs R4 so mixed-size suite reports can distinguish the two
+/// without re-deriving from `log_n`.
+fn goldilocks_family_label(log_n: u32) -> String {
+    if log_n % 2 == 0 {
+        "goldilocks-portable-r4".to_string()
+    } else {
+        "goldilocks-portable-r2".to_string()
+    }
+}
+
 fn cpu_reference(
     input: &[zkgpu_babybear::BabyBear],
     direction: NttDirection,
@@ -519,6 +711,38 @@ fn cpu_reference(
     ntt_cpu_reference(&mut cpu, direction);
     cpu
 }
+
+/// Goldilocks twin of [`cpu_reference`]. `ntt_cpu_reference` is already
+/// generic over `F: GpuField`; only a monomorphic shim is needed here so
+/// the Goldilocks runner path reads cleanly.
+fn goldilocks_cpu_reference(
+    input: &[Goldilocks],
+    direction: NttDirection,
+) -> Vec<Goldilocks> {
+    let mut cpu = input.to_vec();
+    ntt_cpu_reference(&mut cpu, direction);
+    cpu
+}
+
+/// Sentinel error for Phase E.1 — soak benchmark rejects Goldilocks
+/// because the plan has no profiled-execute path yet. Surfaces via the
+/// standard `ZkGpuError::BackendError(Box<dyn Error>)` channel so the
+/// testkit caller sees a structured failure, not a panic.
+#[derive(Debug)]
+struct GoldilocksSoakUnsupported;
+
+impl std::fmt::Display for GoldilocksSoakUnsupported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "soak benchmark not yet supported for Goldilocks: the \
+             Goldilocks plan has no profiled-execute variant (Phase E.2 \
+             follow-up); use run_suite / run_benchmark_suite for wall-time \
+             measurement",
+        )
+    }
+}
+
+impl std::error::Error for GoldilocksSoakUnsupported {}
 
 fn make_plan(
     device: &WgpuDevice,
@@ -1060,5 +1284,94 @@ mod tests {
 
         let partial = vec![mk("a", None), mk("b", Some("GlobalOnlyR4"))];
         assert_eq!(derive_tail_variant(&partial), Some("GlobalOnlyR4".into()));
+    }
+
+    // === Phase E.1.c: Goldilocks field dispatch ===
+
+    /// Soak explicitly rejects Goldilocks until profiled-execute lands
+    /// (Phase E.2). Must surface as a structured `TestkitError`, not a
+    /// panic, and must do so BEFORE any device creation so the CLI can
+    /// fail fast without spinning up wgpu.
+    #[test]
+    fn soak_rejects_goldilocks_field() {
+        let spec = zkgpu_report::SoakSpec {
+            duration_secs: 5,
+            cases: vec![CaseSpec::new(
+                "gl_soak_log10",
+                10,
+                TestDirection::Forward,
+                zkgpu_report::InputPattern::Sequential,
+            )],
+            validate: false,
+            field: Field::Goldilocks,
+            family_override: FamilyOverride::Auto,
+            stockham_tail_override: StockhamTailOverride::Auto,
+        };
+        let err = run_soak_suite(&spec);
+        assert!(err.is_err(), "expected error, got: {err:?}");
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("Goldilocks") || msg.contains("goldilocks"),
+            "error should mention Goldilocks: {msg}"
+        );
+    }
+
+    /// End-to-end GPU canary: a Goldilocks smoke suite must run both the
+    /// forward and inverse cases, route to `WgpuGoldilocksNttPlan`, and
+    /// return a `SuiteReport` with `kernel.field == "Goldilocks"` and both
+    /// cases passing against `ntt_cpu_reference::<Goldilocks>`.
+    ///
+    /// Skips cleanly if no GPU adapter is available (software adapter,
+    /// headless CI without a GPU).
+    #[test]
+    fn goldilocks_smoke_suite_runs_end_to_end() {
+        // Guard: require a real GPU adapter, skip otherwise.
+        if WgpuDevice::new().is_err() {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        }
+        let mut spec = smoke_suite();
+        spec.field = Field::Goldilocks;
+
+        let report = run_suite(&spec).expect("goldilocks smoke suite must run");
+        assert_eq!(report.kernel.field, "Goldilocks");
+        assert_eq!(report.summary.total_cases, 2);
+        assert_eq!(
+            report.summary.passed_cases, 2,
+            "both goldilocks smoke cases must pass; report: {report:?}"
+        );
+        // Plan family label must identify the Goldilocks kernel in each case.
+        for case in &report.cases {
+            let family = case.kernel_family.as_deref().unwrap_or("");
+            assert!(
+                family.starts_with("goldilocks-"),
+                "case {name} kernel_family should start with 'goldilocks-', got: {family}",
+                name = case.name,
+            );
+        }
+    }
+
+    /// Default `Field::BabyBear` must keep existing BabyBear smoke
+    /// behavior unchanged — `kernel.field == "BabyBear"` and case labels
+    /// stay on the BabyBear plan family strings.
+    #[test]
+    fn babybear_smoke_suite_still_works_after_field_dispatch() {
+        if WgpuDevice::new().is_err() {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        }
+        let spec = smoke_suite(); // default: field = BabyBear
+        let report = run_suite(&spec).expect("babybear smoke suite must run");
+        assert_eq!(report.kernel.field, "BabyBear");
+        assert_eq!(report.summary.passed_cases, 2);
+        // Family labels must NOT start with "goldilocks-" on this path.
+        for case in &report.cases {
+            let family = case.kernel_family.as_deref().unwrap_or("");
+            assert!(
+                !family.starts_with("goldilocks-"),
+                "BabyBear case {name} should not route to goldilocks, got: {family}",
+                name = case.name,
+            );
+        }
     }
 }

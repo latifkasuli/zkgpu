@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use zkgpu_babybear::BabyBear;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationOutcome {
@@ -10,7 +9,16 @@ pub struct ValidationOutcome {
     pub first_mismatch_cpu: Option<String>,
 }
 
-pub fn compare_vectors(gpu: &[BabyBear], cpu: &[BabyBear]) -> ValidationOutcome {
+/// Field-generic vector comparison.
+///
+/// Phase E.1.c generified this to compare `Vec<F>` for any `F: Eq + Display`,
+/// so the Goldilocks runner path reuses it alongside BabyBear. Both
+/// `zkgpu_babybear::BabyBear` and `zkgpu_goldilocks::Goldilocks` satisfy
+/// the bounds.
+pub fn compare_vectors<T>(gpu: &[T], cpu: &[T]) -> ValidationOutcome
+where
+    T: PartialEq + core::fmt::Display,
+{
     let mut mismatch_count = 0u32;
     let mut first = None;
 
