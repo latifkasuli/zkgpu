@@ -147,6 +147,10 @@ impl GpuField for KoalaBear {
         self.0
     }
 
+    fn from_u64(n: u64) -> Self {
+        Self((n % P as u64) as u32)
+    }
+
     fn root_of_unity(log_n: u32) -> Self {
         assert!(
             log_n <= TWO_ADICITY,

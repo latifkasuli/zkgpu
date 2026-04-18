@@ -43,9 +43,13 @@ pub fn ntt_cpu_reference<F: GpuField>(data: &mut [F], direction: NttDirection) {
         }
     }
 
-    // For inverse NTT, divide by n
+    // For inverse NTT, divide by n.
+    //
+    // We previously used `bytemuck::cast(n as u32)` here, which implicitly
+    // required `size_of::<F::Repr>() == 4` and broke for 64-bit fields
+    // like Goldilocks. `GpuField::from_u64` is the portable replacement.
     if direction == NttDirection::Inverse {
-        let n_field = F::from_repr(bytemuck::cast(n as u32));
+        let n_field = F::from_u64(n as u64);
         let n_inv = n_field
             .inverse()
             .expect("n must be invertible in the field");

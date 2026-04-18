@@ -5,6 +5,7 @@ members = [
     "crates/zkgpu-wgpu",
     "crates/zkgpu-babybear",
     "crates/zkgpu-koalabear",
+    "crates/zkgpu-goldilocks",
     "crates/zkgpu-ntt",
     "crates/zkgpu-poseidon2",
     "crates/zkgpu-plonky3",
@@ -29,6 +30,7 @@ zkgpu-core = { path = "crates/zkgpu-core" }
 zkgpu-wgpu = { path = "crates/zkgpu-wgpu" }
 zkgpu-babybear = { path = "crates/zkgpu-babybear" }
 zkgpu-koalabear = { path = "crates/zkgpu-koalabear" }
+zkgpu-goldilocks = { path = "crates/zkgpu-goldilocks" }
 zkgpu-ntt = { path = "crates/zkgpu-ntt" }
 zkgpu-poseidon2 = { path = "crates/zkgpu-poseidon2" }
 zkgpu-plonky3 = { path = "crates/zkgpu-plonky3" }

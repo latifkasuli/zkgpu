@@ -33,6 +33,16 @@ pub trait GpuField: Pod + Copy + Clone + Send + Sync + 'static {
     /// Convert this field element to its GPU representation.
     fn to_repr(self) -> Self::Repr;
 
+    /// Convert a small integer to a field element, reducing mod `MODULUS`.
+    ///
+    /// Exists so NTT code can construct a field-element version of the
+    /// transform size `n` without knowing the bit-width of `Repr`. For a
+    /// `u32`-backed field this is ~`Self((n % p as u64) as u32)`; for
+    /// `u64`-backed Goldilocks it's ~`Self(n % p)`. The prior
+    /// `bytemuck::cast(n as u32)` pattern implicitly required
+    /// `size_of::<Repr>() == 4` and broke the contract for 64-bit fields.
+    fn from_u64(n: u64) -> Self;
+
     /// Return the root of unity of order `2^log_n`.
     ///
     /// Panics if `log_n > TWO_ADICITY`.

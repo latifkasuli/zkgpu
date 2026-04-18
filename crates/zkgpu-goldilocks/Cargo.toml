@@ -1,0 +1,16 @@
+[package]
+name = "zkgpu-goldilocks"
+description = "Goldilocks (p = 2^64 - 2^32 + 1) field implementation for zkgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+zkgpu-core = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+zkgpu-ntt = { workspace = true }
+rand = "0.8"
