@@ -29,6 +29,12 @@ use super::stockham::NttTimings;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TransposeVariant {
     Tile16,
+    // Only reachable via `ZKGPU_TRANSPOSE_VARIANT=tile32`, which the wasm
+    // `from_env()` branch ignores (no env on the web). That makes `Tile32`
+    // unconstructed on wasm and triggers `dead_code`. Kept in-tree per the
+    // NVIDIA scale-up T3.E / FTL A/B measurements — the variant is behind
+    // the env gate for future experimentation, not orphaned.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Tile32,
 }
 
