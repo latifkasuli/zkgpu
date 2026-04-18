@@ -29,16 +29,19 @@ workspace = true
 [dependencies.zkgpu-ntt]
 workspace = true
 
+# Goldilocks field CPU implementation. The portable GPU NTT plan
+# (`WgpuGoldilocksNttPlan`) is concrete over `Goldilocks` because the
+# WGSL arithmetic helpers hardcode its modulus and reduction — so the
+# field crate needs to be in the main-dep closure.
+[dependencies.zkgpu-goldilocks]
+workspace = true
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }
 criterion = { workspace = true }
-# Goldilocks (u64) CPU reference, for GPU differential tests of the
-# portable u32x2 arithmetic primitives. Dev-only — never reaches the
-# shipping crate surface.
-zkgpu-goldilocks = { workspace = true }
 pollster = { workspace = true }
 
 [[bench]]

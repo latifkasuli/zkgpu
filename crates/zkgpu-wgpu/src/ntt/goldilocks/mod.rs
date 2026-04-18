@@ -1,16 +1,25 @@
 //! Goldilocks GPU NTT module.
 //!
-//! # Phase status
+//! # Status after Phase B.2
 //!
-//! **Phase A (this commit): scaffolding only.** The resolver lives in
-//! [`resolve`], `FieldStorageAbi` lives in
-//! [`crate::field_codec`], but there is **no Goldilocks NTT plan yet**.
-//! Nothing here is reachable from [`WgpuNttPlan`]; everything is
-//! `pub(crate)` and exists so that Phase B can slot in the portable
-//! `u32x2` Stockham kernels + `WgpuGoldilocksNttPlan` without a second
-//! round of structural churn.
+//! - [`plan::WgpuGoldilocksNttPlan`] — concrete, portable-u32x2 Stockham
+//!   radix-2 NTT plan for [`zkgpu_goldilocks::Goldilocks`]. Forward +
+//!   inverse, up to `MAX_GOLDILOCKS_LOG_N = 31`. Canary-validated on
+//!   local Metal against [`zkgpu_ntt::ntt_cpu_reference::<Goldilocks>`].
+//! - [`resolve`] — kernel-variant resolver (Auto / Portable /
+//!   NativeVulkan). `Auto` always resolves to `PortableU32x2` until an
+//!   allowlist of proven `(backend, gpu_family, driver)` fingerprints
+//!   for the native-int64 path lands.
+//! - [`arith_test`] — Phase B.1 differential-test harness for the
+//!   portable u32x2 arithmetic primitives.
+//!
+//! Not yet wired into [`WgpuNttPlan`] — Phase E adds a `field`
+//! parameter to the harness and routes Goldilocks suites here.
+//! `WgpuGoldilocksNttPlan::execute()` is also blocking; an
+//! async/browser-safe variant lands alongside Phase E.
 //!
 //! [`WgpuNttPlan`]: crate::WgpuNttPlan
+//! [`zkgpu_ntt::ntt_cpu_reference::<Goldilocks>`]: zkgpu_ntt::ntt_cpu_reference
 //!
 //! # Design spec
 //!
@@ -22,7 +31,7 @@
 //! once at plan-construction time and encoded in the plan; shaders
 //! never branch on variant at runtime.
 //!
-//! # Why this matters now
+//! # Why this matters
 //!
 //! - WGSL (10-March-2026 CRD) defines only `i32` / `u32` scalar
 //!   integer types. There is no standard `u64` shader type today.
@@ -41,4 +50,4 @@ pub(crate) mod arith_test;
 pub(crate) mod plan;
 pub(crate) mod resolve;
 
-pub use plan::WgpuGoldilocksNttPlan;
+pub use plan::{WgpuGoldilocksNttPlan, MAX_GOLDILOCKS_LOG_N};

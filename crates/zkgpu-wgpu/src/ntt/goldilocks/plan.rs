@@ -15,12 +15,23 @@
 use std::sync::Arc;
 
 use zkgpu_core::{GpuBuffer, GpuDevice, GpuField, NttDirection, ZkGpuError};
+use zkgpu_goldilocks::Goldilocks;
 
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 use crate::ntt::goldilocks::resolve::{
     resolve_variant, GoldilocksKernelOverride, ResolvedGoldilocksKernel,
 };
+
+/// Maximum `log_n` this portable plan accepts.
+///
+/// Capped at 31 because the stage-indexing path uses `u32` counters
+/// (`n = 1u32 << log_n`, `half = n >> (s+1)`, etc.). Goldilocks'
+/// 2-adicity is 32, so a log_n = 32 NTT is mathematically defined —
+/// but in practice a 2^32 × 8-byte buffer is 32 GB, far beyond any
+/// GPU's `max_buffer_size`. A future plan can widen the indexing path
+/// to `u64` if / when that ceiling becomes interesting.
+pub const MAX_GOLDILOCKS_LOG_N: u32 = 31;
 
 /// WGSL source: helpers + Stockham R2 body, concatenated at compile
 /// time. See `goldilocks_arith_helpers.wgsl` for the prelude design.
@@ -63,20 +74,28 @@ struct ScaleUniform {
 
 /// Portable Goldilocks NTT plan.
 ///
+/// **Concrete over `Goldilocks`.** The WGSL helpers hardcode the
+/// Goldilocks modulus and reduction identity — any other
+/// `GpuField<Repr = u64>` would compile against a generic shape of
+/// this type and then silently execute Goldilocks arithmetic on the
+/// GPU, producing wrong results. Keeping the type concrete rules that
+/// out. When the shader layer becomes field-parametric, generalise at
+/// that point.
+///
 /// Construction precomputes twiddles, allocates scratch, and builds
 /// all `log_n` stage-uniform buffers. `execute` reuses those across
 /// dispatches; only the bind groups (which reference the caller's
 /// input buffer) are created per-call.
-pub struct WgpuGoldilocksNttPlan<F: GpuField<Repr = u64>> {
+pub struct WgpuGoldilocksNttPlan {
     direction: NttDirection,
     log_n: u32,
     n: u32,
 
     /// Precomputed twiddles for this direction, uploaded once.
-    twiddles_buf: WgpuBuffer<F>,
+    twiddles_buf: WgpuBuffer<Goldilocks>,
 
     /// Ping-pong scratch buffer, length N.
-    scratch_buf: WgpuBuffer<F>,
+    scratch_buf: WgpuBuffer<Goldilocks>,
 
     /// One uniform per Stockham stage. Written during construction;
     /// read-only at execute-time.
@@ -92,30 +111,62 @@ pub struct WgpuGoldilocksNttPlan<F: GpuField<Repr = u64>> {
     scale_pipeline: Arc<wgpu::ComputePipeline>,
 
     resolved: ResolvedGoldilocksKernel,
-
-    _marker: std::marker::PhantomData<F>,
 }
 
-impl<F: GpuField<Repr = u64>> WgpuGoldilocksNttPlan<F> {
+impl WgpuGoldilocksNttPlan {
     /// Construct a plan for `2^log_n`-point NTT in `direction`.
     /// Currently hardcoded to the `Auto` resolver path, which in
     /// Phase A/B always resolves to `PortableU32x2`.
+    ///
+    /// Returns `ZkGpuError::InvalidNttSize` if `log_n == 0` or
+    /// `log_n > MAX_GOLDILOCKS_LOG_N`, and `ZkGpuError::BufferSize` if
+    /// the 2 × N × 8-byte working set (user buffer + internal scratch)
+    /// exceeds the device's `max_buffer_size`.
     pub fn new(
         device: &WgpuDevice,
         log_n: u32,
         direction: NttDirection,
     ) -> Result<Self, ZkGpuError> {
+        // ---- Size contract ------------------------------------------
+        if log_n == 0 {
+            return Err(ZkGpuError::InvalidNttSize(
+                "log_n must be >= 1".to_string(),
+            ));
+        }
+        if log_n > MAX_GOLDILOCKS_LOG_N {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "log_n={log_n} exceeds portable Goldilocks plan cap \
+                 (MAX_GOLDILOCKS_LOG_N={MAX_GOLDILOCKS_LOG_N})"
+            )));
+        }
+        // Now safe: log_n in [1, 31], so `1u32 << log_n` fits in u32.
+        let n = 1u32 << log_n;
+
+        // Buffer-budget preflight: the plan holds one N-element scratch
+        // buffer, and the caller's buf is another. Twiddles are N-1
+        // elements. Four of these need to fit under the device's
+        // `max_buffer_size` ceiling (roughly; we check the dominant
+        // 2 × N × 8-byte working set since twiddles are the same
+        // order of magnitude).
+        let elem_bytes = 8u64; // Goldilocks = 8 bytes per element (u64)
+        let working_set = 2u64 * (n as u64) * elem_bytes;
+        let buf_limit = device.caps.max_buffer_size;
+        if working_set > buf_limit {
+            return Err(ZkGpuError::BufferSize {
+                requested: working_set,
+                limit: buf_limit,
+            });
+        }
+
         let resolved = resolve_variant(GoldilocksKernelOverride::Auto, device.caps())
             .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
 
-        let n = 1u32 << log_n;
-
         // ---- Twiddles ------------------------------------------------
-        let twiddles = precompute_stockham_r2_twiddles::<F>(log_n, direction);
-        let twiddles_buf = device.upload::<F>(&twiddles)?;
+        let twiddles = precompute_stockham_r2_twiddles(log_n, direction);
+        let twiddles_buf = device.upload::<Goldilocks>(&twiddles)?;
 
         // ---- Scratch -------------------------------------------------
-        let scratch_buf = device.alloc_zeros::<F>(n as usize)?;
+        let scratch_buf = device.alloc_zeros::<Goldilocks>(n as usize)?;
 
         // ---- Stage uniforms -----------------------------------------
         let mut stage_uniforms = Vec::with_capacity(log_n as usize);
@@ -142,7 +193,7 @@ impl<F: GpuField<Repr = u64>> WgpuGoldilocksNttPlan<F> {
             NttDirection::Forward => None,
             NttDirection::Inverse => {
                 // n_inv = (n as field element)^{-1}, packed as (lo, hi).
-                let n_field = F::from_u64(n as u64);
+                let n_field = <Goldilocks as GpuField>::from_u64(n as u64);
                 let n_inv = n_field.inverse().ok_or_else(|| {
                     ZkGpuError::InvalidNttSize(format!(
                         "field is not invertible at n=2^{log_n}"
@@ -243,7 +294,6 @@ impl<F: GpuField<Repr = u64>> WgpuGoldilocksNttPlan<F> {
             scale_bgl,
             scale_pipeline,
             resolved,
-            _marker: std::marker::PhantomData,
         })
     }
 
@@ -271,7 +321,7 @@ impl<F: GpuField<Repr = u64>> WgpuGoldilocksNttPlan<F> {
     pub fn execute(
         &mut self,
         device: &WgpuDevice,
-        buf: &mut WgpuBuffer<F>,
+        buf: &mut WgpuBuffer<Goldilocks>,
     ) -> Result<(), ZkGpuError> {
         if buf.len() != self.n as usize {
             return Err(ZkGpuError::InvalidNttSize(format!(
@@ -406,18 +456,21 @@ impl<F: GpuField<Repr = u64>> WgpuGoldilocksNttPlan<F> {
 ///     unity (or its inverse for the inverse NTT).
 ///   - `offset` for stage `s` = `sum over s' < s of half(s')`.
 ///
-/// Total length = `N - 1`. Elements are written as `F` so the caller
-/// can upload them directly via `WgpuDevice::upload`.
-fn precompute_stockham_r2_twiddles<F: GpuField<Repr = u64>>(
+/// Total length = `N - 1`. Elements are uploaded directly via
+/// `WgpuDevice::upload::<Goldilocks>`.
+///
+/// Assumes `log_n <= MAX_GOLDILOCKS_LOG_N` (caller's responsibility;
+/// `WgpuGoldilocksNttPlan::new` enforces this).
+fn precompute_stockham_r2_twiddles(
     log_n: u32,
     direction: NttDirection,
-) -> Vec<F> {
+) -> Vec<Goldilocks> {
     let n = 1u32 << log_n;
-    let omega = F::root_of_unity(log_n);
+    let omega = Goldilocks::root_of_unity(log_n);
     let omega = match direction {
         NttDirection::Forward => omega,
         NttDirection::Inverse => omega
-            .inverse()
+            .inv()
             .expect("root of unity must be invertible"),
     };
 
@@ -426,10 +479,10 @@ fn precompute_stockham_r2_twiddles<F: GpuField<Repr = u64>>(
         let n_groups = 1u64 << s;
         let half = n >> (s + 1);
         let step = omega.pow(n_groups);
-        let mut w = F::from_u64(1); // F::ONE but through the canonical constructor
+        let mut w = Goldilocks::new(1);
         for _ in 0..half {
             tw.push(w);
-            w = w.mul(step);
+            w = w * step;
         }
     }
     tw
@@ -510,7 +563,7 @@ mod tests {
             let mut cpu_data = gpu_data.clone();
 
             let mut plan =
-                WgpuGoldilocksNttPlan::<Goldilocks>::new(&device, log_n, NttDirection::Forward)
+                WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward)
                     .expect("plan should build");
 
             let mut gpu_buf = device.upload::<Goldilocks>(&gpu_data).unwrap();
@@ -540,12 +593,12 @@ mod tests {
             let mut buf = device.upload::<Goldilocks>(&original).unwrap();
 
             let mut fwd =
-                WgpuGoldilocksNttPlan::<Goldilocks>::new(&device, log_n, NttDirection::Forward)
+                WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward)
                     .unwrap();
             fwd.execute(&device, &mut buf).unwrap();
 
             let mut inv =
-                WgpuGoldilocksNttPlan::<Goldilocks>::new(&device, log_n, NttDirection::Inverse)
+                WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Inverse)
                     .unwrap();
             inv.execute(&device, &mut buf).unwrap();
 
@@ -557,6 +610,33 @@ mod tests {
         }
     }
 
+    /// Invalid log_n (0 or > 31) must produce a structured
+    /// `InvalidNttSize` error, not a panic, overflow, or assert.
+    #[test]
+    fn plan_rejects_out_of_range_log_n() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        // log_n = 0: explicit error
+        let err = WgpuGoldilocksNttPlan::new(&device, 0, NttDirection::Forward);
+        assert!(matches!(err, Err(ZkGpuError::InvalidNttSize(_))));
+
+        // log_n = 32: above MAX_GOLDILOCKS_LOG_N
+        let err = WgpuGoldilocksNttPlan::new(&device, 32, NttDirection::Forward);
+        assert!(matches!(err, Err(ZkGpuError::InvalidNttSize(_))));
+
+        // log_n = MAX_GOLDILOCKS_LOG_N itself may hit the buffer-size
+        // preflight on most devices (2 × 2^31 × 8 bytes = 32 GB > any
+        // GPU's max_buffer_size). That's acceptable — it must still be
+        // a structured error, not a panic.
+        let err = WgpuGoldilocksNttPlan::new(&device, MAX_GOLDILOCKS_LOG_N, NttDirection::Forward);
+        assert!(matches!(
+            err,
+            Err(ZkGpuError::InvalidNttSize(_)) | Err(ZkGpuError::BufferSize { .. })
+        ));
+    }
+
     /// Plan reports the resolved variant, reason, and storage ABI —
     /// Phase E's harness consumer depends on these accessors.
     #[test]
@@ -566,7 +646,7 @@ mod tests {
             return;
         };
         let plan =
-            WgpuGoldilocksNttPlan::<Goldilocks>::new(&device, 4, NttDirection::Forward).unwrap();
+            WgpuGoldilocksNttPlan::new(&device, 4, NttDirection::Forward).unwrap();
         assert_eq!(plan.kernel_variant(), "PortableU32x2");
         assert_eq!(plan.storage_abi(), "Limb32x2Le");
         // Reason depends on whether we're on browser (BrowserWgslNoInt64)
