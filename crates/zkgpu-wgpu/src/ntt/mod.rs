@@ -8,7 +8,7 @@ pub(crate) mod stockham;
 // u32x2 kernels. See `crates/zkgpu-wgpu/src/ntt/goldilocks/` for the
 // Goldilocks-side planning / resolver surface.
 pub(crate) mod babybear_twiddles;
-pub(crate) mod goldilocks;
+pub mod goldilocks;
 
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{NttDirection, NttPlan, ZkGpuError};

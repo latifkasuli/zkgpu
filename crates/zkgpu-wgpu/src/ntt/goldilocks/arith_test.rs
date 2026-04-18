@@ -18,11 +18,16 @@ use crate::pipeline_registry::PipelineRegistry;
 
 /// WGSL source for the Goldilocks arithmetic primitives + test kernel.
 ///
-/// Kept as `pub(crate)` so Phase B.2's Stockham kernels can re-include
-/// the same source via string concatenation. (WGSL has no preprocessor,
-/// so we own one canonical copy here.)
-pub(crate) const GOLDILOCKS_ARITH_WGSL: &str =
-    include_str!("../../kernels/portable/goldilocks_arith.wgsl");
+/// Built by prepending the shared `goldilocks_arith_helpers.wgsl`
+/// prelude to the test-kernel body. The same prelude is concatenated
+/// into every other Goldilocks WGSL kernel (Stockham, scale, etc.)
+/// — WGSL has no `#include`, so host-side concatenation is the only
+/// way to share helper definitions. See
+/// `crate::ntt::goldilocks::arith_helpers` for the canonical prelude.
+pub(crate) const GOLDILOCKS_ARITH_WGSL: &str = concat!(
+    include_str!("../../kernels/portable/goldilocks_arith_helpers.wgsl"),
+    include_str!("../../kernels/portable/goldilocks_arith.wgsl"),
+);
 
 const KERNEL_ENTRY_POINT: &str = "gl_test_arith";
 const BIND_GROUP_LAYOUT_LABEL: &str = "Goldilocks arith test BGL";

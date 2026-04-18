@@ -38,4 +38,7 @@
 //! native int64 as a proven-on-a-specific-(backend, driver) fast path.
 
 pub(crate) mod arith_test;
+pub(crate) mod plan;
 pub(crate) mod resolve;
+
+pub use plan::WgpuGoldilocksNttPlan;
