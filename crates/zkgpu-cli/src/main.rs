@@ -168,6 +168,11 @@ enum CliMode {
     Benchmark,
     /// Soak test: run sustained NTT for a fixed duration, recording per-iteration samples.
     Soak { duration_secs: u32 },
+    /// Phase F.3.c: run a hash suite (currently only Poseidon2). The
+    /// positional `sizes` list is reinterpreted as per-case
+    /// permutation batch counts, not `log_n` values — each entry
+    /// becomes one `HashCaseSpec` with `num_permutations = size`.
+    Hash { algorithm: zkgpu_report::HashAlgorithm },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,6 +228,10 @@ fn make_data(log_n: u32) -> Vec<BabyBear> {
 const WARM_UP_ITERS: usize = 2;
 const BENCH_ITERS: usize = 5;
 const DEFAULT_SIZES: [u32; 4] = [10, 14, 18, 20];
+/// Default per-case permutation counts when `--hash` is set and the
+/// user doesn't pass positional args. Log-spaced to give a throughput
+/// curve without taking too long even at the top end.
+const DEFAULT_HASH_BATCH_SIZES: [u32; 4] = [1_024, 16_384, 65_536, 262_144];
 
 fn bench_cpu(data: &[BabyBear], direction: NttDirection) -> f64 {
     for _ in 0..WARM_UP_ITERS {
@@ -672,15 +681,25 @@ fn goldilocks_dispatch_count(log_n: u32, direction: NttDirection) -> u32 {
 fn usage() -> &'static str {
     "Usage: zkgpu [--json] [--field babybear|goldilocks] \\
                [--force-family auto|stockham|four-step] \\
-               [--force-tail auto|local|global] [--soak SECS] [log_n...]
+               [--force-tail auto|local|global] \\
+               [--soak SECS | --hash poseidon2] [SIZE...]
 
-Modes:
-  (default)      Short benchmark: warmup + 5 measured iterations per size
-  --soak SECS    Sustained soak: run each size for SECS seconds, recording
-                 per-iteration samples for thermal characterization
-                 (BabyBear + Goldilocks; Goldilocks soak wires through
-                 execute_profiled so median_gpu_ns populates on adapters
-                 with TIMESTAMP_QUERY support)
+Modes (mutually exclusive):
+  (default)      NTT benchmark: warmup + 5 measured iterations per size
+                 (SIZE = log_n).
+  --soak SECS    Sustained NTT soak: run each size for SECS seconds,
+                 recording per-iteration samples for thermal
+                 characterization. BabyBear + Goldilocks (Phase E.2.c/d
+                 wires Goldilocks through execute_profiled so
+                 median_gpu_ns populates on adapters with
+                 TIMESTAMP_QUERY support).
+  --hash ALG     Hash benchmark (Phase F.3.c). ALG = 'poseidon2' today.
+                 SIZE = num_permutations per case. Uses the testkit's
+                 run_hash_suite with profile_gpu_timestamps=true, 1
+                 warmup + 5 measured, SplitMix64 input pattern. Wall-
+                 only timings today; gpu_total_ns populates once a
+                 future sub-phase adds execute_profiled to the
+                 Poseidon2 plans.
 
 Overrides:
   --field          Which prime field to target (default: babybear).
@@ -714,7 +733,10 @@ Examples:
   zkgpu --soak 30 18 20
   zkgpu --soak 60 --json 20
   zkgpu --field goldilocks 10 18
-  zkgpu --field goldilocks --json 10 14 18 20"
+  zkgpu --field goldilocks --json 10 14 18 20
+  zkgpu --hash poseidon2
+  zkgpu --hash poseidon2 --field goldilocks 1024 16384 65536
+  zkgpu --hash poseidon2 --field babybear --json 4096"
 }
 
 fn parse_cli_args<I>(args: I) -> Result<CliArgs, String>
@@ -727,6 +749,7 @@ where
     let mut tail_override = TailOverride::Auto;
     let mut sizes = Vec::new();
     let mut soak_secs: Option<u32> = None;
+    let mut hash_algorithm: Option<zkgpu_report::HashAlgorithm> = None;
 
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
@@ -805,26 +828,70 @@ where
                 }
                 soak_secs = Some(secs);
             }
+            "--hash" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "--hash requires an algorithm (e.g. 'poseidon2')".to_string())?;
+                hash_algorithm = Some(
+                    value.parse::<zkgpu_report::HashAlgorithm>().map_err(|e| {
+                        format!("invalid --hash value '{value}': {e}")
+                    })?,
+                );
+            }
+            _ if arg.starts_with("--hash=") => {
+                let value = &arg["--hash=".len()..];
+                hash_algorithm = Some(
+                    value.parse::<zkgpu_report::HashAlgorithm>().map_err(|e| {
+                        format!("invalid --hash value '{value}': {e}")
+                    })?,
+                );
+            }
             _ if arg.starts_with('-') => {
                 return Err(format!("unrecognized option '{arg}'"));
             }
             _ => {
-                let log_n = arg
+                // Positional ints are interpreted per-mode:
+                //   NTT modes: log_n values
+                //   Hash mode: num_permutations counts
+                // The error message adapts accordingly when we know
+                // the mode; during parsing the mode isn't fixed yet,
+                // so use a neutral phrasing.
+                let value = arg
                     .parse::<u32>()
-                    .map_err(|_| format!("invalid log_n '{arg}'"))?;
-                sizes.push(log_n);
+                    .map_err(|_| format!("invalid positional size '{arg}' (expected a non-negative integer)"))?;
+                sizes.push(value);
             }
         }
     }
 
-    if sizes.is_empty() {
-        sizes = DEFAULT_SIZES.to_vec();
+    // Mutual exclusion: --hash and --soak target different runners.
+    // A hash-soak mode doesn't exist today (sustained-hash
+    // thermal-characterisation is a separate workload; Phase F
+    // scope ships benchmark-only).
+    if hash_algorithm.is_some() && soak_secs.is_some() {
+        return Err(
+            "--hash and --soak are mutually exclusive; pick one (hash-soak \
+             is not supported yet)"
+                .to_string(),
+        );
     }
 
-    let mode = match soak_secs {
-        Some(secs) => CliMode::Soak { duration_secs: secs },
-        None => CliMode::Benchmark,
+    let mode = match (hash_algorithm, soak_secs) {
+        (Some(algorithm), None) => CliMode::Hash { algorithm },
+        (None, Some(secs)) => CliMode::Soak { duration_secs: secs },
+        (None, None) => CliMode::Benchmark,
+        (Some(_), Some(_)) => unreachable!("guarded by the mutual-exclusion check above"),
     };
+
+    // Default positional list: for NTT modes it's `log_n`, for hash
+    // it's `num_permutations`. Pick per-mode defaults so a bare
+    // `zkgpu --hash poseidon2` still runs something useful.
+    if sizes.is_empty() {
+        sizes = match &mode {
+            CliMode::Hash { .. } => DEFAULT_HASH_BATCH_SIZES.to_vec(),
+            _ => DEFAULT_SIZES.to_vec(),
+        };
+    }
 
     Ok(CliArgs {
         json_mode,
@@ -871,7 +938,7 @@ fn main() {
         );
     }
 
-    match cli.mode {
+    match cli.mode.clone() {
         CliMode::Benchmark => run_benchmark_mode(&device, &cli),
         CliMode::Soak { duration_secs } => {
             // Soak mode uses the canonical testkit runner which creates its
@@ -879,6 +946,13 @@ fn main() {
             // holding two GPU device handles.
             drop(device);
             run_soak_mode(&cli, duration_secs);
+        }
+        CliMode::Hash { algorithm } => {
+            // Hash mode delegates to the testkit (zkgpu_testkit::run_hash_suite),
+            // which creates its own device. Drop the one we built for
+            // NTT-shaped startup diagnostics to avoid double-holding.
+            drop(device);
+            run_hash_mode(&cli, algorithm);
         }
     }
 }
@@ -1042,6 +1116,152 @@ fn run_soak_mode(cli: &CliArgs, duration_secs: u32) {
     } else {
         print_soak_table(&report);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Hash mode (Phase F.3.c) — delegates to zkgpu_testkit::run_hash_suite
+// ---------------------------------------------------------------------------
+
+fn run_hash_mode(cli: &CliArgs, algorithm: zkgpu_report::HashAlgorithm) {
+    eprintln!(
+        "Hash mode: algorithm={} field={}",
+        algorithm.as_str(),
+        cli.field.as_str(),
+    );
+
+    // Build one case per positional `num_permutations` entry. All
+    // cases share profiling + iteration settings (1 warmup, 5
+    // measured) so throughput-curve interpretation is consistent
+    // across rows. Matches the `poseidon2_benchmark_suite` convention
+    // but is driven by the operator's CLI-supplied batch list.
+    let mut cases = Vec::with_capacity(cli.sizes.len());
+    for &num in &cli.sizes {
+        cases.push(
+            zkgpu_report::HashCaseSpec::new(
+                format!("hash_{}_n{num}", algorithm.as_str()),
+                num,
+                // SplitMix64 spreads across both u32x2 limbs on
+                // 64-bit fields so the Goldilocks path is
+                // meaningfully exercised alongside BabyBear.
+                zkgpu_report::HashInputPattern::SplitMix64 { seed: 1 },
+            )
+            .with_profile(true)
+            .with_iterations(1, 5),
+        );
+    }
+
+    let spec = zkgpu_report::HashSpec {
+        kind: zkgpu_report::SuiteKind::Benchmark,
+        cases,
+        fail_fast: false,
+        algorithm,
+        field: cli.field,
+    };
+
+    let report = match zkgpu_testkit::run_hash_suite(&spec) {
+        Ok(r) => r,
+        Err(err) => {
+            eprintln!("Hash suite failed: {err}");
+            std::process::exit(1);
+        }
+    };
+
+    // Progress summary to stderr (JSON / table go to stdout below).
+    for c in &report.cases {
+        let ns_to_us = |ns: u64| ns as f64 / 1_000.0;
+        if let Some(ref err) = c.error {
+            eprintln!(
+                "  {} (n={}): FAILED — {}",
+                c.name, c.num_permutations, err,
+            );
+        } else {
+            let wall_us = c.timings.wall_time_ns.map(ns_to_us).unwrap_or(0.0);
+            // Throughput rate: permutations per second. Averaged over
+            // `iterations` already (wall_time_ns is per-iteration avg).
+            let perms_per_sec = if wall_us > 0.0 {
+                (c.num_permutations as f64) * 1_000_000.0 / wall_us
+            } else {
+                0.0
+            };
+            eprintln!(
+                "  {}  n={}  family={}  wall={:.0}us  {:.2}M perms/s  {}",
+                c.name,
+                c.num_permutations,
+                c.kernel_family.as_deref().unwrap_or("?"),
+                wall_us,
+                perms_per_sec / 1e6,
+                if c.passed {
+                    "PASS".to_string()
+                } else {
+                    format!("FAIL ({} mismatches)", c.mismatch_count)
+                },
+            );
+        }
+    }
+
+    if cli.json_mode {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .expect("failed to serialize hash report")
+        );
+    } else {
+        print_hash_table(&report);
+    }
+
+    // Non-zero exit if any case failed, matching the soak contract.
+    if report.summary.failed_cases > 0 {
+        std::process::exit(1);
+    }
+}
+
+fn print_hash_table(report: &zkgpu_report::HashSuiteReport) {
+    let d = &report.device;
+    println!();
+    println!(
+        "Device: {} ({}) tier={}",
+        d.name, d.backend, d.tier,
+    );
+    println!("Field: {}", report.kernel.field);
+    println!("Algorithm: {}", report.kernel.ntt_variant);
+    println!();
+    println!(
+        "{:<24} {:>10} {:>12} {:>14} {:>8}",
+        "case", "n", "wall (us)", "M perms/s", "status",
+    );
+    println!("{}", "-".repeat(72));
+    for c in &report.cases {
+        let wall_us = c
+            .timings
+            .wall_time_ns
+            .map(|ns| ns as f64 / 1_000.0)
+            .unwrap_or(0.0);
+        let perms_per_sec = if wall_us > 0.0 {
+            (c.num_permutations as f64) * 1_000_000.0 / wall_us
+        } else {
+            0.0
+        };
+        let status = if let Some(ref _e) = c.error {
+            "ERROR"
+        } else if c.passed {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        println!(
+            "{:<24} {:>10} {:>12.0} {:>14.2} {:>8}",
+            c.name,
+            c.num_permutations,
+            wall_us,
+            perms_per_sec / 1e6,
+            status,
+        );
+    }
+    println!();
+    println!(
+        "Summary: {}/{} cases passed",
+        report.summary.passed_cases, report.summary.total_cases,
+    );
 }
 
 fn print_soak_table(report: &zkgpu_report::SoakSuiteReport) {
@@ -1226,6 +1446,80 @@ mod tests {
     fn parse_field_requires_value() {
         let err = parse_cli_args(vec!["--field".to_string()]).unwrap_err();
         assert!(err.contains("--field"), "expected error about --field: {err}");
+    }
+
+    // === Phase F.3.c: --hash parsing ===
+
+    #[test]
+    fn parse_hash_poseidon2_split_form() {
+        let parsed = parse_cli_args(vec![
+            "--hash".to_string(),
+            "poseidon2".to_string(),
+            "1024".to_string(),
+            "4096".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(
+            parsed.mode,
+            CliMode::Hash {
+                algorithm: zkgpu_report::HashAlgorithm::Poseidon2
+            }
+        );
+        assert_eq!(parsed.sizes, vec![1024, 4096]);
+    }
+
+    #[test]
+    fn parse_hash_poseidon2_equals_form() {
+        let parsed = parse_cli_args(vec!["--hash=poseidon2".to_string()]).unwrap();
+        assert!(matches!(parsed.mode, CliMode::Hash { .. }));
+    }
+
+    #[test]
+    fn parse_hash_defaults_to_batch_ladder_when_no_positional() {
+        let parsed = parse_cli_args(vec!["--hash".to_string(), "poseidon2".to_string()])
+            .unwrap();
+        assert_eq!(parsed.sizes, DEFAULT_HASH_BATCH_SIZES.to_vec());
+    }
+
+    #[test]
+    fn parse_hash_rejects_unknown_algorithm() {
+        let err = parse_cli_args(vec!["--hash=rescue".to_string()]).unwrap_err();
+        assert!(
+            err.contains("rescue"),
+            "error should echo the unknown algorithm: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_hash_requires_value() {
+        let err = parse_cli_args(vec!["--hash".to_string()]).unwrap_err();
+        assert!(err.contains("--hash"), "expected error about --hash: {err}");
+    }
+
+    #[test]
+    fn parse_hash_and_soak_are_mutually_exclusive() {
+        let err = parse_cli_args(vec![
+            "--hash=poseidon2".to_string(),
+            "--soak=30".to_string(),
+        ])
+        .unwrap_err();
+        assert!(
+            err.contains("mutually exclusive"),
+            "expected mutual-exclusion error: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_hash_accepts_goldilocks_field() {
+        let parsed = parse_cli_args(vec![
+            "--hash=poseidon2".to_string(),
+            "--field=goldilocks".to_string(),
+            "256".to_string(),
+        ])
+        .unwrap();
+        assert!(matches!(parsed.mode, CliMode::Hash { .. }));
+        assert_eq!(parsed.field, Field::Goldilocks);
+        assert_eq!(parsed.sizes, vec![256]);
     }
 
     #[test]
