@@ -563,6 +563,112 @@ pub struct GoldilocksSoakMeasurement {
     pub last_output: Vec<Goldilocks>,
 }
 
+// ---------------------------------------------------------------------------
+// Poseidon2 measurement paths (Phase F.3.b)
+// ---------------------------------------------------------------------------
+//
+// Parallel to `measure_plan` / `measure_goldilocks_plan`. Shipped
+// wall-only because the Poseidon2 plans only expose sync non-profiled
+// `execute` today. `profile_gpu_timestamps = true` is accepted on the
+// `HashCaseSpec` but silently degrades to wall-only — matching the
+// pre-E.2.c Goldilocks NTT sequence, to be lifted when a dedicated
+// F.3.* sub-phase adds `execute_profiled` / `execute_profiled_async`
+// to both Poseidon2 plans.
+
+use zkgpu_wgpu::{WgpuBabyBearPoseidon2Plan, WgpuGoldilocksPoseidon2Plan};
+
+pub struct Poseidon2PlanMeasurement<F> {
+    pub timings: TimingReport,
+    pub final_output: Vec<F>,
+}
+
+pub fn measure_babybear_poseidon2_plan(
+    device: &WgpuDevice,
+    data: &[BabyBear],
+    plan: &mut WgpuBabyBearPoseidon2Plan,
+    warmup_iterations: u32,
+    iterations: u32,
+    _profile_gpu_timestamps: bool,
+) -> Result<Poseidon2PlanMeasurement<BabyBear>, zkgpu_core::ZkGpuError> {
+    let measured = iterations.max(1);
+
+    // Warmup (discarded, non-profiled).
+    for _ in 0..warmup_iterations {
+        let mut buf = device.upload(data)?;
+        plan.execute(device, &mut buf)?;
+    }
+
+    let mut wall_total = Duration::ZERO;
+    let mut final_output = None;
+
+    for iter_idx in 0..measured {
+        let mut buf = device.upload(data)?;
+        let start = Instant::now();
+        plan.execute(device, &mut buf)?;
+        wall_total += start.elapsed();
+
+        if iter_idx + 1 == measured {
+            final_output = Some(buf.read_to_vec()?);
+        }
+    }
+
+    let wall_avg_ns =
+        (wall_total.as_secs_f64() * 1_000_000_000.0 / measured as f64) as u64;
+
+    Ok(Poseidon2PlanMeasurement {
+        timings: TimingReport {
+            wall_time_ns: Some(wall_avg_ns),
+            gpu_total_ns: None,
+            gpu_stage_ns: Vec::new(),
+        },
+        final_output: final_output
+            .expect("measured loop always captures the final GPU output"),
+    })
+}
+
+pub fn measure_goldilocks_poseidon2_plan(
+    device: &WgpuDevice,
+    data: &[Goldilocks],
+    plan: &mut WgpuGoldilocksPoseidon2Plan,
+    warmup_iterations: u32,
+    iterations: u32,
+    _profile_gpu_timestamps: bool,
+) -> Result<Poseidon2PlanMeasurement<Goldilocks>, zkgpu_core::ZkGpuError> {
+    let measured = iterations.max(1);
+
+    for _ in 0..warmup_iterations {
+        let mut buf = device.upload(data)?;
+        plan.execute(device, &mut buf)?;
+    }
+
+    let mut wall_total = Duration::ZERO;
+    let mut final_output = None;
+
+    for iter_idx in 0..measured {
+        let mut buf = device.upload(data)?;
+        let start = Instant::now();
+        plan.execute(device, &mut buf)?;
+        wall_total += start.elapsed();
+
+        if iter_idx + 1 == measured {
+            final_output = Some(buf.read_to_vec()?);
+        }
+    }
+
+    let wall_avg_ns =
+        (wall_total.as_secs_f64() * 1_000_000_000.0 / measured as f64) as u64;
+
+    Ok(Poseidon2PlanMeasurement {
+        timings: TimingReport {
+            wall_time_ns: Some(wall_avg_ns),
+            gpu_total_ns: None,
+            gpu_stage_ns: Vec::new(),
+        },
+        final_output: final_output
+            .expect("measured loop always captures the final GPU output"),
+    })
+}
+
 fn percentile(sorted: &[u64], pct: u32) -> u64 {
     if sorted.is_empty() {
         return 0;

@@ -1,6 +1,7 @@
 mod benchmark;
 mod case;
 mod device;
+mod hash_runner;
 mod inputs;
 mod report;
 mod runner;
@@ -34,6 +35,9 @@ pub use zkgpu_report::{
 pub use zkgpu_report::{
     poseidon2_benchmark_suite, poseidon2_smoke_suite, HashAlgorithm, HashCaseReport,
     HashCaseSpec, HashInputPattern, HashSpec, HashSuiteReport,
+};
+pub use hash_runner::{
+    run_hash_suite, run_poseidon2_benchmark_suite, run_poseidon2_smoke_suite,
 };
 
 #[derive(Debug, Error)]

@@ -1,5 +1,7 @@
 use zkgpu_babybear::{BabyBear, P as BB_P};
 use zkgpu_goldilocks::{Goldilocks, P as GL_P};
+use zkgpu_poseidon2::WIDTH as POSEIDON2_WIDTH;
+use zkgpu_report::HashInputPattern;
 
 use crate::suite::InputPattern;
 
@@ -49,6 +51,75 @@ pub fn make_goldilocks_input(log_n: u32, pattern: &InputPattern) -> Vec<Goldiloc
                     .wrapping_add(seed.wrapping_mul(1442695040888963407));
                 Goldilocks::new(v % GL_P)
             })
+            .collect(),
+    }
+}
+
+/// SplitMix64-style mixer used by both hash-input paths. Factored
+/// out so BabyBear and Goldilocks generators produce byte-identical
+/// `(permutation_index, slot)` → seed state, which keeps diff tests
+/// portable across fields.
+fn hash_mix64(idx: u64, seed: u64) -> u64 {
+    // Constants lifted from the canonical SplitMix64; two mix rounds
+    // are enough to decorrelate neighbouring `idx` inputs.
+    let mut z = idx.wrapping_add(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Build a flat Poseidon2 state batch for BabyBear. Output length is
+/// `num_permutations * zkgpu_poseidon2::WIDTH`; each `WIDTH`-element
+/// block is one independent permutation instance.
+///
+/// Phase F.3.b — input shape matches what
+/// [`zkgpu_wgpu::WgpuBabyBearPoseidon2Plan::execute`] expects.
+pub fn make_babybear_hash_input(
+    num_permutations: u32,
+    pattern: &HashInputPattern,
+) -> Vec<BabyBear> {
+    let total = (num_permutations as usize) * POSEIDON2_WIDTH;
+    match pattern {
+        HashInputPattern::AllZeros => vec![BabyBear::new(0); total],
+        HashInputPattern::AllOnes => vec![BabyBear::new(1); total],
+        HashInputPattern::Sequential => (0..num_permutations)
+            .flat_map(|p| {
+                (0..POSEIDON2_WIDTH as u32).map(move |i| {
+                    // `p * WIDTH + i + 1`, reduced mod BabyBear. The
+                    // `+1` keeps slot 0 from being the identity input.
+                    let raw = (p as u64) * (POSEIDON2_WIDTH as u64) + (i as u64) + 1;
+                    BabyBear::new((raw % (BB_P as u64)) as u32)
+                })
+            })
+            .collect(),
+        HashInputPattern::SplitMix64 { seed } => (0..total as u64)
+            .map(|idx| BabyBear::new((hash_mix64(idx, *seed) % (BB_P as u64)) as u32))
+            .collect(),
+    }
+}
+
+/// Goldilocks twin of [`make_babybear_hash_input`]. The mixer output
+/// is reduced mod the 64-bit Goldilocks modulus so the second u32
+/// limb is populated for about half of the samples — ensures GPU
+/// u32x2 arithmetic is exercised by the differential tests.
+pub fn make_goldilocks_hash_input(
+    num_permutations: u32,
+    pattern: &HashInputPattern,
+) -> Vec<Goldilocks> {
+    let total = (num_permutations as usize) * POSEIDON2_WIDTH;
+    match pattern {
+        HashInputPattern::AllZeros => vec![Goldilocks::new(0); total],
+        HashInputPattern::AllOnes => vec![Goldilocks::new(1); total],
+        HashInputPattern::Sequential => (0..num_permutations)
+            .flat_map(|p| {
+                (0..POSEIDON2_WIDTH as u32).map(move |i| {
+                    let raw = (p as u64) * (POSEIDON2_WIDTH as u64) + (i as u64) + 1;
+                    Goldilocks::new(raw % GL_P)
+                })
+            })
+            .collect(),
+        HashInputPattern::SplitMix64 { seed } => (0..total as u64)
+            .map(|idx| Goldilocks::new(hash_mix64(idx, *seed) % GL_P))
             .collect(),
     }
 }
