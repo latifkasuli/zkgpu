@@ -613,16 +613,17 @@ fn run_roundtrip_case(
 }
 
 // ---------------------------------------------------------------------------
-// Goldilocks runner path (Phase E.1.c)
+// Goldilocks runner path (Phase E.1.c, profiled in E.2.c/d)
 // ---------------------------------------------------------------------------
 //
 // Kept as a parallel path to [`run_case`] rather than unified through a
 // generic plan/buffer trait. Goldilocks-specific behavior:
 //   - No `family_override` / `stockham_tail_override` / `r8_override`
 //     plumbing — the Goldilocks plan picks R2 vs R4 from `log_n` parity
-//     and has no Four-Step equivalent in Phase E.1.
-//   - No profiled-execute path yet, so `gpu_total_ns` / `gpu_stage_ns`
-//     in the returned `TimingReport` are always `None` / empty.
+//     and has no Four-Step or local-fused-tail equivalent.
+//   - `profile_gpu_timestamps` is threaded through since E.2.d via
+//     `measure_goldilocks_plan`; populates `gpu_total_ns` / `gpu_stage_ns`
+//     on adapters with TIMESTAMP_QUERY support when the flag is on.
 //   - `kernel_family` reports `"goldilocks-portable-r4"` or `"-r2"` so
 //     downstream `derive_kernel_variant` can distinguish Goldilocks
 //     runs from BabyBear in mixed-field reports (future scope).
