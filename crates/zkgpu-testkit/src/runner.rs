@@ -365,6 +365,7 @@ fn run_soak_case_goldilocks(
         &mut plan,
         duration,
         case.warmup_iterations.max(2),
+        case.profile_gpu_timestamps,
     ) {
         Ok(m) => m,
         Err(err) => {
@@ -666,6 +667,7 @@ fn run_single_direction_goldilocks(
         &mut plan,
         case.warmup_iterations,
         case.iterations,
+        case.profile_gpu_timestamps,
     ) {
         Ok(m) => m,
         Err(err) => {
@@ -726,6 +728,7 @@ fn run_roundtrip_goldilocks(
         &mut forward,
         case.warmup_iterations,
         case.iterations,
+        case.profile_gpu_timestamps,
     ) {
         Ok(m) => m,
         Err(err) => {
@@ -738,6 +741,7 @@ fn run_roundtrip_goldilocks(
         &mut inverse,
         case.warmup_iterations,
         case.iterations,
+        case.profile_gpu_timestamps,
     ) {
         Ok(m) => m,
         Err(err) => {
@@ -1452,5 +1456,137 @@ mod tests {
                 name = case.name,
             );
         }
+    }
+
+    // === Phase E.2.d: runner parity for profile_gpu_timestamps ===
+
+    /// A Goldilocks benchmark case with `profile_gpu_timestamps = true`
+    /// must populate `gpu_total_ns` on adapters that advertise
+    /// `TIMESTAMP_QUERY`. Before E.2.d the testkit ignored the flag
+    /// on the Goldilocks path — a spec that populated timings on the
+    /// browser runner silently degraded to wall-only here.
+    #[test]
+    fn goldilocks_benchmark_honors_profile_gpu_timestamps_flag() {
+        let Some(device) = WgpuDevice::new().ok() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        if !device.caps().has_timestamp_query {
+            eprintln!("skipping: adapter has no TIMESTAMP_QUERY support");
+            return;
+        }
+        // Synthetic benchmark case — small log_n so the test runs
+        // quickly, but iterations=3 so we accumulate a non-zero sum
+        // even under Metal's timestamp-query quantization at log_n=6.
+        let spec = SuiteSpec {
+            kind: zkgpu_report::SuiteKind::Benchmark,
+            cases: vec![CaseSpec::new(
+                "gl_profiled",
+                10,
+                TestDirection::Forward,
+                zkgpu_report::InputPattern::Sequential,
+            )
+            .with_iterations(1, 3)
+            .with_profile(true)],
+            fail_fast: true,
+            field: Field::Goldilocks,
+            family_override: FamilyOverride::Auto,
+            stockham_tail_override: StockhamTailOverride::Auto,
+            r8_max_log_leaf_override: None,
+        };
+        let report = run_suite(&spec).expect("profiled goldilocks benchmark must run");
+        assert_eq!(report.cases.len(), 1);
+        let case = &report.cases[0];
+        assert!(case.passed, "validation must pass: {case:?}");
+        assert!(
+            case.timings.gpu_total_ns.is_some(),
+            "profile_gpu_timestamps=true must populate gpu_total_ns; got {:?}",
+            case.timings,
+        );
+    }
+
+    /// Mirror: `profile_gpu_timestamps = false` on a Goldilocks case
+    /// must NOT populate `gpu_total_ns`, matching the BabyBear
+    /// contract. Pre-E.2.d the Goldilocks testkit path always
+    /// returned `None` (because it ignored the flag entirely); this
+    /// test locks the opt-out semantics after the flag was wired.
+    #[test]
+    fn goldilocks_benchmark_skips_profiling_when_flag_false() {
+        if WgpuDevice::new().is_err() {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        }
+        let spec = SuiteSpec {
+            kind: zkgpu_report::SuiteKind::Benchmark,
+            cases: vec![CaseSpec::new(
+                "gl_wall_only",
+                10,
+                TestDirection::Forward,
+                zkgpu_report::InputPattern::Sequential,
+            )
+            .with_iterations(1, 2)
+            .with_profile(false)],
+            fail_fast: true,
+            field: Field::Goldilocks,
+            family_override: FamilyOverride::Auto,
+            stockham_tail_override: StockhamTailOverride::Auto,
+            r8_max_log_leaf_override: None,
+        };
+        let report = run_suite(&spec).expect("non-profiled goldilocks benchmark must run");
+        let case = &report.cases[0];
+        assert!(case.passed);
+        assert!(
+            case.timings.gpu_total_ns.is_none(),
+            "profile_gpu_timestamps=false must leave gpu_total_ns unset; got {:?}",
+            case.timings.gpu_total_ns,
+        );
+        assert!(
+            case.timings.gpu_stage_ns.is_empty(),
+            "non-profiled path must not emit stage timings"
+        );
+    }
+
+    /// Goldilocks soak must respect `profile_gpu_timestamps = false`
+    /// — pre-E.2.d, `run_soak_case_goldilocks` always profiled
+    /// unconditionally, which meant a shared soak CaseSpec with the
+    /// flag off produced GPU samples on Goldilocks but wall-only on
+    /// BabyBear. This test pins the now-uniform contract.
+    #[test]
+    fn goldilocks_soak_skips_profiling_when_flag_false() {
+        if WgpuDevice::new().is_err() {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        }
+        let spec = zkgpu_report::SoakSpec {
+            duration_secs: 1,
+            cases: vec![CaseSpec::new(
+                "gl_soak_wall_only",
+                10,
+                TestDirection::Forward,
+                zkgpu_report::InputPattern::Sequential,
+            )], // profile_gpu_timestamps defaults to false
+            validate: false,
+            field: Field::Goldilocks,
+            family_override: FamilyOverride::Auto,
+            stockham_tail_override: StockhamTailOverride::Auto,
+        };
+        let report = run_soak_suite(&spec).expect("non-profiled goldilocks soak must run");
+        let case = &report.cases[0];
+        assert!(
+            case.error.is_none(),
+            "soak must not error: {:?}",
+            case.error
+        );
+        // When profiling is off, no sample should carry a GPU timestamp.
+        let with_gpu = case
+            .samples
+            .iter()
+            .filter(|s| s.gpu_total_ns.is_some())
+            .count();
+        assert_eq!(
+            with_gpu, 0,
+            "profile_gpu_timestamps=false soak must leave every sample's \
+             gpu_total_ns unset; got {with_gpu} samples with a GPU timing"
+        );
     }
 }

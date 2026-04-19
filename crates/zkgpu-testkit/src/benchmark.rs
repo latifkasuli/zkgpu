@@ -354,53 +354,79 @@ pub fn compute_soak_stats(samples: &[SoakSample], actual_duration: Duration) -> 
 
 /// Compute the k-th percentile from a sorted slice (nearest-rank method).
 // ---------------------------------------------------------------------------
-// Goldilocks measurement path (Phase E.1.c)
+// Goldilocks measurement path (Phase E.1.c, profiled in E.2.d)
 // ---------------------------------------------------------------------------
 //
-// Kept as a parallel function rather than generifying `measure_plan` because:
-//   * The Goldilocks plan has no profiled-execute variant yet (only sync
-//     `execute`), so the BabyBear path's `profile_gpu_timestamps` branch has
-//     no Goldilocks equivalent — forcing it through the same signature
-//     would be a lie.
-//   * Soak profiling for Goldilocks is an explicit Phase E.2 follow-up;
-//     flagging it here with a second monomorphic function keeps the gap
-//     visible to reviewers.
-// When a profiled-execute Goldilocks path lands, this can fold back into
-// a generic `measure_plan` via a small `MeasurablePlan` trait.
+// Parallel to [`measure_plan`] rather than generified via a trait — the
+// plan and buffer element types differ enough that a trait would force
+// lifetime/HRTB gymnastics for marginal DRY. Phase E.2.d threads
+// `profile_gpu_timestamps` through so the signature matches the
+// BabyBear path and the shared `CaseSpec.profile_gpu_timestamps`
+// contract means the same thing across runners.
 
 pub struct GoldilocksPlanMeasurement {
     pub timings: TimingReport,
     pub final_output: Vec<Goldilocks>,
 }
 
-/// Wall-time-only measurement for the Goldilocks NTT plan.
+/// Averaged per-iteration measurement for the Goldilocks NTT plan.
 ///
-/// Counterpart of [`measure_plan`] for BabyBear. No GPU timestamps — the
-/// `gpu_total_ns` / `gpu_stage_ns` fields of the returned `TimingReport`
-/// are always unset until [`WgpuGoldilocksNttPlan`] grows a profiled
-/// execute.
+/// Counterpart of [`measure_plan`] for BabyBear. When
+/// `profile_gpu_timestamps = true`, the measured loop routes through
+/// [`WgpuGoldilocksNttPlan::execute_profiled`] and averages GPU
+/// timestamps across iterations; `gpu_total_ns` and `gpu_stage_ns` are
+/// populated on adapters that advertise `TIMESTAMP_QUERY`, `None` /
+/// empty otherwise (matching the BabyBear contract). When the flag is
+/// `false`, uses the fast non-profiled `execute` and returns
+/// wall-time-only, just as BabyBear does.
 pub fn measure_goldilocks_plan(
     device: &WgpuDevice,
     data: &[Goldilocks],
     plan: &mut WgpuGoldilocksNttPlan,
     warmup_iterations: u32,
     iterations: u32,
+    profile_gpu_timestamps: bool,
 ) -> Result<GoldilocksPlanMeasurement, zkgpu_core::ZkGpuError> {
     let measured = iterations.max(1);
 
+    // Warmup always uses the non-profiled path — the timestamp-query
+    // resolve + copy has measurable overhead at small log_n, and
+    // warmup samples are discarded either way.
     for _ in 0..warmup_iterations {
         let mut buf = device.upload(data)?;
         plan.execute(device, &mut buf)?;
     }
 
     let mut wall_total = Duration::ZERO;
+    let mut gpu_total_ns_accum: f64 = 0.0;
+    let mut stage_totals: Option<Vec<(String, f64)>> = None;
+    let mut profiled_samples: u32 = 0;
     let mut final_output = None;
 
     for iter_idx in 0..measured {
         let mut buf = device.upload(data)?;
         let start = Instant::now();
-        plan.execute(device, &mut buf)?;
+        let ntt_timings = if profile_gpu_timestamps {
+            plan.execute_profiled(device, &mut buf)?
+        } else {
+            plan.execute(device, &mut buf)?;
+            None
+        };
         wall_total += start.elapsed();
+
+        if let Some(ref t) = ntt_timings {
+            gpu_total_ns_accum += t.gpu_total_ns;
+            let accum = stage_totals.get_or_insert_with(|| {
+                t.gpu_stage_ns
+                    .iter()
+                    .map(|s| (s.label.clone(), 0.0))
+                    .collect()
+            });
+            for (acc, sample) in accum.iter_mut().zip(t.gpu_stage_ns.iter()) {
+                acc.1 += sample.duration_ns;
+            }
+            profiled_samples += 1;
+        }
 
         if iter_idx + 1 == measured {
             final_output = Some(buf.read_to_vec()?);
@@ -408,32 +434,50 @@ pub fn measure_goldilocks_plan(
     }
 
     let wall_avg_ns = (wall_total.as_secs_f64() * 1_000_000_000.0 / measured as f64) as u64;
+    let (gpu_total_ns, gpu_stage_ns) = if profiled_samples > 0 {
+        let divisor = profiled_samples as f64;
+        let total = (gpu_total_ns_accum / divisor) as u64;
+        let stages = stage_totals
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(label, total)| StageTimingReport {
+                label,
+                duration_ns: (total / divisor) as u64,
+            })
+            .collect();
+        (Some(total), stages)
+    } else {
+        (None, Vec::new())
+    };
 
     Ok(GoldilocksPlanMeasurement {
         timings: TimingReport {
             wall_time_ns: Some(wall_avg_ns),
-            gpu_total_ns: None,
-            gpu_stage_ns: Vec::new(),
+            gpu_total_ns,
+            gpu_stage_ns,
         },
         final_output: final_output
             .expect("measured loop always captures the final GPU output"),
     })
 }
 
-/// Goldilocks twin of [`measure_plan_soak`] — Phase E.2.c.
+/// Goldilocks twin of [`measure_plan_soak`] — Phase E.2.c, gate
+/// added in E.2.d.
 ///
-/// Uses `WgpuGoldilocksNttPlan::execute_profiled` for per-iteration
-/// GPU timestamps so the soak report can compute the same
-/// `thermal_drift_ratio`, `median_gpu_ns`, etc. that BabyBear soak
-/// produces. When the device doesn't support `TIMESTAMP_QUERY`,
-/// `execute_profiled` returns `None` and we fall back to wall-only
-/// samples (matching the BabyBear behavior on the same adapter).
+/// When `profile_gpu_timestamps = true`, uses
+/// [`WgpuGoldilocksNttPlan::execute_profiled`] so each soak sample
+/// carries `gpu_total_ns`. When `false`, uses the non-profiled
+/// `execute` and samples carry `gpu_total_ns: None` — matching
+/// BabyBear soak semantics for the same `CaseSpec` flag so operators
+/// get wall-only stats when they explicitly opt out of profiling
+/// (e.g. to reduce per-iteration overhead on long soaks).
 pub fn measure_goldilocks_plan_soak(
     device: &WgpuDevice,
     data: &[Goldilocks],
     plan: &mut WgpuGoldilocksNttPlan,
     duration: Duration,
     warmup_iterations: u32,
+    profile_gpu_timestamps: bool,
 ) -> Result<GoldilocksSoakMeasurement, zkgpu_core::ZkGpuError> {
     // --- Warmup (discarded, not timed) ---
     for _ in 0..warmup_iterations {
@@ -454,9 +498,13 @@ pub fn measure_goldilocks_plan_soak(
         let mut buf = device.upload(data)?;
         let iter_start = Instant::now();
 
-        let gpu_ns = plan
-            .execute_profiled(device, &mut buf)?
-            .map(|t| t.gpu_total_ns as u64);
+        let gpu_ns = if profile_gpu_timestamps {
+            plan.execute_profiled(device, &mut buf)?
+                .map(|t| t.gpu_total_ns as u64)
+        } else {
+            plan.execute(device, &mut buf)?;
+            None
+        };
 
         let wall_ns = iter_start.elapsed().as_nanos() as u64;
         let elapsed_ms = soak_start.elapsed().as_millis() as u64;

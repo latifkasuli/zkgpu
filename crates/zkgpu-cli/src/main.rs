@@ -678,15 +678,21 @@ Modes:
   (default)      Short benchmark: warmup + 5 measured iterations per size
   --soak SECS    Sustained soak: run each size for SECS seconds, recording
                  per-iteration samples for thermal characterization
-                 (BabyBear only; Goldilocks soak lands in Phase E.2)
+                 (BabyBear + Goldilocks; Goldilocks soak wires through
+                 execute_profiled so median_gpu_ns populates on adapters
+                 with TIMESTAMP_QUERY support)
 
 Overrides:
   --field          Which prime field to target (default: babybear).
                    'babybear'   -> 32-bit field; full benchmark / soak surface.
                    'goldilocks' -> 64-bit portable u32x2 Stockham plan;
-                                    validation + wall-time benchmark only,
-                                    no profiled timings yet, no --force-family
-                                    or --force-tail (both silently ignored).
+                                    full benchmark + soak surface including
+                                    GPU timestamps (Phase E.2.c/d).
+                                    --force-family / --force-tail are
+                                    silently ignored: the Goldilocks plan
+                                    has no four-step or local-fused-tail
+                                    variant, and R2/R4 is picked from
+                                    log_n parity.
   --force-family   Pin the NTT family (default: auto = device-policy pick).
                    'stockham' disables four-step; 'four-step' forces it.
                    BabyBear only.
