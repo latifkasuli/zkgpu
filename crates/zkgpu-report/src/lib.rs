@@ -456,6 +456,188 @@ pub struct SuiteReport {
 }
 
 // ---------------------------------------------------------------------------
+// Hash spec/report surface (Phase F.3.a)
+// ---------------------------------------------------------------------------
+//
+// Parallel to the NTT `CaseSpec` / `SuiteSpec` / `CaseReport` /
+// `SuiteReport` family. Kept as a separate type family rather than
+// overloading the NTT spec because the vocabulary doesn't map:
+//   - NTT cases have `log_n` + `direction` (Forward / Inverse /
+//     Roundtrip). Poseidon2 has fixed width (16) and a direction-free
+//     batch model.
+//   - NTT `InputPattern::LargeValuesDescending` anchors at `P - 1 - i`
+//     in the field modulus; for a hash benchmark the analogous
+//     "saturate every field slot" pattern is `AllOnes` / `AllPMinus1`
+//     but those aren't useful axes — for hashes we care about a
+//     pseudo-random stream that spreads across both limbs on 64-bit
+//     fields so the u32x2 arithmetic is exercised.
+//
+// A future `HashSoakSpec` would sit alongside `SoakSpec` the same way.
+// For F.3.a we ship the non-soak surface only; soak is F.3.b scope.
+
+/// Which hash primitive the case / suite targets.
+///
+/// Poseidon2 is the only primitive shipped today. Future additions
+/// (Rescue, Griffin, SHA-family adapters, etc.) extend this enum
+/// behind the same harness plumbing.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum HashAlgorithm {
+    Poseidon2,
+}
+
+impl HashAlgorithm {
+    /// Lowercase canonical name — used for CLI flags and JSON
+    /// `kernel.ntt_variant` analogues. Matches the `Field::as_str`
+    /// convention.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Poseidon2 => "poseidon2",
+        }
+    }
+}
+
+impl core::str::FromStr for HashAlgorithm {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "poseidon2" | "Poseidon2" => Ok(Self::Poseidon2),
+            other => Err(format!(
+                "unknown hash algorithm `{other}` (expected `poseidon2`)"
+            )),
+        }
+    }
+}
+
+/// Input-generation pattern for a hash case.
+///
+/// Each permutation's `WIDTH`-element state is seeded from the
+/// pattern. Unlike NTT's [`InputPattern`], there's no
+/// `LargeValuesDescending` axis — for hashes the interesting
+/// differentiators are "identity" (Zeros / Ones — catches the common
+/// cold-state bug where an uninitialised state accidentally matches
+/// the zero input) and "spread" (`SplitMix64`, which on 64-bit fields
+/// exercises both u32x2 limbs per slot).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum HashInputPattern {
+    /// Every slot of every permutation is the field zero.
+    AllZeros,
+    /// Every slot is the field one.
+    AllOnes,
+    /// `slot[i] = permutation_index * slot_stride + i + 1`. Each
+    /// permutation gets a distinct block so the batch exercises
+    /// per-thread addressing.
+    Sequential,
+    /// SplitMix64-mixed: slot `i` of permutation `p` =
+    /// `mixer(p * WIDTH + i, seed)`. Reduces mod the field modulus
+    /// on the testkit side. Deterministic across runs — useful for
+    /// reproducible benchmark samples.
+    SplitMix64 { seed: u64 },
+}
+
+/// Specification for a single hash test case.
+///
+/// Unlike [`CaseSpec`], there's no `direction` (hash is one-way) and
+/// no `log_n` (width is implicit in the algorithm). The `num_permutations`
+/// field is the batch size — each `WIDTH`-element block is an
+/// independent hash instance, and the GPU plan processes them all in
+/// a single compute dispatch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HashCaseSpec {
+    pub name: String,
+    /// Number of independent permutation instances to run in this
+    /// case. Each instance is a state of `WIDTH` (= 16) field elements.
+    pub num_permutations: u32,
+    pub input: HashInputPattern,
+    #[serde(default)]
+    pub profile_gpu_timestamps: bool,
+    #[serde(default = "default_iterations")]
+    pub iterations: u32,
+    #[serde(default)]
+    pub warmup_iterations: u32,
+}
+
+impl HashCaseSpec {
+    pub fn new(
+        name: impl Into<String>,
+        num_permutations: u32,
+        input: HashInputPattern,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            num_permutations,
+            input,
+            profile_gpu_timestamps: false,
+            iterations: 1,
+            warmup_iterations: 0,
+        }
+    }
+
+    pub fn with_profile(mut self, enabled: bool) -> Self {
+        self.profile_gpu_timestamps = enabled;
+        self
+    }
+
+    pub fn with_iterations(mut self, warmup_iterations: u32, iterations: u32) -> Self {
+        self.warmup_iterations = warmup_iterations;
+        self.iterations = iterations;
+        self
+    }
+}
+
+/// Specification for a full hash suite.
+///
+/// Kind reuses [`SuiteKind`] so downstream grouping / reporting can
+/// treat hash and NTT suites uniformly. `algorithm` is a suite-level
+/// tag; if you want to A/B two algorithms, run two suites.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HashSpec {
+    pub kind: SuiteKind,
+    pub cases: Vec<HashCaseSpec>,
+    pub fail_fast: bool,
+    /// Hash primitive used by every case in the suite.
+    pub algorithm: HashAlgorithm,
+    /// Which prime field the suite targets. Defaults to `BabyBear` so
+    /// hand-written specs that omit the key don't silently switch
+    /// fields.
+    #[serde(default = "default_field")]
+    pub field: Field,
+}
+
+/// Report for a single hash case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HashCaseReport {
+    pub name: String,
+    pub num_permutations: u32,
+    pub input: HashInputPattern,
+    /// `"goldilocks-poseidon2-portable"` / `"babybear-poseidon2"` etc.
+    /// Lets mixed-field report aggregators distinguish rows without
+    /// sniffing the spec.
+    pub kernel_family: Option<String>,
+    pub passed: bool,
+    /// Number of slots whose GPU output disagreed with the CPU
+    /// reference. Summed across every validated permutation.
+    pub mismatch_count: u32,
+    /// `(permutation_index, slot_index)` of the first mismatch. `None`
+    /// when the case passed.
+    pub first_mismatch_index: Option<(u32, u32)>,
+    pub first_mismatch_gpu: Option<String>,
+    pub first_mismatch_cpu: Option<String>,
+    pub timings: TimingReport,
+    pub error: Option<String>,
+}
+
+/// Complete hash suite report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HashSuiteReport {
+    pub schema_version: u32,
+    pub suite: SuiteKind,
+    pub device: DeviceReport,
+    pub kernel: KernelReport,
+    pub cases: Vec<HashCaseReport>,
+    pub summary: SuiteSummary,
+}
+
+// ---------------------------------------------------------------------------
 // Harness request/response (shared between FFI and web harness)
 // ---------------------------------------------------------------------------
 
@@ -739,6 +921,60 @@ fn soak_spec(duration_secs: u32) -> SoakSpec {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Built-in hash suite presets (Phase F.3.a)
+// ---------------------------------------------------------------------------
+
+/// Smoke suite: a handful of small / prime-count batches that cover
+/// every validation path (zeros, ones, sequential, RNG spread) without
+/// taking more than a second even on the slowest mobile adapter.
+pub fn poseidon2_smoke_suite() -> HashSpec {
+    HashSpec {
+        kind: SuiteKind::Smoke,
+        cases: vec![
+            HashCaseSpec::new("poseidon2_smoke_single", 1, HashInputPattern::Sequential),
+            // 17 is prime — catches any 2D-fold dispatch off-by-one the
+            // same way the NTT smoke picks odd sizes.
+            HashCaseSpec::new("poseidon2_smoke_batch17", 17, HashInputPattern::Sequential),
+            HashCaseSpec::new("poseidon2_smoke_zeros", 8, HashInputPattern::AllZeros),
+            HashCaseSpec::new("poseidon2_smoke_ones", 8, HashInputPattern::AllOnes),
+            HashCaseSpec::new(
+                "poseidon2_smoke_rng",
+                32,
+                HashInputPattern::SplitMix64 { seed: 0xCAFE_BABE_DEAD_BEEF },
+            ),
+        ],
+        fail_fast: true,
+        algorithm: HashAlgorithm::Poseidon2,
+        field: Field::BabyBear,
+    }
+}
+
+/// Benchmark suite: a log-spaced batch-size ladder with profiling
+/// enabled. Parallels the NTT `benchmark_suite` convention of
+/// progressively larger workloads so per-case throughput curves can
+/// be plotted.
+pub fn poseidon2_benchmark_suite() -> HashSpec {
+    let benchmark_case = |name: &str, num: u32| {
+        HashCaseSpec::new(name, num, HashInputPattern::SplitMix64 { seed: 1 })
+            .with_profile(true)
+            .with_iterations(1, 5)
+    };
+
+    HashSpec {
+        kind: SuiteKind::Benchmark,
+        cases: vec![
+            benchmark_case("poseidon2_bench_1k", 1_024),
+            benchmark_case("poseidon2_bench_16k", 16_384),
+            benchmark_case("poseidon2_bench_65k", 65_536),
+            benchmark_case("poseidon2_bench_256k", 262_144),
+        ],
+        fail_fast: false,
+        algorithm: HashAlgorithm::Poseidon2,
+        field: Field::BabyBear,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -933,5 +1169,156 @@ mod tests {
         let json = serde_json::to_string(&spec).unwrap();
         let parsed: SuiteSpec = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.field, Field::Goldilocks);
+    }
+
+    // ----- Phase F.3.a: hash spec/report surface -----
+
+    #[test]
+    fn hash_algorithm_parses_and_displays() {
+        use core::str::FromStr;
+        assert_eq!(
+            HashAlgorithm::from_str("poseidon2").unwrap(),
+            HashAlgorithm::Poseidon2
+        );
+        assert_eq!(
+            HashAlgorithm::from_str("Poseidon2").unwrap(),
+            HashAlgorithm::Poseidon2
+        );
+        assert!(HashAlgorithm::from_str("rescue").is_err());
+        assert_eq!(HashAlgorithm::Poseidon2.as_str(), "poseidon2");
+    }
+
+    #[test]
+    fn poseidon2_smoke_suite_has_expected_shape() {
+        let suite = poseidon2_smoke_suite();
+        assert_eq!(suite.kind, SuiteKind::Smoke);
+        assert_eq!(suite.algorithm, HashAlgorithm::Poseidon2);
+        assert_eq!(suite.field, Field::BabyBear);
+        assert!(suite.fail_fast);
+        assert_eq!(suite.cases.len(), 5);
+        // No profiled cases in smoke — matches NTT smoke convention.
+        for c in &suite.cases {
+            assert!(!c.profile_gpu_timestamps, "smoke should not profile");
+        }
+    }
+
+    #[test]
+    fn poseidon2_benchmark_suite_enables_profiling_and_iterates() {
+        let suite = poseidon2_benchmark_suite();
+        assert_eq!(suite.kind, SuiteKind::Benchmark);
+        assert!(!suite.fail_fast);
+        assert!(suite
+            .cases
+            .iter()
+            .all(|c| c.profile_gpu_timestamps && c.iterations == 5 && c.warmup_iterations == 1));
+        // Sizes should be strictly ascending — lets downstream
+        // throughput-per-permutation curves interpret the ladder
+        // without sorting.
+        let mut prev = 0u32;
+        for c in &suite.cases {
+            assert!(c.num_permutations > prev, "non-monotonic batch sizes");
+            prev = c.num_permutations;
+        }
+    }
+
+    #[test]
+    fn hash_spec_round_trips_json() {
+        let spec = poseidon2_benchmark_suite();
+        let json = serde_json::to_string(&spec).unwrap();
+        let parsed: HashSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.algorithm, HashAlgorithm::Poseidon2);
+        assert_eq!(parsed.field, Field::BabyBear);
+        assert_eq!(parsed.cases.len(), spec.cases.len());
+    }
+
+    #[test]
+    fn hash_spec_defaults_field_to_babybear_when_omitted() {
+        // Legacy JSON shape — algorithm is required, field is not.
+        let json = r#"{
+            "kind": "Smoke",
+            "cases": [],
+            "fail_fast": true,
+            "algorithm": "Poseidon2"
+        }"#;
+        let parsed: HashSpec = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.field, Field::BabyBear);
+    }
+
+    #[test]
+    fn hash_case_spec_defaults_iterations() {
+        // Minimal case spec — only required keys.
+        let json = r#"{
+            "name": "gl_1k",
+            "num_permutations": 1024,
+            "input": "AllZeros"
+        }"#;
+        let parsed: HashCaseSpec = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.iterations, 1);
+        assert_eq!(parsed.warmup_iterations, 0);
+        assert!(!parsed.profile_gpu_timestamps);
+    }
+
+    #[test]
+    fn hash_input_pattern_splitmix_round_trips() {
+        let p = HashInputPattern::SplitMix64 { seed: 0xDEAD_BEEF };
+        let json = serde_json::to_string(&p).unwrap();
+        let parsed: HashInputPattern = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, p);
+    }
+
+    #[test]
+    fn hash_suite_report_round_trips_json() {
+        // Minimal report — shape sanity, not content.
+        let report = HashSuiteReport {
+            schema_version: 1,
+            suite: SuiteKind::Smoke,
+            device: DeviceReport {
+                name: "test".into(),
+                backend: "Metal".into(),
+                tier: "UnifiedMemoryNative".into(),
+                gpu_family: "Apple".into(),
+                detection_source: "NameFallback".into(),
+                platform_class: "AppleNative".into(),
+                memory_model: "Unified".into(),
+                driver: "".into(),
+                driver_info: "".into(),
+                max_buffer_size_bytes: 0,
+                max_workgroup_size_x: 0,
+                max_compute_invocations: 0,
+                max_compute_workgroup_storage_size_bytes: 0,
+                feature_flags: Vec::new(),
+            },
+            kernel: KernelReport {
+                field: "BabyBear".into(),
+                ntt_variant: "babybear-poseidon2".into(),
+                stockham_tail_strategy: None,
+            },
+            cases: vec![HashCaseReport {
+                name: "c".into(),
+                num_permutations: 17,
+                input: HashInputPattern::Sequential,
+                kernel_family: Some("babybear-poseidon2".into()),
+                passed: true,
+                mismatch_count: 0,
+                first_mismatch_index: None,
+                first_mismatch_gpu: None,
+                first_mismatch_cpu: None,
+                timings: TimingReport {
+                    wall_time_ns: Some(123),
+                    gpu_total_ns: None,
+                    gpu_stage_ns: Vec::new(),
+                },
+                error: None,
+            }],
+            summary: SuiteSummary {
+                total_cases: 1,
+                passed_cases: 1,
+                failed_cases: 0,
+            },
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        let parsed: HashSuiteReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.cases.len(), 1);
+        assert!(parsed.cases[0].passed);
     }
 }
