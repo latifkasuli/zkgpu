@@ -389,12 +389,17 @@ pub fn measure_goldilocks_plan(
 ) -> Result<GoldilocksPlanMeasurement, zkgpu_core::ZkGpuError> {
     let measured = iterations.max(1);
 
-    // Warmup always uses the non-profiled path — the timestamp-query
-    // resolve + copy has measurable overhead at small log_n, and
-    // warmup samples are discarded either way.
+    // Warmup mirrors the profiling choice so pipeline state matches
+    // what the measured loop will see. BabyBear's `measure_plan` does
+    // the same — keeping the behaviour aligned avoids cross-field
+    // cold-start asymmetries in the first measured iteration.
     for _ in 0..warmup_iterations {
         let mut buf = device.upload(data)?;
-        plan.execute(device, &mut buf)?;
+        if profile_gpu_timestamps {
+            let _ = plan.execute_profiled(device, &mut buf)?;
+        } else {
+            plan.execute(device, &mut buf)?;
+        }
     }
 
     let mut wall_total = Duration::ZERO;
@@ -480,11 +485,16 @@ pub fn measure_goldilocks_plan_soak(
     profile_gpu_timestamps: bool,
 ) -> Result<GoldilocksSoakMeasurement, zkgpu_core::ZkGpuError> {
     // --- Warmup (discarded, not timed) ---
+    // Mirror the profiling flag so cold-state transitions in the first
+    // measured iteration don't carry a timestamp-query setup cost the
+    // rest of the soak doesn't see. Matches BabyBear's measure_plan_soak.
     for _ in 0..warmup_iterations {
         let mut buf = device.upload(data)?;
-        // Warmup uses the non-profiled path for speed — a warmup
-        // iteration's timestamp is discarded anyway.
-        plan.execute(device, &mut buf)?;
+        if profile_gpu_timestamps {
+            let _ = plan.execute_profiled(device, &mut buf)?;
+        } else {
+            plan.execute(device, &mut buf)?;
+        }
     }
 
     // --- Soak phase ---
