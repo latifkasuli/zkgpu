@@ -26,6 +26,8 @@ use crate::async_util;
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 use crate::dispatch::{plan_linear_dispatch, LinearDispatch};
+use crate::ntt::NttTimings;
+use crate::profiling::{GpuProfiler, GpuTiming, TimestampSpan};
 use crate::ntt::goldilocks::resolve::{
     resolve_variant, GoldilocksKernelOverride, ResolvedGoldilocksKernel,
 };
@@ -504,13 +506,17 @@ impl WgpuGoldilocksNttPlan {
     /// inserted automatically for odd log_n).
     ///
     /// Blocks on `device.poll(wait_indefinitely)`. For browser / async
-    /// callers use [`execute_async`](Self::execute_async).
+    /// callers use [`execute_async`](Self::execute_async). For GPU
+    /// timestamp profiling use
+    /// [`execute_profiled`](Self::execute_profiled) /
+    /// [`execute_profiled_async`](Self::execute_profiled_async).
     pub fn execute(
         &mut self,
         device: &WgpuDevice,
         buf: &mut WgpuBuffer<Goldilocks>,
     ) -> Result<(), ZkGpuError> {
-        self.encode_and_submit(device, buf)?;
+        let encoder = self.encode(device, buf, None, None)?;
+        device.raw_queue().submit(Some(encoder.finish()));
 
         // Force GPU completion before the caller can do a map-based
         // readback on UMA targets — same sync point as arith_test.rs.
@@ -535,22 +541,195 @@ impl WgpuGoldilocksNttPlan {
         device: &WgpuDevice,
         buf: &mut WgpuBuffer<Goldilocks>,
     ) -> Result<(), ZkGpuError> {
-        self.encode_and_submit(device, buf)?;
+        let encoder = self.encode(device, buf, None, None)?;
+        device.raw_queue().submit(Some(encoder.finish()));
         async_util::wait_for_submission(device.raw_device(), device.raw_queue()).await
     }
 
-    /// Build the compute-pass command buffer and submit it to the GPU.
+    /// Execute with per-compute-pass GPU timestamp profiling (blocking).
     ///
-    /// Shared encode path for both [`execute`](Self::execute) and
-    /// [`execute_async`](Self::execute_async). Returns as soon as
-    /// `queue.submit` completes — the caller is responsible for the
-    /// completion wait (sync `device.poll` vs async
-    /// `async_util::wait_for_submission`).
-    fn encode_and_submit(
+    /// Phase E.2.c. Returns `Some(NttTimings)` on devices that advertise
+    /// `TIMESTAMP_QUERY`; `None` otherwise (matching the BabyBear
+    /// `execute_kernels_profiled` contract). The Goldilocks plan emits
+    /// a single "stockham" span covering all Stockham stages (they run
+    /// in one compute pass — see [`encode`](Self::encode)) plus a
+    /// trailing "inverse_scale" span for inverse plans.
+    pub fn execute_profiled(
         &mut self,
         device: &WgpuDevice,
         buf: &mut WgpuBuffer<Goldilocks>,
-    ) -> Result<(), ZkGpuError> {
+    ) -> Result<Option<NttTimings>, ZkGpuError> {
+        let wall_start = std::time::Instant::now();
+
+        let mut profiler = self.new_profiler_if_supported(device);
+        let spans = self.begin_spans(&mut profiler);
+        let (stockham_ts, scale_ts) = self.pass_timestamp_writes(profiler.as_ref(), &spans);
+
+        let mut encoder = self.encode(device, buf, stockham_ts, scale_ts)?;
+        if let Some(ref p) = profiler {
+            p.resolve(&mut encoder);
+        }
+        device.raw_queue().submit(Some(encoder.finish()));
+        device
+            .raw_device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
+
+        let wall_clock = wall_start.elapsed();
+
+        let timings = match profiler {
+            Some(p) => {
+                let timestamps = p.read_timestamps(device.raw_device())?;
+                Some(self.build_ntt_timings(&p, &timestamps, &spans, wall_clock))
+            }
+            None => None,
+        };
+        Ok(timings)
+    }
+
+    /// Async variant of [`execute_profiled`](Self::execute_profiled).
+    /// Browser-safe (uses `web_time::Instant` + async timestamp readback).
+    pub async fn execute_profiled_async(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<Goldilocks>,
+    ) -> Result<Option<NttTimings>, ZkGpuError> {
+        let wall_start = web_time::Instant::now();
+
+        let mut profiler = self.new_profiler_if_supported(device);
+        let spans = self.begin_spans(&mut profiler);
+        let (stockham_ts, scale_ts) = self.pass_timestamp_writes(profiler.as_ref(), &spans);
+
+        let mut encoder = self.encode(device, buf, stockham_ts, scale_ts)?;
+        if let Some(ref p) = profiler {
+            p.resolve(&mut encoder);
+        }
+        device.raw_queue().submit(Some(encoder.finish()));
+
+        let wall_clock = wall_start.elapsed();
+
+        let timings = match profiler {
+            Some(p) => {
+                let timestamps = p.read_timestamps_async(device.raw_device()).await?;
+                Some(self.build_ntt_timings(&p, &timestamps, &spans, wall_clock))
+            }
+            None => {
+                // No profiler — still wait for GPU completion on native
+                // (wasm: no-op, map_async downstream handles sync).
+                async_util::wait_for_submission(device.raw_device(), device.raw_queue()).await?;
+                None
+            }
+        };
+        Ok(timings)
+    }
+
+    /// Number of timestamped compute passes for the current direction.
+    /// Forward: 1 (Stockham). Inverse: 2 (Stockham + scale).
+    fn num_profiled_passes(&self) -> usize {
+        match self.direction {
+            NttDirection::Forward => 1,
+            NttDirection::Inverse => 2,
+        }
+    }
+
+    /// Create a profiler sized for this plan's compute-pass count, or
+    /// `None` on devices without timestamp-query support. Factored out
+    /// so both sync and async profiled paths share a single creation
+    /// site.
+    fn new_profiler_if_supported(&self, device: &WgpuDevice) -> Option<GpuProfiler> {
+        let max_queries = (self.num_profiled_passes() as u32) * 2;
+        GpuProfiler::new_if_supported(
+            device.raw_device(),
+            device.raw_queue(),
+            device.caps(),
+            max_queries,
+        )
+    }
+
+    /// Pre-allocate one span per compute pass. Empty vec if profiler is
+    /// `None`. Pre-allocation matches the BabyBear pattern — all span
+    /// indices are reserved before any pass is encoded.
+    fn begin_spans(&self, profiler: &mut Option<GpuProfiler>) -> Vec<TimestampSpan> {
+        match profiler {
+            Some(p) => (0..self.num_profiled_passes())
+                .filter_map(|_| p.begin_span())
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Build the per-pass `ComputePassTimestampWrites` tuple from the
+    /// profiler and allocated spans. Returns `(stockham_ts, scale_ts)`.
+    fn pass_timestamp_writes<'a>(
+        &self,
+        profiler: Option<&'a GpuProfiler>,
+        spans: &'a [TimestampSpan],
+    ) -> (
+        Option<wgpu::ComputePassTimestampWrites<'a>>,
+        Option<wgpu::ComputePassTimestampWrites<'a>>,
+    ) {
+        let stockham_ts =
+            profiler.and_then(|p| spans.first().map(|s| p.pass_timestamp_writes(s)));
+        let scale_ts = if self.direction == NttDirection::Inverse {
+            profiler.and_then(|p| spans.get(1).map(|s| p.pass_timestamp_writes(s)))
+        } else {
+            None
+        };
+        (stockham_ts, scale_ts)
+    }
+
+    /// Convert a resolved timestamp array into an [`NttTimings`].
+    /// Labels: `"stockham"` for the Stockham pass, `"inverse scale"`
+    /// for the scale pass (matching the BabyBear convention's
+    /// `"inverse scale"` string for JSON-report compatibility).
+    fn build_ntt_timings(
+        &self,
+        profiler: &GpuProfiler,
+        timestamps: &[u64],
+        spans: &[TimestampSpan],
+        wall_clock: std::time::Duration,
+    ) -> NttTimings {
+        let mut gpu_stage_ns = Vec::with_capacity(spans.len());
+        let mut total = 0.0;
+        for (i, span) in spans.iter().enumerate() {
+            let dur = profiler.span_duration_ns(timestamps, span).unwrap_or(0.0);
+            total += dur;
+            let label = if i == 0 {
+                // Single Stockham compute pass covers all stages for
+                // both R2 and R4 variants.
+                "stockham".to_string()
+            } else {
+                // The only other span is the inverse scale pass.
+                "inverse scale".to_string()
+            };
+            gpu_stage_ns.push(GpuTiming {
+                label,
+                duration_ns: dur,
+            });
+        }
+        NttTimings {
+            wall_clock,
+            gpu_stage_ns,
+            gpu_total_ns: total,
+        }
+    }
+
+    /// Build the compute-pass command buffer.
+    ///
+    /// Shared encode path for sync, async, and profiled variants.
+    /// Accepts optional `ComputePassTimestampWrites` for each pass so
+    /// the profiled paths can attach begin/end query indices; non-
+    /// profiled callers pass `None`. Returns the encoder without
+    /// submitting — the caller is responsible for `profiler.resolve`
+    /// (if profiling), `queue.submit`, and the completion wait (sync
+    /// `device.poll` vs async `async_util::wait_for_submission`).
+    fn encode(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<Goldilocks>,
+        stockham_ts: Option<wgpu::ComputePassTimestampWrites<'_>>,
+        scale_ts: Option<wgpu::ComputePassTimestampWrites<'_>>,
+    ) -> Result<wgpu::CommandEncoder, ZkGpuError> {
         if buf.len() != self.n as usize {
             return Err(ZkGpuError::InvalidNttSize(format!(
                 "buffer length {} does not match plan n={}",
@@ -628,7 +807,7 @@ impl WgpuGoldilocksNttPlan {
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("goldilocks ntt stages"),
-                timestamp_writes: None,
+                timestamp_writes: stockham_ts,
             });
             pass.set_pipeline(pipeline);
             for bg in &bind_groups {
@@ -677,15 +856,19 @@ impl WgpuGoldilocksNttPlan {
                 .expect("inverse plan must have scale dispatch");
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("goldilocks inverse scale"),
-                timestamp_writes: None,
+                timestamp_writes: scale_ts,
             });
             pass.set_pipeline(&self.scale_pipeline);
             pass.set_bind_group(0, &scale_bg, &[]);
             pass.dispatch_workgroups(scale_dispatch.x, scale_dispatch.y, 1);
+        } else {
+            // Forward plan with a scale_ts slot should never happen —
+            // `pass_timestamp_writes` only allocates a scale span on
+            // Inverse. Dropping the unused arg is a no-op.
+            debug_assert!(scale_ts.is_none(), "scale_ts only valid on inverse plans");
         }
 
-        device.raw_queue().submit(Some(encoder.finish()));
-        Ok(())
+        Ok(encoder)
     }
 }
 
@@ -1139,6 +1322,111 @@ mod tests {
             sync_out, async_out,
             "execute_async must match sync execute bit-for-bit at log_n={log_n}"
         );
+    }
+
+    /// Phase E.2.c canary: `execute_profiled` must produce
+    /// bit-identical output to the sync `execute`. Only the timestamp
+    /// plumbing differs between the two — any behavioral drift
+    /// (e.g. a compute pass accidentally split) would show here first.
+    #[test]
+    fn execute_profiled_matches_sync_execute() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let log_n = 6u32;
+        let n = 1u32 << log_n;
+        let input = sequential_input(n);
+
+        let mut sync_plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward).unwrap();
+        let mut sync_buf = device.upload::<Goldilocks>(&input).unwrap();
+        sync_plan.execute(&device, &mut sync_buf).unwrap();
+        let sync_out = sync_buf.read_to_vec_blocking().unwrap();
+
+        let mut profiled_plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward).unwrap();
+        let mut profiled_buf = device.upload::<Goldilocks>(&input).unwrap();
+        let timings = profiled_plan
+            .execute_profiled(&device, &mut profiled_buf)
+            .expect("profiled execute must succeed");
+        let profiled_out = profiled_buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(
+            sync_out, profiled_out,
+            "profiled output must match sync at log_n={log_n}"
+        );
+
+        // Timing-shape checks: if the device supports timestamps, we
+        // get Some(NttTimings) with exactly one "stockham" stage for a
+        // forward plan. Otherwise we get None — still a valid result.
+        if let Some(t) = timings {
+            assert_eq!(t.gpu_stage_ns.len(), 1, "forward plan emits one span");
+            assert_eq!(t.gpu_stage_ns[0].label, "stockham");
+            assert!(t.gpu_total_ns >= 0.0);
+            assert!(
+                t.wall_clock.as_nanos() > 0,
+                "wall_clock should be populated"
+            );
+        }
+    }
+
+    /// Inverse direction profiled path emits two spans ("stockham" +
+    /// "inverse scale") — locks the per-pass labeling that
+    /// downstream JSON consumers rely on.
+    #[test]
+    fn execute_profiled_inverse_emits_two_stages() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let log_n = 6u32;
+        let n = 1u32 << log_n;
+        let input = sequential_input(n);
+
+        let mut plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Inverse).unwrap();
+        let mut buf = device.upload::<Goldilocks>(&input).unwrap();
+        let timings = plan.execute_profiled(&device, &mut buf).unwrap();
+        if let Some(t) = timings {
+            assert_eq!(t.gpu_stage_ns.len(), 2, "inverse plan emits two spans");
+            assert_eq!(t.gpu_stage_ns[0].label, "stockham");
+            assert_eq!(t.gpu_stage_ns[1].label, "inverse scale");
+            // Summed per-stage equals total (within f64 rounding).
+            let sum: f64 = t.gpu_stage_ns.iter().map(|s| s.duration_ns).sum();
+            assert!((sum - t.gpu_total_ns).abs() < 1.0);
+        }
+        // Otherwise (no timestamp support), the call must still not
+        // error — the non-profiled branch of execute_profiled_async is
+        // exercised below; here the sync path's None branch is
+        // covered by simply reaching this point.
+    }
+
+    /// Async profiled mirror of the sync bit-parity test.
+    #[test]
+    fn execute_profiled_async_matches_sync_execute() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let log_n = 6u32;
+        let n = 1u32 << log_n;
+        let input = sequential_input(n);
+
+        let mut sync_plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward).unwrap();
+        let mut sync_buf = device.upload::<Goldilocks>(&input).unwrap();
+        sync_plan.execute(&device, &mut sync_buf).unwrap();
+        let sync_out = sync_buf.read_to_vec_blocking().unwrap();
+
+        let mut plan =
+            WgpuGoldilocksNttPlan::new(&device, log_n, NttDirection::Forward).unwrap();
+        let mut buf = device.upload::<Goldilocks>(&input).unwrap();
+        let _timings =
+            pollster::block_on(plan.execute_profiled_async(&device, &mut buf)).unwrap();
+        let async_out = buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(sync_out, async_out);
     }
 
     /// Inverse direction (exercises the scale pass post-Stockham) must
