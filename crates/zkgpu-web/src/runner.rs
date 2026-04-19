@@ -366,28 +366,20 @@ async fn run_roundtrip(
 }
 
 // ---------------------------------------------------------------------------
-// Goldilocks async runner (Phase E.2.b)
+// Goldilocks async runner (Phase E.2.b, profiled in E.2.c)
 // ---------------------------------------------------------------------------
 //
 // Parallel to `run_case_inner` / `run_direction` / `run_roundtrip`. The
-// Goldilocks plan has no family-override or tail-override surface and
-// no profiled-execute path yet, so the async routes are thinner:
-//   - make_goldilocks_input + goldilocks_cpu_reference for I/O
-//   - execute_async (non-profiled) for the GPU pass
-//   - case.profile_gpu_timestamps=true → structured "not supported"
-//     error pending Phase E.2.c's profiled-execute wiring
-//
-// Once `WgpuGoldilocksNttPlan::execute_profiled_async` exists, fold
-// back into a single generic `measure_plan_async<F>` via a trait.
+// Goldilocks plan has no family-override or tail-override surface;
+// R2 vs R4 is decided by `log_n` parity. Profiled-timestamp support
+// landed in E.2.c via `WgpuGoldilocksNttPlan::execute_profiled_async`
+// — `case.profile_gpu_timestamps` now routes through that path on the
+// Goldilocks side, matching the BabyBear contract. The two runner
+// impls stay separate for now because the plan types and buffer
+// element types differ; a future refactor can fold them into a single
+// generic `measure_plan_async<F>` via a trait.
 
 async fn run_case_goldilocks_inner(case: &CaseSpec, dev: &Rc<WgpuDevice>) -> CaseReport {
-    // `case.profile_gpu_timestamps` is intentionally ignored on the
-    // Goldilocks path — mirrors the native testkit's
-    // `measure_goldilocks_plan`, which wall-times and reports
-    // `gpu_total_ns: None` regardless of the flag. Keeping parity lets
-    // a shared `SuiteSpec` produce semantically identical reports on
-    // either runner. When E.2.c adds `execute_profiled_async` we flip
-    // to honouring the flag on both sides in the same commit.
     let input = make_goldilocks_input(case.log_n, &case.input);
 
     match case.direction {
@@ -421,6 +413,7 @@ async fn run_direction_goldilocks(
         &mut plan,
         case.warmup_iterations,
         case.iterations,
+        case.profile_gpu_timestamps,
     )
     .await
     {
@@ -481,6 +474,7 @@ async fn run_roundtrip_goldilocks(
         &mut forward_plan,
         case.warmup_iterations,
         case.iterations,
+        case.profile_gpu_timestamps,
     )
     .await
     {
@@ -493,6 +487,7 @@ async fn run_roundtrip_goldilocks(
         &mut inverse_plan,
         case.warmup_iterations,
         case.iterations,
+        case.profile_gpu_timestamps,
     )
     .await
     {
@@ -522,9 +517,12 @@ async fn run_roundtrip_goldilocks(
     }
 }
 
-/// Wall-time-only async measurement for the Goldilocks plan.
-/// Counterpart of [`measure_plan_async`] for BabyBear; same shape minus
-/// the profiled branch (Phase E.2.c).
+/// Counterpart of [`measure_plan_async`] for the Goldilocks plan.
+/// Phase E.2.c: now honours `profile_gpu_timestamps` by routing
+/// through `execute_profiled_async` when requested — returns
+/// populated `gpu_total_ns` + stage labels on adapters with
+/// TIMESTAMP_QUERY support, `None` otherwise (exactly matching the
+/// BabyBear contract).
 struct GoldilocksPlanMeasurement {
     timings: TimingReport,
     final_output: Vec<Goldilocks>,
@@ -536,7 +534,12 @@ async fn measure_goldilocks_plan_async(
     plan: &mut WgpuGoldilocksNttPlan,
     warmup_iterations: u32,
     iterations: u32,
+    profile_gpu_timestamps: bool,
 ) -> Result<GoldilocksPlanMeasurement, String> {
+    // --- Warmup (discarded) — always non-profiled since the sample
+    // is thrown away. Profiled execute is slightly more expensive
+    // (timestamp resolve + copy), and we don't want warmup overhead
+    // to dominate short-duration benchmarks.
     for _ in 0..warmup_iterations {
         let mut buf = dev.upload(input).map_err(|e| e.to_string())?;
         plan.execute_async(dev, &mut buf)
@@ -546,15 +549,40 @@ async fn measure_goldilocks_plan_async(
 
     let measured = iterations.max(1);
     let mut wall_total_ns: u64 = 0;
+    let mut gpu_total_ns_accum: f64 = 0.0;
+    let mut stage_totals: Option<Vec<(String, f64)>> = None;
+    let mut profiled_samples: u32 = 0;
     let mut final_output: Option<Vec<Goldilocks>> = None;
 
     for iter_idx in 0..measured {
         let mut buf = dev.upload(input).map_err(|e| e.to_string())?;
         let wall_start = web_time::Instant::now();
-        plan.execute_async(dev, &mut buf)
-            .await
-            .map_err(|e| e.to_string())?;
+
+        let ntt_timings = if profile_gpu_timestamps {
+            plan.execute_profiled_async(dev, &mut buf)
+                .await
+                .map_err(|e| e.to_string())?
+        } else {
+            plan.execute_async(dev, &mut buf)
+                .await
+                .map_err(|e| e.to_string())?;
+            None
+        };
         wall_total_ns += wall_start.elapsed().as_nanos() as u64;
+
+        if let Some(ref t) = ntt_timings {
+            gpu_total_ns_accum += t.gpu_total_ns;
+            let accum = stage_totals.get_or_insert_with(|| {
+                t.gpu_stage_ns
+                    .iter()
+                    .map(|s| (s.label.clone(), 0.0))
+                    .collect()
+            });
+            for (acc, sample) in accum.iter_mut().zip(t.gpu_stage_ns.iter()) {
+                acc.1 += sample.duration_ns;
+            }
+            profiled_samples += 1;
+        }
 
         if iter_idx + 1 == measured {
             final_output = Some(
@@ -566,12 +594,30 @@ async fn measure_goldilocks_plan_async(
     }
 
     let wall_avg_ns = wall_total_ns / measured as u64;
-    Ok(GoldilocksPlanMeasurement {
-        timings: TimingReport {
+    let timings = if profiled_samples > 0 {
+        let divisor = profiled_samples as f64;
+        TimingReport {
+            wall_time_ns: Some(wall_avg_ns),
+            gpu_total_ns: Some((gpu_total_ns_accum / divisor) as u64),
+            gpu_stage_ns: stage_totals
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(label, total)| StageTimingReport {
+                    label,
+                    duration_ns: (total / divisor) as u64,
+                })
+                .collect(),
+        }
+    } else {
+        TimingReport {
             wall_time_ns: Some(wall_avg_ns),
             gpu_total_ns: None,
             gpu_stage_ns: Vec::new(),
-        },
+        }
+    };
+
+    Ok(GoldilocksPlanMeasurement {
+        timings,
         final_output: final_output.expect("measured loop always captures final output"),
     })
 }

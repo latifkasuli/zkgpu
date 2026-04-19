@@ -554,8 +554,6 @@ fn run_benchmark_goldilocks(
 
     let mut plan = WgpuGoldilocksNttPlan::new(device, log_n, direction)
         .expect("goldilocks plan creation failed");
-    // Kernel-variant labeling mirrors the testkit's
-    // `goldilocks_family_label` so JSON reports align across tools.
     let family = if log_n % 2 == 0 {
         "goldilocks-portable-r4".to_string()
     } else {
@@ -565,13 +563,22 @@ fn run_benchmark_goldilocks(
     let cpu_us = bench_cpu_goldilocks(&data, direction);
     let gpu_e2e_us = bench_gpu_goldilocks(device, &data, &mut plan);
 
+    // Phase E.2.c.4: collect GPU hardware timestamps via the new
+    // execute_profiled path. Returns None on adapters without
+    // TIMESTAMP_QUERY support (the BabyBear path degrades the same
+    // way — see `profiled_run`).
+    let (gpu_hw_total_ns, gpu_hw_stages) = profiled_goldilocks_run(device, &data, &mut plan);
+
     let mut cpu_data = data.clone();
     ntt_cpu_reference(&mut cpu_data, direction);
     let validation = validate_goldilocks(device, &data, &cpu_data, &mut plan);
 
+    let hw_ms = gpu_hw_total_ns
+        .map(|ns| format!("{:.3}ms", ns / 1_000_000.0))
+        .unwrap_or_else(|| "n/a".to_string());
     eprintln!(
-        "    family={}  cpu={:.0}us  e2e={:.0}us  {}",
-        family, cpu_us, gpu_e2e_us, &validation,
+        "    family={}  cpu={:.0}us  e2e={:.0}us  hw={}  {}",
+        family, cpu_us, gpu_e2e_us, hw_ms, &validation,
     );
 
     RunReport {
@@ -579,10 +586,6 @@ fn run_benchmark_goldilocks(
         n,
         direction: dir_str.to_string(),
         family,
-        // Goldilocks plan emits a single stage sequence per direction;
-        // reporting `0` here (vs. 1) would imply "no dispatches" which is
-        // wrong. Use the actual per-plan dispatch count: log_n stages for
-        // R2, log_n/2 for R4, plus 1 for the inverse scale.
         dispatches: goldilocks_dispatch_count(log_n, direction),
         cpu_reference_us: cpu_us,
         gpu_e2e_us,
@@ -591,10 +594,70 @@ fn run_benchmark_goldilocks(
         // Goldilocks rows should read the per-field `family` label to
         // know whether `gpu_kernel_us` is a distinct measurement.
         gpu_kernel_us: gpu_e2e_us,
-        gpu_hw_total_ns: None,
-        gpu_hw_stages: None,
+        gpu_hw_total_ns,
+        gpu_hw_stages,
         validation,
     }
+}
+
+/// Run `execute_profiled` PROFILED_ITERS times and average. Mirrors
+/// `profiled_run` for BabyBear; on devices without TIMESTAMP_QUERY
+/// returns `(None, None)` after a single warmup iteration.
+fn profiled_goldilocks_run(
+    device: &WgpuDevice,
+    data: &[Goldilocks],
+    plan: &mut WgpuGoldilocksNttPlan,
+) -> (Option<f64>, Option<Vec<StageReport>>) {
+    // Warmup — untimed.
+    for _ in 0..WARM_UP_ITERS {
+        let mut buf = device.upload(data).expect("upload failed");
+        let _ = plan.execute_profiled(device, &mut buf);
+    }
+
+    let mut total_ns_accum: Option<f64> = None;
+    let mut stage_accum: Option<Vec<(String, f64)>> = None;
+    let mut collected = 0usize;
+
+    for _ in 0..PROFILED_ITERS {
+        let mut buf = device.upload(data).expect("upload failed");
+        match plan
+            .execute_profiled(device, &mut buf)
+            .expect("profiled exec failed")
+        {
+            Some(timings) => {
+                *total_ns_accum.get_or_insert(0.0) += timings.gpu_total_ns;
+                let accum = stage_accum.get_or_insert_with(|| {
+                    timings
+                        .gpu_stage_ns
+                        .iter()
+                        .map(|s| (s.label.clone(), 0.0))
+                        .collect()
+                });
+                for (acc, sample) in accum.iter_mut().zip(timings.gpu_stage_ns.iter()) {
+                    acc.1 += sample.duration_ns;
+                }
+                collected += 1;
+            }
+            None => return (None, None),
+        }
+    }
+
+    if collected == 0 {
+        return (None, None);
+    }
+
+    let n = collected as f64;
+    let avg_total = total_ns_accum.map(|t| t / n);
+    let stages = stage_accum.map(|stages| {
+        stages
+            .into_iter()
+            .map(|(label, total)| StageReport {
+                label,
+                duration_ns: total / n,
+            })
+            .collect()
+    });
+    (avg_total, stages)
 }
 
 fn goldilocks_dispatch_count(log_n: u32, direction: NttDirection) -> u32 {

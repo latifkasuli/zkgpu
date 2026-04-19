@@ -420,6 +420,91 @@ pub fn measure_goldilocks_plan(
     })
 }
 
+/// Goldilocks twin of [`measure_plan_soak`] — Phase E.2.c.
+///
+/// Uses `WgpuGoldilocksNttPlan::execute_profiled` for per-iteration
+/// GPU timestamps so the soak report can compute the same
+/// `thermal_drift_ratio`, `median_gpu_ns`, etc. that BabyBear soak
+/// produces. When the device doesn't support `TIMESTAMP_QUERY`,
+/// `execute_profiled` returns `None` and we fall back to wall-only
+/// samples (matching the BabyBear behavior on the same adapter).
+pub fn measure_goldilocks_plan_soak(
+    device: &WgpuDevice,
+    data: &[Goldilocks],
+    plan: &mut WgpuGoldilocksNttPlan,
+    duration: Duration,
+    warmup_iterations: u32,
+) -> Result<GoldilocksSoakMeasurement, zkgpu_core::ZkGpuError> {
+    // --- Warmup (discarded, not timed) ---
+    for _ in 0..warmup_iterations {
+        let mut buf = device.upload(data)?;
+        // Warmup uses the non-profiled path for speed — a warmup
+        // iteration's timestamp is discarded anyway.
+        plan.execute(device, &mut buf)?;
+    }
+
+    // --- Soak phase ---
+    let soak_start = Instant::now();
+    let mut samples = Vec::with_capacity(1024);
+    let mut first_output: Option<Vec<Goldilocks>> = None;
+    let mut last_output = Vec::new();
+    let mut iteration = 0u32;
+
+    while soak_start.elapsed() < duration {
+        let mut buf = device.upload(data)?;
+        let iter_start = Instant::now();
+
+        let gpu_ns = plan
+            .execute_profiled(device, &mut buf)?
+            .map(|t| t.gpu_total_ns as u64);
+
+        let wall_ns = iter_start.elapsed().as_nanos() as u64;
+        let elapsed_ms = soak_start.elapsed().as_millis() as u64;
+
+        samples.push(SoakSample {
+            iteration,
+            wall_ns,
+            gpu_total_ns: gpu_ns,
+            elapsed_ms,
+        });
+
+        if first_output.is_none() {
+            first_output = Some(buf.read_to_vec()?);
+        }
+        if soak_start.elapsed() >= duration {
+            last_output = buf.read_to_vec()?;
+        }
+
+        iteration += 1;
+    }
+
+    if last_output.is_empty() {
+        if let Some(ref first) = first_output {
+            last_output = first.clone();
+        }
+    }
+
+    let actual_duration = soak_start.elapsed();
+    let stats = compute_soak_stats(&samples, actual_duration);
+
+    Ok(GoldilocksSoakMeasurement {
+        samples,
+        stats,
+        first_output: first_output.unwrap_or_default(),
+        last_output,
+    })
+}
+
+/// Goldilocks twin of [`SoakMeasurement`]. Separate type because the
+/// element vec is `Vec<Goldilocks>` rather than `Vec<BabyBear>`;
+/// everything else is identical.
+pub struct GoldilocksSoakMeasurement {
+    pub samples: Vec<SoakSample>,
+    pub stats: SoakStats,
+    pub first_output: Vec<Goldilocks>,
+    pub last_output: Vec<Goldilocks>,
+}
+
 fn percentile(sorted: &[u64], pct: u32) -> u64 {
     if sorted.is_empty() {
         return 0;

@@ -10,7 +10,8 @@ use zkgpu_wgpu::{
 };
 
 use crate::benchmark::{
-    measure_goldilocks_plan, measure_plan, measure_plan_soak, sum_timing_reports,
+    measure_goldilocks_plan, measure_goldilocks_plan_soak, measure_plan, measure_plan_soak,
+    sum_timing_reports,
 };
 use crate::case::{CaseSpec, TestDirection};
 use crate::device::build_device_report;
@@ -108,32 +109,30 @@ pub fn run_soak_suite(spec: &SoakSpec) -> Result<SoakSuiteReport, TestkitError> 
         return Err(TestkitError::EmptySuite);
     }
 
-    // Soak requires per-iteration GPU timestamps via
-    // `execute_kernels_profiled`. The Goldilocks plan only has a sync
-    // `execute` today; profiled-execute is a Phase E.2 follow-up. Reject
-    // Goldilocks soak with a clear structural error rather than silently
-    // falling back to wall-only stats (which would ruin the soak's
-    // thermal-drift signal).
-    if spec.field == Field::Goldilocks {
-        return Err(TestkitError::Backend(ZkGpuError::BackendError(Box::new(
-            GoldilocksSoakUnsupported,
-        ))));
-    }
-
     let device = WgpuDevice::new().map_err(|e| TestkitError::DeviceInit(e.to_string()))?;
     let device_report = build_device_report(&device);
     let duration = Duration::from_secs(spec.duration_secs as u64);
     let mut cases = Vec::with_capacity(spec.cases.len());
 
+    // Phase E.2.c: Goldilocks soak routes through a parallel
+    // `run_soak_case_goldilocks` backed by `execute_profiled` —
+    // pre-E.2.c this returned a structural error because the
+    // Goldilocks plan had no profiled-execute variant. BabyBear path
+    // is unchanged.
     for case in &spec.cases {
-        let report = run_soak_case(
-            &device,
-            case,
-            duration,
-            spec.validate,
-            spec.family_override,
-            spec.stockham_tail_override,
-        );
+        let report = match spec.field {
+            Field::BabyBear => run_soak_case(
+                &device,
+                case,
+                duration,
+                spec.validate,
+                spec.family_override,
+                spec.stockham_tail_override,
+            ),
+            Field::Goldilocks => {
+                run_soak_case_goldilocks(&device, case, duration, spec.validate)
+            }
+        };
         cases.push(report);
     }
 
@@ -322,6 +321,81 @@ fn run_soak_case(
         stockham_tail_strategy: tail_strategy,
         stockham_tail_reason: tail_reason,
         tail_stride_bytes,
+    }
+}
+
+/// Goldilocks soak case runner — Phase E.2.c.
+///
+/// Parallel to [`run_soak_case`]. No `family_override` /
+/// `tail_override` surface because the Goldilocks plan has no
+/// four-step or local-fused-tail variant; the R2/R4 choice is
+/// decided by `log_n` parity. `kernel_family` mirrors the
+/// non-soak Goldilocks path's `goldilocks_family_label`.
+fn run_soak_case_goldilocks(
+    device: &WgpuDevice,
+    case: &CaseSpec,
+    duration: Duration,
+    validate: bool,
+) -> SoakCaseReport {
+    let direction = match case.direction {
+        TestDirection::Forward => NttDirection::Forward,
+        TestDirection::Inverse => NttDirection::Inverse,
+        TestDirection::Roundtrip => {
+            return soak_case_error(
+                case,
+                duration,
+                None,
+                "soak benchmark does not support Roundtrip direction; \
+                 use separate Forward and Inverse cases instead"
+                    .to_string(),
+            );
+        }
+    };
+
+    let mut plan = match WgpuGoldilocksNttPlan::new(device, case.log_n, direction) {
+        Ok(plan) => plan,
+        Err(err) => return soak_case_error(case, duration, None, err.to_string()),
+    };
+    let kernel_family = Some(goldilocks_family_label(case.log_n));
+    let input = make_goldilocks_input(case.log_n, &case.input);
+
+    let measurement = match measure_goldilocks_plan_soak(
+        device,
+        &input,
+        &mut plan,
+        duration,
+        case.warmup_iterations.max(2),
+    ) {
+        Ok(m) => m,
+        Err(err) => {
+            return soak_case_error(case, duration, kernel_family, err.to_string());
+        }
+    };
+
+    let validated = if validate && !measurement.first_output.is_empty() {
+        let expected = goldilocks_cpu_reference(&input, direction);
+        let first_ok = compare_vectors(&measurement.first_output, &expected).passed;
+        let last_ok = compare_vectors(&measurement.last_output, &expected).passed;
+        first_ok && last_ok
+    } else {
+        false
+    };
+
+    SoakCaseReport {
+        name: case.name.clone(),
+        log_n: case.log_n,
+        direction: case.direction,
+        kernel_family,
+        requested_duration_secs: duration.as_secs() as u32,
+        stats: measurement.stats,
+        samples: measurement.samples,
+        validated,
+        error: None,
+        // Tail metadata is Stockham-BabyBear-specific — see the
+        // non-soak Goldilocks path for the same rationale.
+        stockham_tail_strategy: None,
+        stockham_tail_reason: None,
+        tail_stride_bytes: None,
     }
 }
 
@@ -723,26 +797,6 @@ fn goldilocks_cpu_reference(
     ntt_cpu_reference(&mut cpu, direction);
     cpu
 }
-
-/// Sentinel error for Phase E.1 — soak benchmark rejects Goldilocks
-/// because the plan has no profiled-execute path yet. Surfaces via the
-/// standard `ZkGpuError::BackendError(Box<dyn Error>)` channel so the
-/// testkit caller sees a structured failure, not a panic.
-#[derive(Debug)]
-struct GoldilocksSoakUnsupported;
-
-impl std::fmt::Display for GoldilocksSoakUnsupported {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(
-            "soak benchmark not yet supported for Goldilocks: the \
-             Goldilocks plan has no profiled-execute variant (Phase E.2 \
-             follow-up); use run_suite / run_benchmark_suite for wall-time \
-             measurement",
-        )
-    }
-}
-
-impl std::error::Error for GoldilocksSoakUnsupported {}
 
 fn make_plan(
     device: &WgpuDevice,
@@ -1288,32 +1342,57 @@ mod tests {
 
     // === Phase E.1.c: Goldilocks field dispatch ===
 
-    /// Soak explicitly rejects Goldilocks until profiled-execute lands
-    /// (Phase E.2). Must surface as a structured `TestkitError`, not a
-    /// panic, and must do so BEFORE any device creation so the CLI can
-    /// fail fast without spinning up wgpu.
+    /// Phase E.2.c: Goldilocks soak is now supported via
+    /// `execute_profiled` on the Goldilocks plan. Runs a short soak
+    /// (1s to keep the test fast) and verifies the returned report
+    /// has `kernel.field == "Goldilocks"`, a non-zero
+    /// `total_iterations`, and (when the adapter supports timestamp
+    /// queries) populated `median_gpu_ns`. Pre-E.2.c, this API call
+    /// returned a structural error.
     #[test]
-    fn soak_rejects_goldilocks_field() {
+    fn soak_goldilocks_runs_end_to_end() {
+        if WgpuDevice::new().is_err() {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        }
         let spec = zkgpu_report::SoakSpec {
-            duration_secs: 5,
+            duration_secs: 1,
             cases: vec![CaseSpec::new(
                 "gl_soak_log10",
                 10,
                 TestDirection::Forward,
                 zkgpu_report::InputPattern::Sequential,
             )],
-            validate: false,
+            validate: true,
             field: Field::Goldilocks,
             family_override: FamilyOverride::Auto,
             stockham_tail_override: StockhamTailOverride::Auto,
         };
-        let err = run_soak_suite(&spec);
-        assert!(err.is_err(), "expected error, got: {err:?}");
-        let msg = err.unwrap_err().to_string();
+        let report = run_soak_suite(&spec).expect("Goldilocks soak must run");
+        assert_eq!(report.kernel.field, "Goldilocks");
+        assert_eq!(report.cases.len(), 1);
+        let case = &report.cases[0];
         assert!(
-            msg.contains("Goldilocks") || msg.contains("goldilocks"),
-            "error should mention Goldilocks: {msg}"
+            case.error.is_none(),
+            "soak case should not error: {:?}",
+            case.error
         );
+        assert!(
+            case.stats.total_iterations > 0,
+            "soak must capture at least one iteration"
+        );
+        assert!(
+            case.kernel_family
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("goldilocks-"),
+            "kernel_family should be goldilocks-*: {:?}",
+            case.kernel_family
+        );
+        // Validation was requested; should have run unless the device
+        // produced an empty first_output (shouldn't happen — there's
+        // always at least one iteration).
+        assert!(case.validated, "validate=true soak must validate outputs");
     }
 
     /// End-to-end GPU canary: a Goldilocks smoke suite must run both the
