@@ -29,6 +29,13 @@ workspace = true
 [dependencies.zkgpu-ntt]
 workspace = true
 
+# Poseidon2 permutation (CPU reference + field-generic params).
+# `WgpuBabyBearPoseidon2Plan` (and later Goldilocks) uploads the
+# params' round-constant vectors as GPU storage buffers and runs
+# the permutation in a single compute pass.
+[dependencies.zkgpu-poseidon2]
+workspace = true
+
 # Goldilocks field CPU implementation. The portable GPU NTT plan
 # (`WgpuGoldilocksNttPlan`) is concrete over `Goldilocks` because the
 # WGSL arithmetic helpers hardcode its modulus and reduction — so the
