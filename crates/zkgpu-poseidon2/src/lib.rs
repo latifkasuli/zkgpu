@@ -515,6 +515,47 @@ mod tests {
         }
     }
 
+    /// Goldilocks regression guard — Phase F.2 anchor. Pins the
+    /// output of the Goldilocks Poseidon2 permutation on the
+    /// `state[0] = 1` input so the GPU plan in `zkgpu-wgpu` has a
+    /// bit-parity gate it can assert against independently.
+    /// Transcribed from a passing run on 2026-04-19.
+    ///
+    /// If this pin ever changes intentionally (e.g. when the crate
+    /// starts consuming Plonky3-derived Goldilocks constants), the
+    /// GPU-side pin in `crates/zkgpu-wgpu/src/poseidon2/plan.rs`
+    /// must be updated in the same commit.
+    #[test]
+    fn goldilocks_regression_state_0001() {
+        use zkgpu_goldilocks::Goldilocks;
+        let perm =
+            Poseidon2::new(Poseidon2Params::<Goldilocks, WIDTH>::goldilocks_default());
+        let mut state = [Goldilocks::new(0); WIDTH];
+        state[0] = Goldilocks::new(1);
+        perm.permute(&mut state);
+
+        let expected: [u64; WIDTH] = [
+            2188074367496775180,
+            5885830467094400763,
+            3310312858303912864,
+            3736067622965212886,
+            14578661067055100765,
+            7771460173176447673,
+            16719455422659298413,
+            12878948591403318662,
+            9702470661204462942,
+            13973340836048818744,
+            6474905020163181456,
+            7259406223061710650,
+            10585164742300593476,
+            1863897901684124130,
+            12515919369749004495,
+            15547016035687218023,
+        ];
+        let got: [u64; WIDTH] = state.map(|f| f.to_repr());
+        assert_eq!(got, expected, "Goldilocks Poseidon2 regression");
+    }
+
     /// Regression guard: pin the output of BabyBear Poseidon2 on a fixed
     /// input so later refactors can't silently change the permutation.
     /// Computed once by running this test with all zeros in the

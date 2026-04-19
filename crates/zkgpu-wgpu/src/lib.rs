@@ -17,5 +17,5 @@ pub use caps::{CapabilityProfile, DetectionSource, DeviceTier, DriverQuirks, Gpu
 pub use device::WgpuDevice;
 pub use ntt::goldilocks::{WgpuGoldilocksNttPlan, MAX_GOLDILOCKS_LOG_N};
 pub use ntt::{NttTimings, PlannerPolicy, StockhamTailOverride, WgpuNttPlan};
-pub use poseidon2::WgpuBabyBearPoseidon2Plan;
+pub use poseidon2::{WgpuBabyBearPoseidon2Plan, WgpuGoldilocksPoseidon2Plan};
 pub use profiling::{GpuProfiler, GpuTiming, TimestampSpan};

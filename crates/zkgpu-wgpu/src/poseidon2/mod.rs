@@ -13,10 +13,12 @@
 //!   reference in [`zkgpu_poseidon2::Poseidon2`]: bit-parity on the
 //!   `babybear_regression_state_0001` anchor plus batch
 //!   differential tests over random inputs.
+//! - [`WgpuGoldilocksPoseidon2Plan`] — Phase F.2 portable u32x2
+//!   Goldilocks twin. Same structure, `vec2<u32>` limbs via
+//!   `goldilocks_arith_helpers.wgsl` prelude; pinned against
+//!   `goldilocks_regression_state_0001`.
 //!
 //! Not yet:
-//! - Goldilocks GPU Poseidon2 (Phase F.2 — portable u32x2 limb
-//!   variant, same shape as the NTT `WgpuGoldilocksNttPlan`).
 //! - Testkit / CLI / web harness wiring for Poseidon2 suites
 //!   (Phase F.3).
 //!
@@ -32,6 +34,8 @@
 //! (≥ 65535 × 64 = ~4.2M on WebGPU baseline) respect
 //! `max_compute_workgroups_per_dimension`.
 
+mod goldilocks_plan;
 mod plan;
 
+pub use goldilocks_plan::WgpuGoldilocksPoseidon2Plan;
 pub use plan::WgpuBabyBearPoseidon2Plan;
