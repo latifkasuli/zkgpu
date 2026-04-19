@@ -70,15 +70,50 @@ pub struct WgpuBabyBearPoseidon2Plan {
 }
 
 impl WgpuBabyBearPoseidon2Plan {
+    /// S-box exponent hardcoded by [`BABYBEAR_POSEIDON2_WGSL`'s][W] `sbox7`
+    /// function — four multiplies producing `x^7`. Any other `alpha` is
+    /// rejected at construction because the kernel genuinely cannot
+    /// execute it: swapping the S-box requires a shader edit, not a
+    /// uniform update.
+    ///
+    /// [W]: ../../kernels/portable/babybear_poseidon2.wgsl
+    pub const SUPPORTED_ALPHA: u64 = 7;
+
     /// Build a plan from a fully-parametrised [`Poseidon2Params`].
     ///
     /// Consumes the params: the round constants and internal diagonal
     /// are uploaded to GPU storage buffers once and live inside the
     /// plan. To change constants, build a new plan.
+    ///
+    /// Returns [`ZkGpuError::InvalidNttSize`] when the params carry a
+    /// configuration the WGSL kernel cannot honour — today that's
+    /// `alpha != 7` (the shader hardcodes the `x^7` S-box) or a
+    /// constant-vector length that disagrees with `rounds_f_half` /
+    /// `rounds_p`. Width is enforced at the type level via
+    /// `Poseidon2Params<BabyBear, WIDTH>`.
     pub fn new(
         device: &WgpuDevice,
         params: Poseidon2Params<BabyBear, WIDTH>,
     ) -> Result<Self, ZkGpuError> {
+        // Phase F.1 post-review: reject unsupported alpha up front.
+        // The shader's `sbox7` fn is four multiplies hardcoded to
+        // `x^7`. A hypothetical `Poseidon2Params::<BabyBear, _>` with
+        // `alpha = 3` is cryptographically meaningful (coprime to
+        // p - 1 = 2^27 · ... for BabyBear), but this plan would
+        // silently execute the wrong S-box. Surface the mismatch as a
+        // structured error so callers either fix their params or wait
+        // for a future plan variant that exposes alpha as a
+        // shader-defs override.
+        if params.alpha != Self::SUPPORTED_ALPHA {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "Poseidon2 alpha={} is not supported by \
+                 WgpuBabyBearPoseidon2Plan (shader hardcodes x^{}); \
+                 build a plan variant with a matching S-box first",
+                params.alpha,
+                Self::SUPPORTED_ALPHA,
+            )));
+        }
+
         // Sanity: the WGSL kernel assumes the canonical external
         // length (2 * rounds_f_half rows, each WIDTH wide) and a
         // rounds_p-length internal constant vector. Params::new()
@@ -481,6 +516,65 @@ mod tests {
             matches!(err, Err(ZkGpuError::InvalidNttSize(_))),
             "expected InvalidNttSize, got {err:?}"
         );
+    }
+
+    /// Phase F.1 post-review: the plan must refuse to build when
+    /// `params.alpha` doesn't match the WGSL kernel's hardcoded S-box.
+    /// Without this gate, a caller could pass `alpha = 3` (valid
+    /// Poseidon2 parameter, wrong for this shader) and get a plan
+    /// that runs silently with the wrong permutation.
+    ///
+    /// No GPU needed — the check fires before device work.
+    #[test]
+    fn poseidon2_rejects_unsupported_alpha() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        // Build default BabyBear params (alpha=7), then override to
+        // an unsupported alpha. Constants lengths stay consistent, so
+        // only the alpha check should fire.
+        let mut params = Poseidon2Params::<BabyBear, WIDTH>::babybear_default();
+        params.alpha = 3;
+        let err = WgpuBabyBearPoseidon2Plan::new(&device, params);
+        // Can't `{:?}` the Ok branch since the plan doesn't derive Debug
+        // (holds `Arc<wgpu::ComputePipeline>`). Check via match + string
+        // inspection, which is sufficient.
+        match err {
+            Err(ZkGpuError::InvalidNttSize(msg)) => {
+                assert!(
+                    msg.contains("alpha=3"),
+                    "error should name the rejected alpha: {msg}"
+                );
+                assert!(
+                    msg.contains("x^7") || msg.contains("7"),
+                    "error should name the supported alpha: {msg}"
+                );
+            }
+            Err(e) => panic!(
+                "expected InvalidNttSize for alpha=3, got different error: {e}"
+            ),
+            Ok(_) => panic!(
+                "plan built successfully for alpha=3 — kernel would run \
+                 silently wrong permutation"
+            ),
+        }
+    }
+
+    /// Positive gate: the default BabyBear params build cleanly — so
+    /// the alpha check isn't false-positiving on its own sanctioned
+    /// configuration. Explicit because the rejection test above would
+    /// still pass if alpha=7 itself were being blocked.
+    #[test]
+    fn poseidon2_accepts_alpha_7() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let params = Poseidon2Params::<BabyBear, WIDTH>::babybear_default();
+        assert_eq!(params.alpha, WgpuBabyBearPoseidon2Plan::SUPPORTED_ALPHA);
+        let _plan = WgpuBabyBearPoseidon2Plan::new(&device, params)
+            .expect("default BabyBear params (alpha=7) must build cleanly");
     }
 
     /// Determinism: running the same input twice (including across
