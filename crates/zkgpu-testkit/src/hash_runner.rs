@@ -499,15 +499,21 @@ mod tests {
         }
     }
 
-    /// `profile_gpu_timestamps = true` is accepted by the spec but
-    /// the F.3.b testkit degrades to wall-only — there's no
-    /// `execute_profiled` on the Poseidon2 plans yet. Contract: the
-    /// flag doesn't error, but `gpu_total_ns` stays `None`. When a
-    /// future sub-phase adds profiled-execute both the plan and this
-    /// test update together (the assertion below should flip to
-    /// `is_some()` at that point).
+    /// Phase F.3.d post-review (P2): `profile_gpu_timestamps = true`
+    /// is rejected with a per-case structured error, not silently
+    /// degraded. Previously the testkit (and web runner) dropped the
+    /// flag on the floor and returned a success report with
+    /// `gpu_total_ns: None` — indistinguishable from an intentional
+    /// wall-only run. Rejecting instead makes the unsupported-config
+    /// case visible in the report.
+    ///
+    /// When a future F.3.* sub-phase adds `execute_profiled` to both
+    /// plans, this test (plus the twin in
+    /// `crates/zkgpu-web/src/hash_runner.rs` once the GPU integration
+    /// lands) must flip to assert `c.passed == true` and
+    /// `c.timings.gpu_total_ns.is_some()`.
     #[test]
-    fn hash_profile_flag_currently_degrades_to_wall_only() {
+    fn hash_profile_flag_rejected_until_profiled_execute_lands() {
         if try_device().is_none() {
             eprintln!("skipping: no GPU adapter available");
             return;
@@ -515,7 +521,7 @@ mod tests {
         let spec = HashSpec {
             kind: SuiteKind::Benchmark,
             cases: vec![HashCaseSpec::new(
-                "profile_wall_only",
+                "profile_requested_unsupported",
                 8,
                 HashInputPattern::Sequential,
             )
@@ -525,18 +531,18 @@ mod tests {
             algorithm: HashAlgorithm::Poseidon2,
             field: Field::BabyBear,
         };
-        let report = run_hash_suite(&spec).expect("must run");
+        let report = run_hash_suite(&spec).expect("suite-level call must succeed");
         let c = &report.cases[0];
-        assert!(c.passed);
-        // Wall time populated (some value > 0), GPU timestamps not.
-        assert!(c.timings.wall_time_ns.is_some());
+        assert!(!c.passed, "profile=true must fail the case");
+        let err = c.error.as_deref().unwrap_or("");
         assert!(
-            c.timings.gpu_total_ns.is_none(),
-            "pre-profiled-execute Poseidon2 path must leave gpu_total_ns unset; \
-             got {:?}",
-            c.timings.gpu_total_ns,
+            err.contains("profile_gpu_timestamps"),
+            "error should name the offending flag: {err}"
         );
-        assert!(c.timings.gpu_stage_ns.is_empty());
+        assert!(
+            err.contains("execute_profiled") || err.contains("F.3"),
+            "error should point at the follow-up: {err}"
+        );
     }
 
     /// `fail_fast = true` must stop after the first failing case.

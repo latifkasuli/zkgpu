@@ -569,11 +569,19 @@ pub struct GoldilocksSoakMeasurement {
 //
 // Parallel to `measure_plan` / `measure_goldilocks_plan`. Shipped
 // wall-only because the Poseidon2 plans only expose sync non-profiled
-// `execute` today. `profile_gpu_timestamps = true` is accepted on the
-// `HashCaseSpec` but silently degrades to wall-only — matching the
-// pre-E.2.c Goldilocks NTT sequence, to be lifted when a dedicated
-// F.3.* sub-phase adds `execute_profiled` / `execute_profiled_async`
-// to both Poseidon2 plans.
+// `execute` today.
+//
+// Contract (Phase F.3.d post-review): when `profile_gpu_timestamps =
+// true`, these helpers return a structured error rather than
+// silently degrading. That keeps spec semantics honest — a caller
+// that asks for GPU timestamps gets either the timestamps or a
+// visible rejection, never a success report with a silently-dropped
+// field. The shipped `poseidon2_benchmark_suite()` constructor and
+// CLI hash mode both set the flag to `false`, so the rejection only
+// fires on hand-constructed specs. When `execute_profiled` lands on
+// the plans, this branch is replaced with the profiled path and the
+// error goes away — the contract flips from "rejected" to
+// "supported" without a caller-side change.
 
 use zkgpu_wgpu::{WgpuBabyBearPoseidon2Plan, WgpuGoldilocksPoseidon2Plan};
 
@@ -582,14 +590,34 @@ pub struct Poseidon2PlanMeasurement<F> {
     pub final_output: Vec<F>,
 }
 
+/// Error payload returned when a hand-written spec asks for GPU
+/// timestamps on the Poseidon2 path — the plans have no
+/// `execute_profiled` variant yet. Shared helper so both the
+/// BabyBear and Goldilocks measurement paths return the same
+/// diagnostic string.
+fn poseidon2_profiling_unsupported_error() -> zkgpu_core::ZkGpuError {
+    zkgpu_core::ZkGpuError::InvalidNttSize(
+        "profile_gpu_timestamps=true is not yet supported on the \
+         Poseidon2 path — the plans have no execute_profiled variant. \
+         Rerun with profile_gpu_timestamps=false, or wait for a \
+         future F.3.* sub-phase that adds profiled-execute to both \
+         plans and flips this from rejection to a measured profiled \
+         path."
+            .to_string(),
+    )
+}
+
 pub fn measure_babybear_poseidon2_plan(
     device: &WgpuDevice,
     data: &[BabyBear],
     plan: &mut WgpuBabyBearPoseidon2Plan,
     warmup_iterations: u32,
     iterations: u32,
-    _profile_gpu_timestamps: bool,
+    profile_gpu_timestamps: bool,
 ) -> Result<Poseidon2PlanMeasurement<BabyBear>, zkgpu_core::ZkGpuError> {
+    if profile_gpu_timestamps {
+        return Err(poseidon2_profiling_unsupported_error());
+    }
     let measured = iterations.max(1);
 
     // Warmup (discarded, non-profiled).
@@ -632,8 +660,12 @@ pub fn measure_goldilocks_poseidon2_plan(
     plan: &mut WgpuGoldilocksPoseidon2Plan,
     warmup_iterations: u32,
     iterations: u32,
-    _profile_gpu_timestamps: bool,
+    profile_gpu_timestamps: bool,
 ) -> Result<Poseidon2PlanMeasurement<Goldilocks>, zkgpu_core::ZkGpuError> {
+    if profile_gpu_timestamps {
+        return Err(poseidon2_profiling_unsupported_error());
+    }
+
     let measured = iterations.max(1);
 
     for _ in 0..warmup_iterations {

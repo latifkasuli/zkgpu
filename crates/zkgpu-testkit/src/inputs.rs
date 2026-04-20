@@ -170,28 +170,47 @@ mod tests {
         assert!(o.iter().all(|f| f.to_repr() == 1));
     }
 
-    /// Stronger parity pin: concrete SplitMix64 output. Both the
-    /// testkit and web runner compute the same value for
-    /// `hash_mix64(0, 1)`; this test locks the literal so if either
-    /// implementation drifts it's caught with a specific assertion
-    /// rather than a downstream differential failure.
+    /// Stronger parity pin: the concrete `hash_mix64(0, 1)` value is
+    /// pinned as a literal on BOTH crates that implement their own
+    /// copy of the mixer (testkit + zkgpu-web). A drift in either
+    /// crate's `hash_mix64` fails locally with a specific literal
+    /// mismatch — no cross-crate tautology, no silent cross-runner
+    /// differential.
+    ///
+    /// The literal below is `hash_mix64(0, 1)` computed by the
+    /// formula documented at the fn — recomputed 2026-04-20 via a
+    /// standalone rustc run. The matching pin in
+    /// `crates/zkgpu-web/src/hash_runner.rs` uses the same constant.
     #[test]
     fn splitmix64_first_output_is_pinned() {
-        // hash_mix64(0, 1) — computed by the formula documented at
-        // the fn. Recomputed 2026-04-20 and pinned so a future mixer
-        // refactor is an obvious diff.
-        let raw = hash_mix64(0, 1);
-        // BabyBear reduced value.
-        let bb_expected = (raw % (BB_P as u64)) as u32;
+        const HASH_MIX64_0_SEED_1: u64 = 0xE220_A839_7B1D_CDAF;
+        // Sanity: the local mixer matches the pinned literal. If this
+        // fails, the mixer drifted in this crate.
+        assert_eq!(
+            hash_mix64(0, 1),
+            HASH_MIX64_0_SEED_1,
+            "testkit hash_mix64 drifted from pinned literal",
+        );
+        // BabyBear-reduced first output.
+        let bb_first_expected =
+            (HASH_MIX64_0_SEED_1 % (BB_P as u64)) as u32;
         let bb_got =
             make_babybear_hash_input(1, &HashInputPattern::SplitMix64 { seed: 1 });
-        assert_eq!(bb_got[0].to_repr(), bb_expected);
-        // Goldilocks reduced value.
-        let gl_expected = raw % GL_P;
+        assert_eq!(
+            bb_got[0].to_repr(),
+            bb_first_expected,
+            "BabyBear input-generator output disagrees with pinned literal",
+        );
+        // Goldilocks-reduced first output.
+        let gl_first_expected = HASH_MIX64_0_SEED_1 % GL_P;
         let gl_got = make_goldilocks_hash_input(
             1,
             &HashInputPattern::SplitMix64 { seed: 1 },
         );
-        assert_eq!(gl_got[0].to_repr(), gl_expected);
+        assert_eq!(
+            gl_got[0].to_repr(),
+            gl_first_expected,
+            "Goldilocks input-generator output disagrees with pinned literal",
+        );
     }
 }

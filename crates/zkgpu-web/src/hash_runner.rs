@@ -141,6 +141,7 @@ async fn run_case_babybear(
         plan,
         case.warmup_iterations,
         case.iterations,
+        case.profile_gpu_timestamps,
     )
     .await
     {
@@ -176,6 +177,7 @@ async fn run_case_goldilocks(
         plan,
         case.warmup_iterations,
         case.iterations,
+        case.profile_gpu_timestamps,
     )
     .await
     {
@@ -191,13 +193,27 @@ async fn run_case_goldilocks(
 }
 
 // ---------------------------------------------------------------------------
-// Async measure helpers — wall-only per F.3.b contract
+// Async measure helpers
 // ---------------------------------------------------------------------------
 //
-// `profile_gpu_timestamps` is not wired (Poseidon2 plans have no
-// profiled-execute variant today). Honouring it is a future F.3.*
-// sub-phase; the contract matches the native testkit's
-// `measure_*_poseidon2_plan`.
+// Contract (Phase F.3.d post-review): both measure fns reject
+// `profile_gpu_timestamps = true` with a structured error. The
+// Poseidon2 plans have no `execute_profiled_async` variant yet, and
+// silently degrading to wall-only produces a success report with a
+// dropped field — the Phase E reviewers have consistently pushed
+// against that shape. Matches the native testkit's
+// `measure_*_poseidon2_plan` rejection. Built-in suites / CLI both
+// set the flag to `false`, so only hand-written specs hit this
+// path. When profiled-execute lands, the rejection flips to a
+// measured profiled path in the same commit.
+
+fn poseidon2_profiling_unsupported() -> String {
+    "profile_gpu_timestamps=true is not yet supported on the \
+     Poseidon2 path — the plans have no execute_profiled_async \
+     variant. Rerun with profile_gpu_timestamps=false, or wait for a \
+     future F.3.* sub-phase that adds profiled-execute to both plans."
+        .to_string()
+}
 
 async fn measure_babybear_poseidon2_async(
     dev: &Rc<WgpuDevice>,
@@ -205,7 +221,11 @@ async fn measure_babybear_poseidon2_async(
     plan: &mut WgpuBabyBearPoseidon2Plan,
     warmup_iterations: u32,
     iterations: u32,
+    profile_gpu_timestamps: bool,
 ) -> Result<(TimingReport, Vec<BabyBear>), String> {
+    if profile_gpu_timestamps {
+        return Err(poseidon2_profiling_unsupported());
+    }
     for _ in 0..warmup_iterations {
         let mut buf = dev.upload(data).map_err(|e| e.to_string())?;
         plan.execute_async(dev, &mut buf)
@@ -251,7 +271,12 @@ async fn measure_goldilocks_poseidon2_async(
     plan: &mut WgpuGoldilocksPoseidon2Plan,
     warmup_iterations: u32,
     iterations: u32,
+    profile_gpu_timestamps: bool,
 ) -> Result<(TimingReport, Vec<Goldilocks>), String> {
+    if profile_gpu_timestamps {
+        return Err(poseidon2_profiling_unsupported());
+    }
+
     for _ in 0..warmup_iterations {
         let mut buf = dev.upload(data).map_err(|e| e.to_string())?;
         plan.execute_async(dev, &mut buf)
@@ -482,18 +507,49 @@ mod tests {
         assert_eq!(gl[0].to_repr(), 1);
         assert_eq!(gl[31].to_repr(), 32);
 
-        // SplitMix64 { seed: 1 } first two outputs — these values
-        // come from running the shared `hash_mix64(0, 1)` and
-        // `hash_mix64(1, 1)` under the literal constants in the
-        // docstring. If either the constants or the mixer change,
-        // both implementations must update and so must these pins.
+        // SplitMix64 { seed: 1 } first output — must match the
+        // testkit-side pin at `zkgpu_testkit::inputs::tests::
+        // splitmix64_first_output_is_pinned`. Both sides pin the
+        // same literal so a drift in either crate's `hash_mix64`
+        // shows up as a local failure, not a silent cross-runner
+        // differential.
+        //
+        // The literal below is `hash_mix64(0, 1)` computed by the
+        // formula documented at the fn — recomputed 2026-04-20 via a
+        // standalone rustc run of the same bit-twiddle, so a drift in
+        // the mixer constants is caught by both crates' tests
+        // independently.
+        const HASH_MIX64_0_SEED_1: u64 = 0xE220_A839_7B1D_CDAF;
         let bb_mix = make_babybear_hash_input(
             1,
             &HashInputPattern::SplitMix64 { seed: 1 },
         );
         assert_eq!(bb_mix.len(), 16);
-        // Verify the mixer output is reduced mod p (smoke check —
-        // BabyBear p < 2^31 so any valid output is < 2^31).
+        // BabyBear-reduced first output.
+        let bb_first_expected =
+            (HASH_MIX64_0_SEED_1 % (zkgpu_babybear::P as u64)) as u32;
+        assert_eq!(
+            bb_mix[0].to_repr(),
+            bb_first_expected,
+            "BabyBear SplitMix64 drift — browser-side hash_mix64 \
+             disagrees with pinned literal 0x{:016X}",
+            HASH_MIX64_0_SEED_1,
+        );
+        // Goldilocks-reduced first output.
+        let gl_mix = make_goldilocks_hash_input(
+            1,
+            &HashInputPattern::SplitMix64 { seed: 1 },
+        );
+        let gl_first_expected = HASH_MIX64_0_SEED_1 % zkgpu_goldilocks::P;
+        assert_eq!(
+            gl_mix[0].to_repr(),
+            gl_first_expected,
+            "Goldilocks SplitMix64 drift — browser-side hash_mix64 \
+             disagrees with pinned literal 0x{:016X}",
+            HASH_MIX64_0_SEED_1,
+        );
+        // Range smoke on the rest of the batch — cheap sanity that
+        // the reduction doesn't silently overflow.
         for f in &bb_mix {
             assert!(f.to_repr() < 0x7800_0001);
         }
