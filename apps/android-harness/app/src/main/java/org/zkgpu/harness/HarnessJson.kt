@@ -213,11 +213,18 @@ object HarnessJson {
         // Matches `zkgpu_report::poseidon2_smoke_suite()`. Inline here
         // because the Kotlin side has no Rust-bridge call for "give me
         // the shipped smoke spec as JSON"; easier to transcribe.
+        // Unit-variant inputs (AllZeros / AllOnes / Sequential)
+        // serialise as bare strings — serde's untagged-unit
+        // convention. Only struct-like variants (e.g. SplitMix64 {
+        // seed }) use the `{"Tag": {...}}` envelope. Phase F.3.e.2
+        // initial draft wrapped AllZeros/AllOnes as `{"AllZeros": {}}`
+        // which BrowserStack caught with `invalid type: map, expected
+        // unit at line 1 column 401` — fixed here.
         val cases = JSONArray()
-            .put(smokeCase("poseidon2_smoke_single", 1, sequentialInput()))
-            .put(smokeCase("poseidon2_smoke_batch17", 17, sequentialInput()))
-            .put(smokeCase("poseidon2_smoke_zeros", 8, JSONObject().put("AllZeros", JSONObject())))
-            .put(smokeCase("poseidon2_smoke_ones", 8, JSONObject().put("AllOnes", JSONObject())))
+            .put(smokeCase("poseidon2_smoke_single", 1, "Sequential"))
+            .put(smokeCase("poseidon2_smoke_batch17", 17, "Sequential"))
+            .put(smokeCase("poseidon2_smoke_zeros", 8, "AllZeros"))
+            .put(smokeCase("poseidon2_smoke_ones", 8, "AllOnes"))
             .put(
                 smokeCase(
                     "poseidon2_smoke_rng",
@@ -247,12 +254,6 @@ object HarnessJson {
             .put("profile_gpu_timestamps", false)
             .put("iterations", 1)
             .put("warmup_iterations", 0)
-
-    private fun sequentialInput(): Any =
-        // `InputPattern::Sequential` / `HashInputPattern::Sequential`
-        // is a unit variant; serde encodes it as the bare string
-        // "Sequential" (no wrapper object).
-        "Sequential"
 
     fun syntheticErrorJson(message: String): String =
         JSONObject()
