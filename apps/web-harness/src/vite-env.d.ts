@@ -17,6 +17,18 @@ declare module "../pkg/zkgpu_web" {
   /** Run a single test case from JSON CaseSpec. Returns JSON CaseReport. */
   export function run_case(case_json: string): Promise<string>;
 
+  /**
+   * Phase F.3.d wasm entry — run a Poseidon2 hash suite.
+   *
+   * Input: JSON-encoded `HashSpec` (no envelope; bare spec).
+   *
+   * Wire shape asymmetry (flagged in types.ts for follow-up):
+   *   - success → bare `HashSuiteReport` JSON
+   *   - error   → `HarnessResponse`-shaped object (ok: false, error)
+   * Callers must sniff whichever shape arrived.
+   */
+  export function run_hash(spec_json: string): Promise<string>;
+
   /** Return version info as JSON. */
   export function version(): string;
 }

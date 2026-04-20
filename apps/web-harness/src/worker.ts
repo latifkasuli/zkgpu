@@ -11,7 +11,14 @@
  * the wasm-side global device state.
  */
 
-import type { WorkerRequest, WorkerResponse, HarnessResponse, DeviceReport } from "./types";
+import type {
+  WorkerRequest,
+  WorkerResponse,
+  HarnessResponse,
+  DeviceReport,
+  HashSpec,
+  HashSuiteReport,
+} from "./types";
 
 // ---- State ----
 
@@ -71,6 +78,10 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 
     case "run_suite":
       enqueue(() => handleRunSuite(msg.request));
+      break;
+
+    case "run_hash":
+      enqueue(() => handleRunHash(msg.spec));
       break;
 
     case "version":
@@ -133,6 +144,62 @@ async function handleRunSuite(request: import("./types").HarnessRequest) {
     const error = e instanceof Error ? e.message : String(e);
     log("error", `Suite failed: ${error}`);
     post({ type: "suite_error", error });
+  }
+}
+
+// ---- Run hash (Phase F.3.d wasm entry) ----
+
+/**
+ * Drive a Poseidon2 hash suite through the wasm `run_hash` entry.
+ *
+ * Wire shape: the wasm entry emits a **bare** `HashSuiteReport` JSON
+ * on success and a `HarnessResponse`-shaped error object on failure
+ * (see `types.ts` `hash_result` for the harmonization TODO). This
+ * handler sniffs which shape arrived by looking for the
+ * `schema_version` key and dispatches to `hash_result` /
+ * `hash_error` accordingly — the main-thread caller consumes a
+ * uniform worker-API shape either way.
+ */
+async function handleRunHash(spec: HashSpec) {
+  if (!wasmReady || !wasmModule) {
+    post({
+      type: "hash_error",
+      error: "Worker not initialized — send 'init' first",
+    });
+    return;
+  }
+
+  try {
+    const specJson = JSON.stringify(spec);
+    log(
+      "info",
+      `Running hash suite: ${spec.algorithm} field=${spec.field} cases=${spec.cases.length}...`,
+    );
+
+    const resultJson = await wasmModule.run_hash(specJson);
+    const parsed: unknown = JSON.parse(resultJson);
+
+    // Success: bare HashSuiteReport carries `schema_version` at the
+    // top level. Error: HarnessResponse-shaped object carries
+    // `ok: false` + `error`. Neither branch assumes the other's
+    // fields are present.
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "schema_version" in parsed
+    ) {
+      post({ type: "hash_result", report: parsed as HashSuiteReport });
+    } else {
+      const errObj = parsed as { error?: string };
+      post({
+        type: "hash_error",
+        error: errObj.error ?? "wasm run_hash returned unexpected shape",
+      });
+    }
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    log("error", `Hash suite failed: ${error}`);
+    post({ type: "hash_error", error });
   }
 }
 
