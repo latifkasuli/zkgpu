@@ -326,6 +326,16 @@ struct HashSuiteReport: Codable {
     var summary: SuiteSummary
 }
 
+/// Plain-string `CodingKey` used by the custom key-encoding
+/// strategy above. Lets us build a snake-cased key from a converted
+/// string at runtime without needing a second enum.
+private struct SnakeCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+    init(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+}
+
 private struct DynamicCodingKey: CodingKey {
     var stringValue: String
     var intValue: Int? { nil }
@@ -367,9 +377,46 @@ enum ZkgpuBridgeError: LocalizedError {
 }
 
 enum ZkgpuBridge {
+    /// Phase F.3.f key-encoding strategy.
+    ///
+    /// Swift's built-in `.convertToSnakeCase` is applied to **every**
+    /// coding key during encoding — including the dynamic keys that
+    /// `HashInputPattern.splitMix64` uses for the `{"SplitMix64":
+    /// {...}}` variant envelope. That mangles the Rust-side variant
+    /// tag into `split_mix64`, which serde rejects with
+    /// `unknown variant`.
+    ///
+    /// Custom rule: snake-case only keys that start with a lowercase
+    /// letter (i.e. Swift struct / enum *field* names). Keys that
+    /// start with an uppercase letter are enum *variant tags*
+    /// (`SplitMix64`, `PseudoRandomDeterministic`, `AllZeros`
+    /// serialised as-bare-strings doesn't hit this path) and must
+    /// pass through verbatim.
+    private static func keyToSnakeCase(_ keys: [CodingKey]) -> CodingKey {
+        // `keys` is the full path; the last element is the one being
+        // encoded. Preserves container depth semantics.
+        let last = keys.last!
+        let name = last.stringValue
+        guard let first = name.first else { return last }
+        if first.isUppercase {
+            return last
+        }
+        // Standard Swift camelCase → snake_case conversion.
+        var out = ""
+        var previousIsLower = false
+        for ch in name {
+            if ch.isUppercase, previousIsLower {
+                out.append("_")
+            }
+            out.append(ch.lowercased())
+            previousIsLower = ch.isLowercase
+        }
+        return SnakeCodingKey(stringValue: out)
+    }
+
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.keyEncodingStrategy = .custom(keyToSnakeCase)
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }()
