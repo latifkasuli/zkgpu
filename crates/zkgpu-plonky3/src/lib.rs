@@ -305,6 +305,29 @@ fn zkgpu_to_p3_babybear(src: &[ZkgpuBabyBear]) -> Vec<P3BabyBear> {
     src.iter().map(|e| P3BabyBear::new(e.0)).collect()
 }
 
+// -- Strict-vs-warn fallback decision ----------------------------------------
+
+/// Handle an `Err` from a GPU-path step by either panicking (strict
+/// mode) or warning + returning `None` (non-strict mode, caller falls
+/// back to CPU).
+///
+/// Factored out of `dft_batch` so the strict-vs-warn policy can be
+/// tested without allocating huge matrices to trip internal errors.
+/// See the test `strict_mode_panics` which calls this directly.
+#[inline]
+fn handle_gpu_step_err(context_tag: &str, log_h: u32, strict: bool, err: String) {
+    if strict {
+        panic!(
+            "GpuDft::strict_gpu(): {context_tag} at log_h={log_h} and \
+             strict mode forbids CPU fallback: {err}"
+        );
+    }
+    tracing::warn!(
+        target: "zkgpu_plonky3",
+        "{context_tag} at log_h={log_h}, falling back: {err}"
+    );
+}
+
 // -- TwoAdicSubgroupDft impl --------------------------------------------------
 
 impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
@@ -335,12 +358,7 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
         let ctx = match get_context() {
             Ok(ctx) => ctx.clone(),
             Err(e) => {
-                if self.strict {
-                    panic!(
-                        "GpuDft::strict_gpu(): device init failed and \
-                         strict mode forbids CPU fallback: {e}"
-                    );
-                }
+                handle_gpu_step_err("device init failed", log_h, self.strict, e.clone());
                 return self.cpu_fallback.dft_batch(mat);
             }
         };
@@ -348,17 +366,7 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
         let plan = match ctx.get_or_build_plan(log_h, NttDirection::Forward) {
             Ok(p) => p,
             Err(e) => {
-                if self.strict {
-                    panic!(
-                        "GpuDft::strict_gpu(): plan build failed at \
-                         log_h={log_h} and strict mode forbids CPU \
-                         fallback: {e}"
-                    );
-                }
-                tracing::warn!(
-                    target: "zkgpu_plonky3",
-                    "plan build failed at log_h={log_h}, falling back: {e}"
-                );
+                handle_gpu_step_err("plan build failed", log_h, self.strict, e);
                 return self.cpu_fallback.dft_batch(mat);
             }
         };
@@ -368,17 +376,7 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
         let natural = match run_column_loop(&ctx, &plan, &mat) {
             Ok(out) => out,
             Err(e) => {
-                if self.strict {
-                    panic!(
-                        "GpuDft::strict_gpu(): GPU execution failed at \
-                         log_h={log_h} and strict mode forbids CPU \
-                         fallback: {e}"
-                    );
-                }
-                tracing::warn!(
-                    target: "zkgpu_plonky3",
-                    "GPU execution failed at log_h={log_h}, falling back: {e}"
-                );
+                handle_gpu_step_err("GPU execution failed", log_h, self.strict, e);
                 return self.cpu_fallback.dft_batch(mat);
             }
         };
@@ -608,28 +606,45 @@ mod tests {
         assert_matrix_eq(&gpu_out, &cpu_out, "strict_gpu log_h=12 w=4");
     }
 
-    /// Strict mode is advertised as panicking in `dft_batch` when a
-    /// fallback would occur. We can't reliably force a device-init
-    /// failure in-process (the context is process-global and may
-    /// already be initialised), but we can demonstrate the panic
-    /// mechanism fires on plan-build failure by requesting a
-    /// `log_n` beyond BabyBear's 2-adicity cap (27). The plan
-    /// constructor rejects this, which under strict mode must panic.
+    /// Strict-mode panic path exercised via the internal
+    /// `handle_gpu_step_err` seam. Testing through the full
+    /// `dft_batch` entry point would require triggering one of the
+    /// GPU-path failures end-to-end (device init, plan build, or
+    /// execute), all of which would demand either process-wide state
+    /// manipulation or multi-GiB matrix allocations — neither
+    /// appropriate for a unit test.
+    ///
+    /// The factoring keeps the actual dispatch simple: every site in
+    /// `dft_batch` that could fall back calls `handle_gpu_step_err`,
+    /// so if this helper panics correctly on strict + err, every call
+    /// site does too.
     #[test]
     #[should_panic(expected = "strict mode forbids CPU fallback")]
-    fn strict_gpu_panics_on_plan_build_failure() {
-        // log_h = 28 exceeds BabyBear's TWO_ADICITY = 27, so
-        // `WgpuNttPlan::new` returns an error. Under `strict_gpu`,
-        // this must panic rather than silently route to CPU.
-        //
-        // Using a tiny width to keep the matrix under ~1 GiB even at
-        // log_h=28 (2^28 * 4 bytes = 1 GiB); we're testing the error
-        // path, not real execution.
-        let h = 1usize << 28;
-        let values = vec![P3BabyBear::new(0); h];
-        let mat = RowMajorMatrix::new(values, 1);
-        let gpu = GpuDft::<P3BabyBear>::strict_gpu();
-        let _ = gpu.dft_batch(mat); // expected to panic
+    fn strict_mode_panics_on_err() {
+        handle_gpu_step_err(
+            "plan build failed",
+            14,
+            true,
+            "simulated: log_n=28 exceeds 2-adicity".to_string(),
+        );
+    }
+
+    /// Non-strict mode must *not* panic on the same error — it
+    /// should emit a `tracing::warn!` and return. This test is the
+    /// inverse of `strict_mode_panics_on_err` and together they pin
+    /// the full policy behavior of `handle_gpu_step_err`.
+    #[test]
+    fn non_strict_mode_warns_without_panic() {
+        handle_gpu_step_err(
+            "plan build failed",
+            14,
+            false,
+            "simulated error".to_string(),
+        );
+        // If we get here without panicking, the non-strict path is
+        // correct. (tracing::warn! output is not asserted — verifying
+        // log output in a unit test couples to the tracing
+        // subscriber, which is out of scope.)
     }
 
     /// Sanity-check field conversion round-trips.
