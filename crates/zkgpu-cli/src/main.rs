@@ -923,18 +923,37 @@ fn main() {
 
     eprintln!("Device: {caps}");
     eprintln!("Field: {}", cli.field.as_str());
-    eprintln!("Family override: {}", cli.family_override.as_str());
-    eprintln!("Tail override: {}", cli.tail_override.as_str());
+    let is_hash_mode = matches!(cli.mode, CliMode::Hash { .. });
+    // Suppress NTT-override diagnostic lines in hash mode — the hash
+    // runner doesn't consume --force-family / --force-tail at all, so
+    // printing them would falsely suggest they're active.
+    if !is_hash_mode {
+        eprintln!("Family override: {}", cli.family_override.as_str());
+        eprintln!("Tail override: {}", cli.tail_override.as_str());
+    }
     // BabyBear-only flags are silently ignored on the Goldilocks path
     // (see `--field` in usage). Warn the operator so no-op runs aren't
     // mistaken for successful A/B matrices.
     if cli.field == Field::Goldilocks
+        && !is_hash_mode
         && (cli.family_override != FamilyOverride::Auto
             || cli.tail_override != TailOverride::Auto)
     {
         eprintln!(
             "warning: --force-family / --force-tail ignored under --field goldilocks \
              (the Goldilocks plan has no four-step or local-fused-tail variant)"
+        );
+    }
+    // F.3.c post-review (P3): --hash mode uses neither override. Warn
+    // if the operator set them so the run isn't mistaken for a
+    // forced-family/tail A/B matrix against the hash kernel.
+    if is_hash_mode
+        && (cli.family_override != FamilyOverride::Auto
+            || cli.tail_override != TailOverride::Auto)
+    {
+        eprintln!(
+            "warning: --force-family / --force-tail are NTT-only and have no \
+             effect on --hash runs; the hash path ignores them"
         );
     }
 
@@ -1130,10 +1149,19 @@ fn run_hash_mode(cli: &CliArgs, algorithm: zkgpu_report::HashAlgorithm) {
     );
 
     // Build one case per positional `num_permutations` entry. All
-    // cases share profiling + iteration settings (1 warmup, 5
-    // measured) so throughput-curve interpretation is consistent
-    // across rows. Matches the `poseidon2_benchmark_suite` convention
-    // but is driven by the operator's CLI-supplied batch list.
+    // cases share iteration settings (1 warmup, 5 measured) so
+    // throughput-curve interpretation is consistent across rows.
+    // Matches the `poseidon2_benchmark_suite` convention but driven
+    // by the operator's CLI-supplied batch list.
+    //
+    // F.3.c post-review (P2): profile_gpu_timestamps is NOT set. The
+    // Poseidon2 plans today have no profiled-execute variant; the
+    // testkit's measure_*_poseidon2_plan would silently drop a
+    // profiled-request flag. Keeping the spec honest — wall_time_ns
+    // populated, gpu_total_ns null — beats advertising GPU
+    // timestamps that don't arrive. When a future F.3.* sub-phase
+    // adds execute_profiled, flip this to `.with_profile(true)` in
+    // the same commit that wires the plan-side support.
     let mut cases = Vec::with_capacity(cli.sizes.len());
     for &num in &cli.sizes {
         cases.push(
@@ -1145,7 +1173,6 @@ fn run_hash_mode(cli: &CliArgs, algorithm: zkgpu_report::HashAlgorithm) {
                 // meaningfully exercised alongside BabyBear.
                 zkgpu_report::HashInputPattern::SplitMix64 { seed: 1 },
             )
-            .with_profile(true)
             .with_iterations(1, 5),
         );
     }
@@ -1520,6 +1547,29 @@ mod tests {
         assert!(matches!(parsed.mode, CliMode::Hash { .. }));
         assert_eq!(parsed.field, Field::Goldilocks);
         assert_eq!(parsed.sizes, vec![256]);
+    }
+
+    /// Phase F.3.c post-review (P3): `--hash` + NTT overrides parses
+    /// successfully (the overrides are ignored, not rejected — see
+    /// main.rs for the stderr warning that fires at startup). The
+    /// parser itself shouldn't block the combination so bulk-reusing
+    /// an NTT invocation line with `--hash` appended keeps working.
+    #[test]
+    fn parse_hash_tolerates_ntt_overrides() {
+        let parsed = parse_cli_args(vec![
+            "--hash=poseidon2".to_string(),
+            "--force-family=stockham".to_string(),
+            "--force-tail=local".to_string(),
+            "1024".to_string(),
+        ])
+        .unwrap();
+        assert!(matches!(parsed.mode, CliMode::Hash { .. }));
+        // Parser doesn't clear them — the runtime warning does the
+        // operator-visible work. Asserting both are stored verifies
+        // the parse path doesn't accidentally drop them (which would
+        // break NTT mode too).
+        assert_eq!(parsed.family_override, FamilyOverride::Stockham);
+        assert_eq!(parsed.tail_override, TailOverride::Local);
     }
 
     #[test]

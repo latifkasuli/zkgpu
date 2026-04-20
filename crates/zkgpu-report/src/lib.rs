@@ -950,14 +950,21 @@ pub fn poseidon2_smoke_suite() -> HashSpec {
     }
 }
 
-/// Benchmark suite: a log-spaced batch-size ladder with profiling
-/// enabled. Parallels the NTT `benchmark_suite` convention of
-/// progressively larger workloads so per-case throughput curves can
-/// be plotted.
+/// Benchmark suite: a log-spaced batch-size ladder. Parallels the NTT
+/// `benchmark_suite` convention of progressively larger workloads so
+/// per-case throughput curves can be plotted.
+///
+/// **`profile_gpu_timestamps` intentionally stays `false`** until a
+/// future F.3.* sub-phase adds `execute_profiled` /
+/// `execute_profiled_async` to both Poseidon2 plans. Setting the flag
+/// today would silently degrade to wall-only timings (see
+/// `measure_*_poseidon2_plan` in zkgpu-testkit) with no signal in the
+/// report — an honest spec beats a flag that gets dropped on the
+/// floor. When profiled-execute lands, flip this to `.with_profile(true)`
+/// in the same commit that wires the plan-side support.
 pub fn poseidon2_benchmark_suite() -> HashSpec {
     let benchmark_case = |name: &str, num: u32| {
         HashCaseSpec::new(name, num, HashInputPattern::SplitMix64 { seed: 1 })
-            .with_profile(true)
             .with_iterations(1, 5)
     };
 
@@ -1203,14 +1210,18 @@ mod tests {
     }
 
     #[test]
-    fn poseidon2_benchmark_suite_enables_profiling_and_iterates() {
+    fn poseidon2_benchmark_suite_shape_and_iteration_defaults() {
         let suite = poseidon2_benchmark_suite();
         assert_eq!(suite.kind, SuiteKind::Benchmark);
         assert!(!suite.fail_fast);
+        // F.3.a post-review (P2): profiling is off until profiled-
+        // execute lands on the Poseidon2 plans. When that lands, flip
+        // the constructor to `.with_profile(true)` AND flip this
+        // assertion in the same commit.
         assert!(suite
             .cases
             .iter()
-            .all(|c| c.profile_gpu_timestamps && c.iterations == 5 && c.warmup_iterations == 1));
+            .all(|c| !c.profile_gpu_timestamps && c.iterations == 5 && c.warmup_iterations == 1));
         // Sizes should be strictly ascending — lets downstream
         // throughput-per-permutation curves interpret the ladder
         // without sorting.
