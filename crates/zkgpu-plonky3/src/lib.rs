@@ -14,6 +14,22 @@
 //! [`GpuDft::preload_plans`], `tracing::instrument` for profiler
 //! compatibility, cache-growth semantics documented below.
 //!
+//! Phase 7.4 — perf microbench (see `benches/gpu_vs_cpu_dft.rs`).
+//! Headline findings on RTX 4090 + Ryzen 9 7950X:
+//!
+//! * **Single-polynomial (width=1)**: GPU wins at `log_h ≥ 16`;
+//!   peak 2.44× at `log_h=18` for `dft_batch`, 1.73× at `log_h=20`
+//!   for `coset_lde_batch`.
+//! * **Wide-batch (width=8)**: GPU loses at every tested size under
+//!   Path A (column-loop). Best case at `log_h=20`: CPU 100 ms /
+//!   GPU 111 ms (1.11× CPU win). This is the motivating data point
+//!   for Phase 7.5 (Path B — 2D batched plan).
+//! * **Fallback threshold holds**: `log_h < 14 → CPU` is
+//!   empirically correct on discrete NVIDIA.
+//!
+//! Run the bench with
+//! `cargo bench -p zkgpu-plonky3 --bench gpu_vs_cpu_dft`.
+//!
 //! # Strategy
 //!
 //! Plonky3's DFT operates on a [`RowMajorMatrix<F>`] where each
