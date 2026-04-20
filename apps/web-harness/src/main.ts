@@ -13,6 +13,7 @@ import type {
   SuiteReport,
   CaseReport,
   DeviceReport,
+  HashSuiteReport,
 } from "./types";
 
 // ---------- DOM refs ----------
@@ -33,6 +34,7 @@ const jsonText = document.getElementById("json-text") as HTMLTextAreaElement;
 // ---------- State ----------
 
 let lastReport: SuiteReport | null = null;
+let lastHashReport: HashSuiteReport | null = null;
 let lastResponseJson: string | null = null;
 let running = false;
 
@@ -71,6 +73,13 @@ function handleWorkerMessage(msg: WorkerResponse) {
       onSuiteResult(msg.response);
       break;
     case "suite_error":
+      setStatus("error", msg.error);
+      setRunning(false);
+      break;
+    case "hash_result":
+      onHashResult(msg.report);
+      break;
+    case "hash_error":
       setStatus("error", msg.error);
       setRunning(false);
       break;
@@ -152,6 +161,46 @@ function onSuiteResult(response: HarnessResponse) {
   }
 }
 
+// ---------- Hash result handling (Phase F.3.e) ----------
+//
+// The shipped UI has no "Run Hash" button today; this path exists so
+// consumers driving the worker through `__zkgpuWorker` (Playwright,
+// future UI hooks) get a uniform main-thread response instead of a
+// silent drop. Mirrors `onSuiteResult` for JSON-export symmetry.
+
+function onHashResult(report: HashSuiteReport) {
+  setRunning(false);
+
+  lastReport = null;
+  lastHashReport = report;
+
+  // Reuse the enrichment shape so exported JSON carries the same
+  // browser metadata (clock source, UA, worker flag) as NTT runs.
+  const enriched = enrichHashReport(report);
+  lastResponseJson = JSON.stringify(enriched, null, 2);
+
+  exportBtn.disabled = false;
+  copyBtn.disabled = false;
+  downloadBtn.disabled = false;
+
+  const s = report.summary;
+  const line = `hash suite ${report.suite}: ${s.passed_cases}/${s.total_cases} passed`;
+  console.log(`[hash] ${line}`);
+  if (s.failed_cases === 0) {
+    setStatus("success", `All ${s.total_cases} hash cases passed`);
+  } else {
+    setStatus("error", `${s.failed_cases}/${s.total_cases} hash cases failed`);
+  }
+}
+
+function enrichHashReport(report: HashSuiteReport): Record<string, unknown> {
+  const obj = JSON.parse(JSON.stringify(report)) as Record<string, unknown>;
+  obj.timing_metadata = collectTimingMetadata();
+  obj.collected_at = new Date().toISOString();
+  obj.harness = "web";
+  return obj;
+}
+
 // ---------- Rendering ----------
 
 function renderReport(report: SuiteReport) {
@@ -210,6 +259,7 @@ function clearResults() {
   summaryDiv.innerHTML = "";
   jsonOutput.style.display = "none";
   lastReport = null;
+  lastHashReport = null;
   lastResponseJson = null;
   exportBtn.disabled = true;
   copyBtn.disabled = true;
@@ -237,15 +287,18 @@ async function copyJson() {
 }
 
 function downloadJson() {
-  if (!lastResponseJson || !lastReport) return;
+  if (!lastResponseJson) return;
+  const source = lastReport ?? lastHashReport;
+  if (!source) return;
   const blob = new Blob([lastResponseJson], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  const deviceName = lastReport.device.name.replace(/[^a-zA-Z0-9]/g, "_");
-  const suite = lastReport.suite;
+  const deviceName = source.device.name.replace(/[^a-zA-Z0-9]/g, "_");
+  const suite = source.suite;
+  const prefix = lastHashReport ? "zkgpu_hash" : "zkgpu";
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   a.href = url;
-  a.download = `zkgpu_${suite}_${deviceName}_${ts}.json`;
+  a.download = `${prefix}_${suite}_${deviceName}_${ts}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -268,7 +321,7 @@ function collectTimingMetadata(): TimingMetadata {
     worker: true, // our execution runs in a Web Worker
     secure_context: globalThis.isSecureContext ?? false,
     user_agent: navigator.userAgent,
-    adapter_info: lastReport?.device.name ?? "",
+    adapter_info: lastReport?.device.name ?? lastHashReport?.device.name ?? "",
   };
 }
 
