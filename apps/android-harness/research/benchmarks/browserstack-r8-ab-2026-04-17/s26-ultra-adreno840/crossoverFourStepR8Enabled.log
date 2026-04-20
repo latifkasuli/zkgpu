@@ -1,0 +1,141 @@
+04-17 12:14:42.682 I/Zygote  (11765): Process 11765 created for org.zkgpu.harness
+04-17 12:14:42.683 I/g.zkgpu.harness(11765): Late-enabling -Xcheck:jni
+04-17 12:14:42.698 I/g.zkgpu.harness(11765): Using CollectorTypeCMC GC.
+04-17 12:14:42.703 D/nativeloader(11765): Load libframework-connectivity-tiramisu-jni.so using APEX ns com_android_tethering for caller /apex/com.android.tethering/javalib/framework-connectivity-t.jar: ok
+04-17 12:14:42.705 D/ActivityThread(11765): setConscryptValidator
+04-17 12:14:42.705 D/ActivityThread(11765): setConscryptValidator - put
+04-17 12:14:42.717 W/ActivityThread(11765): Package uses different ABI(s) than its instrumentation: package[org.zkgpu.harness]: arm64-v8a, null instrumentation[org.zkgpu.harness.test]: null, null
+04-17 12:14:42.725 D/nativeloader(11765): Configuring clns-9 for other apk /data/app/~~-tcBRBUXGhwBU8IxY5BepA==/org.zkgpu.harness.test-hBHP5I-aHE_JlkkMQsAaZQ==/base.apk:/data/app/~~gi5OkCsO5GbrnGsTjsLUDA==/org.zkgpu.harness-mdUATr9ODEOJ-TfLy-la_w==/base.apk. target_sdk_version=36, uses_libraries=, library_path=/data/app/~~-tcBRBUXGhwBU8IxY5BepA==/org.zkgpu.harness.test-hBHP5I-aHE_JlkkMQsAaZQ==/lib/arm64:/data/app/~~gi5OkCsO5GbrnGsTjsLUDA==/org.zkgpu.harness-mdUATr9ODEOJ-TfLy-la_w==/lib/arm64:/data/app/~~-tcBRBUXGhwBU8IxY5BepA==/org.zkgpu.harness.test-hBHP5I-aHE_JlkkMQsAaZQ==/base.apk!/lib/arm64-v8a:/data/app/~~gi5OkCsO5GbrnGsTjsLUDA==/org.zkgpu.harness-mdUATr9ODEOJ-TfLy-la_w==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/org.zkgpu.harness
+04-17 12:14:42.727 V/GraphicsEnvironment(11765): Currently set values for:
+04-17 12:14:42.727 V/GraphicsEnvironment(11765):   angle_gl_driver_selection_pkgs=[]
+04-17 12:14:42.727 V/GraphicsEnvironment(11765):   angle_gl_driver_selection_values=[]
+04-17 12:14:42.727 V/GraphicsEnvironment(11765): org.zkgpu.harness is not listed in per-application setting
+04-17 12:14:42.727 V/GraphicsEnvironment(11765): ANGLE allowlist from config: com.dreamgames.royalmatch com.dts.freefiremax com.dxx.firenow com.gramgames.mergedragons com.ludo.king com.mojang.minecraftpe com.my.defense com.nintendo.zaka com.os.airforce com.playrix.fishdomdd.gplay io.teslatech.callbreak jp.konami.prospia net.peakgames.toonblast
+04-17 12:14:42.727 V/GraphicsEnvironment(11765): No special selections for ANGLE, returning default driver choice
+04-17 12:14:42.727 V/GraphicsEnvironment(11765): App is not on the allowlist for updatable production driver.
+04-17 12:14:42.746 I/AndroidJUnitRunner(11765): newApplication android.app.Application
+04-17 12:14:42.746 I/AndroidJUnitRunner(11765): onCreate Bundle[mParcelledData.dataSize=164]
+04-17 12:14:42.746 D/AndroidJUnitRunner(11765): Use the raw file system for managing file I/O.
+04-17 12:14:42.747 V/TestEventClient(11765): No service name argument was given (testDiscoveryService, testRunEventService or orchestratorService)
+04-17 12:14:42.748 D/AndroidJUnitRunner(11765): onStart is called.
+04-17 12:14:42.750 I/InstrConnection(11765): Could not send broadcast or register receiver (isolatedProcess?)
+04-17 12:14:42.757 I/TestRunner(11765): run started: 1 tests
+04-17 12:14:42.758 I/TestRunner(11765): started: crossoverFourStepR8Enabled(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-17 12:14:42.762 D/nativeloader(11765): Load /data/app/~~gi5OkCsO5GbrnGsTjsLUDA==/org.zkgpu.harness-mdUATr9ODEOJ-TfLy-la_w==/base.apk!/lib/arm64-v8a/libzkgpu_android_bridge.so using class loader ns clns-9 (caller=/data/app/~~gi5OkCsO5GbrnGsTjsLUDA==/org.zkgpu.harness-mdUATr9ODEOJ-TfLy-la_w==/base.apk!classes3.dex): ok
+04-17 12:14:42.763 D/vulkan  (11765): searching for layers in '/data/app/~~gi5OkCsO5GbrnGsTjsLUDA==/org.zkgpu.harness-mdUATr9ODEOJ-TfLy-la_w==/lib/arm64'
+04-17 12:14:42.763 D/vulkan  (11765): searching for layers in '/data/app/~~-tcBRBUXGhwBU8IxY5BepA==/org.zkgpu.harness.test-hBHP5I-aHE_JlkkMQsAaZQ==/base.apk!/lib/arm64-v8a'
+04-17 12:14:42.763 D/vulkan  (11765): searching for layers in '/data/app/~~gi5OkCsO5GbrnGsTjsLUDA==/org.zkgpu.harness-mdUATr9ODEOJ-TfLy-la_w==/base.apk!/lib/arm64-v8a'
+04-17 12:14:42.765 E/Adreno-AppProfiles(11765): QSPM AIDL service doesn't exist
+04-17 12:14:42.766 I/AdrenoVK-0(11765): ===== BEGIN DUMP OF OVERRIDDEN SETTINGS =====
+04-17 12:14:42.766 I/AdrenoVK-0(11765): ===== END DUMP OF OVERRIDDEN SETTINGS =====
+04-17 12:14:42.766 I/vulkan  (11765): CreateInfoWrapper::FilterExtension: already have 'VK_KHR_get_physical_device_properties2'.
+04-17 12:14:42.766 E/Adreno-AppProfiles(11765): QSPM AIDL service doesn't exist
+04-17 12:14:42.766 I/AdrenoVK-0(11765): ===== BEGIN DUMP OF OVERRIDDEN SETTINGS =====
+04-17 12:14:42.766 I/AdrenoVK-0(11765): ===== END DUMP OF OVERRIDDEN SETTINGS =====
+04-17 12:14:42.768 D/qdgralloc(11765): Fetching IMapper5 from QtiMapper5
+04-17 12:14:42.774 I/SnapAlloc(11765): Graphics lib is available
+04-17 12:14:42.775 I/AdrenoVK-0(11765): QUALCOMM build          : bacff47b1e, I498f01ff61
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Build Date              : 11/20/25
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Shader Compiler Version : E031.50.19.13
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Local Branch            : 
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Remote Branch           : refs/tags/AU_LINUX_ANDROID_LA.VENDOR.16.2.0.R1.11.00.00.1277.089
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Remote Branch           : NONE
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Reconstruct Branch      : NOTHING
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Build Config            : C P 20.0.0 AArch64
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Driver Path             : /vendor/lib64/hw/vulkan.adreno.so
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Driver Version          : 0842.19.3
+04-17 12:14:42.775 I/AdrenoVK-0(11765): PFP                     : 0x01510594
+04-17 12:14:42.775 I/AdrenoVK-0(11765): ME                      : 0x01510025
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Application Name    : wgpu
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Process Name        : org.zkgpu.harness
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Application Version : 0x00000001
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Engine Name         : wgpu-hal
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Engine Version      : 0x00000002
+04-17 12:14:42.775 I/AdrenoVK-0(11765): Api Version         : 0x00403000
+04-17 12:14:43.278 W/g.zkgpu.harness(11765): userfaultfd: MOVE ioctl seems unsupported: Success
+04-17 12:14:43.280 I/g.zkgpu.harness(11765): Explicit concurrent mark compact GC freed 2112KB AllocSpace bytes, 0(0B) LOS objects, 92% free, 1875KB/25MB, paused 46us,734us total 6.965ms
+04-17 12:14:43.360 I/g.zkgpu.harness(11765): Explicit concurrent mark compact GC freed 204KB AllocSpace bytes, 1(20KB) LOS objects, 92% free, 1871KB/25MB, paused 41us,746us total 6.250ms
+04-17 12:14:43.946 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED path=/data/user/0/org.zkgpu.harness/files/zkgpu/latest-report.json family_override=FourStep r8_max_log_leaf_override=4294967295
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED kernel.ntt_variant=four-step
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED device name="Adreno (TM) 840" backend=Vulkan tier=UnifiedMemoryNative family=Adreno driver="Driver Build: bacff47b1e, I498f01ff61, 1763652273
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): Date: 11/20/25
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): Compiler Version: E031.50.19.13
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): Driver Branch: 
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): "
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18: family=four-step wall=1.21ms gpu=0.30ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[0] "transpose R×C→C×R" gpu=0.035ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[1] "phase2 R-pt r8 stages 0+1+2" gpu=0.029ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[2] "phase2 R-pt r8 stages 3+4+5" gpu=0.028ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[3] "phase2 R-pt r8 stages 6+7+8" gpu=0.022ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[4] "twiddle multiply" gpu=0.053ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[5] "transpose C×R→R×C" gpu=0.032ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[6] "phase5 C-pt r8 stages 0+1+2" gpu=0.028ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[7] "phase5 C-pt r8 stages 3+4+5" gpu=0.022ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[8] "phase5 C-pt r8 stages 6+7+8" gpu=0.022ms
+04-17 12:14:43.947 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log18 stage[9] "transpose R×C→C×R (output)" gpu=0.032ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18: family=four-step wall=1.05ms gpu=0.30ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[0] "transpose R×C→C×R" gpu=0.035ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[1] "phase2 R-pt r8 stages 0+1+2" gpu=0.030ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[2] "phase2 R-pt r8 stages 3+4+5" gpu=0.028ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[3] "phase2 R-pt r8 stages 6+7+8" gpu=0.023ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[4] "twiddle multiply" gpu=0.053ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[5] "transpose C×R→R×C" gpu=0.032ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[6] "phase5 C-pt r8 stages 0+1+2" gpu=0.029ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[7] "phase5 C-pt r8 stages 3+4+5" gpu=0.022ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[8] "phase5 C-pt r8 stages 6+7+8" gpu=0.022ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log18 stage[9] "transpose R×C→C×R (output)" gpu=0.032ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20: family=four-step wall=2.62ms gpu=1.44ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[0] "transpose R×C→C×R" gpu=0.154ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[1] "phase2 R-pt r8 stages 0+1+2" gpu=0.110ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[2] "phase2 R-pt r8 stages 3+4+5" gpu=0.098ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[3] "phase2 R-pt r8 stages 6+7+8" gpu=0.096ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[4] "phase2 R-pt r2 stage 9" gpu=0.094ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[5] "twiddle multiply" gpu=0.188ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[6] "transpose C×R→R×C" gpu=0.153ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[7] "phase5 C-pt r8 stages 0+1+2" gpu=0.110ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[8] "phase5 C-pt r8 stages 3+4+5" gpu=0.098ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[9] "phase5 C-pt r8 stages 6+7+8" gpu=0.096ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[10] "phase5 C-pt r2 stage 9" gpu=0.094ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log20 stage[11] "transpose R×C→C×R (output)" gpu=0.149ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20: family=four-step wall=2.72ms gpu=1.48ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[0] "transpose R×C→C×R" gpu=0.162ms
+04-17 12:14:43.948 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[1] "phase2 R-pt r8 stages 0+1+2" gpu=0.111ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[2] "phase2 R-pt r8 stages 3+4+5" gpu=0.103ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[3] "phase2 R-pt r8 stages 6+7+8" gpu=0.099ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[4] "phase2 R-pt r2 stage 9" gpu=0.098ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[5] "twiddle multiply" gpu=0.194ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[6] "transpose C×R→R×C" gpu=0.154ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[7] "phase5 C-pt r8 stages 0+1+2" gpu=0.112ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[8] "phase5 C-pt r8 stages 3+4+5" gpu=0.102ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[9] "phase5 C-pt r8 stages 6+7+8" gpu=0.099ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[10] "phase5 C-pt r2 stage 9" gpu=0.097ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log20 stage[11] "transpose R×C→C×R (output)" gpu=0.154ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22: family=four-step wall=9.79ms gpu=6.73ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[0] "transpose R×C→C×R" gpu=0.686ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[1] "phase2 R-pt r8 stages 0+1+2" gpu=0.510ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[2] "phase2 R-pt r8 stages 3+4+5" gpu=0.501ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[3] "phase2 R-pt r8 stages 6+7+8" gpu=0.480ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[4] "phase2 R-pt r4 stages 9+10" gpu=0.478ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[5] "twiddle multiply" gpu=0.761ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[6] "transpose C×R→R×C" gpu=0.674ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[7] "phase5 C-pt r8 stages 0+1+2" gpu=0.507ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[8] "phase5 C-pt r8 stages 3+4+5" gpu=0.498ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[9] "phase5 C-pt r8 stages 6+7+8" gpu=0.476ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[10] "phase5 C-pt r4 stages 9+10" gpu=0.479ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED forward_log22 stage[11] "transpose R×C→C×R (output)" gpu=0.672ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22: family=four-step wall=9.74ms gpu=6.73ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[0] "transpose R×C→C×R" gpu=0.683ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[1] "phase2 R-pt r8 stages 0+1+2" gpu=0.506ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[2] "phase2 R-pt r8 stages 3+4+5" gpu=0.499ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[3] "phase2 R-pt r8 stages 6+7+8" gpu=0.478ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[4] "phase2 R-pt r4 stages 9+10" gpu=0.476ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[5] "twiddle multiply" gpu=0.763ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[6] "transpose C×R→R×C" gpu=0.678ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[7] "phase5 C-pt r8 stages 0+1+2" gpu=0.512ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[8] "phase5 C-pt r8 stages 3+4+5" gpu=0.502ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[9] "phase5 C-pt r8 stages 6+7+8" gpu=0.481ms
+04-17 12:14:43.949 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[10] "phase5 C-pt r4 stages 9+10" gpu=0.479ms
+04-17 12:14:43.950 I/ZkgpuHarnessTest(11765): R8_AB_ENABLED inverse_log22 stage[11] "transpose R×C→C×R (output)" gpu=0.673ms
+04-17 12:14:43.950 I/TestRunner(11765): finished: crossoverFourStepR8Enabled(org.zkgpu.harness.ZkgpuInstrumentedTest)
+04-17 12:14:43.951 I/TestRunner(11765): run finished: 1 tests, 0 failed, 0 ignored
+04-17 12:14:45.262 D/io_stats( 1149): !@ Read_top(KB): g.zkgpu.harness:high(11765) 272 dumpsys:normal(11807) 152 grep:normal(11808) 152
