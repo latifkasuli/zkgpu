@@ -30,12 +30,17 @@ enum HarnessFamilyOverride: String, CaseIterable, Codable, Identifiable {
 struct HarnessRequest: Codable {
     var suite: HarnessSuite?
     var spec: SuiteSpec?
+    /// Phase F.3.f — iOS twin of the F.3.e.1 FFI dispatch. When
+    /// `hashSpec` is set, the Rust router runs `run_hash_suite` and
+    /// returns `hashReport` instead of `report`. NTT fields stay nil.
+    var hashSpec: HashSpec?
     var familyOverride: HarnessFamilyOverride?
 }
 
 struct HarnessResponse: Codable {
     var ok: Bool
     var report: SuiteReport?
+    var hashReport: HashSuiteReport?
     var error: String?
 }
 
@@ -187,6 +192,140 @@ private struct PseudoRandomPayload: Codable {
     var seed: UInt64
 }
 
+// MARK: - Hash surface (Phase F.3.f)
+
+/// Swift twin of `zkgpu_report::HashAlgorithm`. Only Poseidon2 today.
+enum HashAlgorithm: String, Codable {
+    case poseidon2 = "Poseidon2"
+}
+
+/// Swift twin of `zkgpu_report::Field`. Matches the Android harness
+/// `HashField` enum but shipped separately because Swift and Kotlin
+/// don't share source.
+enum HashField: String, Codable {
+    case babyBear = "BabyBear"
+    case goldilocks = "Goldilocks"
+}
+
+/// Swift twin of `zkgpu_report::HashInputPattern`. Custom `Codable`
+/// because the Rust variants mix bare strings (unit variants) and
+/// keyed objects (`SplitMix64 { seed }`) — same shape trick as
+/// [`InputPattern`] above.
+enum HashInputPattern: Codable {
+    case allZeros
+    case allOnes
+    case sequential
+    case splitMix64(seed: UInt64)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(String.self) {
+            switch value {
+            case "AllZeros":
+                self = .allZeros
+            case "AllOnes":
+                self = .allOnes
+            case "Sequential":
+                self = .sequential
+            default:
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Unknown hash input pattern \(value)"
+                )
+            }
+            return
+        }
+
+        let keyed = try decoder.container(keyedBy: DynamicCodingKey.self)
+        if keyed.allKeys.count == 1,
+           let key = keyed.allKeys.first,
+           key.stringValue == "SplitMix64" {
+            let payload = try keyed.decode(SplitMix64Payload.self, forKey: key)
+            self = .splitMix64(seed: payload.seed)
+            return
+        }
+
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Unsupported hash input pattern encoding"
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .allZeros:
+            var container = encoder.singleValueContainer()
+            try container.encode("AllZeros")
+        case .allOnes:
+            var container = encoder.singleValueContainer()
+            try container.encode("AllOnes")
+        case .sequential:
+            var container = encoder.singleValueContainer()
+            try container.encode("Sequential")
+        case .splitMix64(let seed):
+            var container = encoder.container(keyedBy: DynamicCodingKey.self)
+            try container.encode(
+                SplitMix64Payload(seed: seed),
+                forKey: DynamicCodingKey("SplitMix64")
+            )
+        }
+    }
+}
+
+private struct SplitMix64Payload: Codable {
+    var seed: UInt64
+}
+
+/// Swift twin of `zkgpu_report::HashCaseSpec`. Field names are
+/// camelCase; the encoder's `.convertToSnakeCase` strategy remaps
+/// them to `num_permutations` / `profile_gpu_timestamps` /
+/// `warmup_iterations` on the wire.
+struct HashCaseSpec: Codable {
+    var name: String
+    var numPermutations: UInt32
+    var input: HashInputPattern
+    var profileGpuTimestamps: Bool
+    var iterations: UInt32
+    var warmupIterations: UInt32
+}
+
+/// Swift twin of `zkgpu_report::HashSpec`.
+struct HashSpec: Codable {
+    var kind: HarnessSuite
+    var cases: [HashCaseSpec]
+    var failFast: Bool
+    var algorithm: HashAlgorithm
+    var field: HashField
+}
+
+/// Swift twin of `zkgpu_report::HashCaseReport`.
+/// `firstMismatchIndex` is a `(perm, slot)` tuple on the Rust side,
+/// serialised as a two-element JSON array. Decode it as a pair.
+struct HashCaseReport: Codable {
+    var name: String
+    var numPermutations: UInt32
+    var input: HashInputPattern
+    var kernelFamily: String?
+    var passed: Bool
+    var mismatchCount: UInt32
+    var firstMismatchIndex: [UInt32]?
+    var firstMismatchGpu: String?
+    var firstMismatchCpu: String?
+    var timings: TimingReport
+    var error: String?
+}
+
+/// Swift twin of `zkgpu_report::HashSuiteReport`. `suite` is
+/// `SuiteKind` on the Rust side; reuses `HarnessSuite` here.
+struct HashSuiteReport: Codable {
+    var schemaVersion: UInt32
+    var suite: HarnessSuite
+    var device: DeviceReport
+    var kernel: KernelReport
+    var cases: [HashCaseReport]
+    var summary: SuiteSummary
+}
+
 private struct DynamicCodingKey: CodingKey {
     var stringValue: String
     var intValue: Int? { nil }
@@ -316,6 +455,109 @@ enum ZkgpuBridge {
         return url
     }
 
+    // MARK: - Hash builders (Phase F.3.f)
+
+    /// Default Poseidon2 smoke spec — mirrors the shipped
+    /// `zkgpu_report::poseidon2_smoke_suite()` for the requested
+    /// field. Matches the Android harness's
+    /// `HarnessJson.poseidon2SmokeRequestJson` shape.
+    static func poseidon2SmokeRequest(field: HashField) -> HarnessRequest {
+        let cases: [HashCaseSpec] = [
+            HashCaseSpec(
+                name: "poseidon2_smoke_single",
+                numPermutations: 1,
+                input: .sequential,
+                profileGpuTimestamps: false,
+                iterations: 1,
+                warmupIterations: 0
+            ),
+            HashCaseSpec(
+                name: "poseidon2_smoke_batch17",
+                numPermutations: 17,
+                input: .sequential,
+                profileGpuTimestamps: false,
+                iterations: 1,
+                warmupIterations: 0
+            ),
+            HashCaseSpec(
+                name: "poseidon2_smoke_zeros",
+                numPermutations: 8,
+                input: .allZeros,
+                profileGpuTimestamps: false,
+                iterations: 1,
+                warmupIterations: 0
+            ),
+            HashCaseSpec(
+                name: "poseidon2_smoke_ones",
+                numPermutations: 8,
+                input: .allOnes,
+                profileGpuTimestamps: false,
+                iterations: 1,
+                warmupIterations: 0
+            ),
+            HashCaseSpec(
+                name: "poseidon2_smoke_rng",
+                numPermutations: 32,
+                // Swift `UInt64` handles the full [0, 2^64) range at
+                // the type level; serde's u64 deserializer is happy
+                // as long as the JSON number stays non-negative.
+                input: .splitMix64(seed: 0xCAFE_BABE),
+                profileGpuTimestamps: false,
+                iterations: 1,
+                warmupIterations: 0
+            ),
+        ]
+        let spec = HashSpec(
+            kind: .smoke,
+            cases: cases,
+            failFast: true,
+            algorithm: .poseidon2,
+            field: field
+        )
+        return HarnessRequest(
+            suite: nil,
+            spec: nil,
+            hashSpec: spec,
+            familyOverride: nil
+        )
+    }
+
+    /// Poseidon2 benchmark ladder. Mirrors the Android harness's
+    /// `poseidon2BenchmarkRequestJson` (1024 / 16384 / 65536 default
+    /// ladder, SplitMix64 seed 1, 1 warmup + 5 measured).
+    static func poseidon2BenchmarkRequest(
+        field: HashField,
+        permutationCounts: [UInt32] = [1_024, 16_384, 65_536]
+    ) -> HarnessRequest {
+        let cases = permutationCounts.map { num in
+            HashCaseSpec(
+                name: "ios_poseidon2_n\(num)",
+                numPermutations: num,
+                input: .splitMix64(seed: 1),
+                // profileGpuTimestamps stays false until
+                // execute_profiled lands on the Poseidon2 plans.
+                // Setting true would hit the F.3.d post-review
+                // rejection in measure_*_poseidon2_plan.
+                profileGpuTimestamps: false,
+                iterations: 5,
+                warmupIterations: 1
+            )
+        }
+        let spec = HashSpec(
+            kind: .benchmark,
+            cases: cases,
+            failFast: false,
+            algorithm: .poseidon2,
+            field: field
+        )
+        return HarnessRequest(
+            suite: nil,
+            spec: nil,
+            hashSpec: spec,
+            familyOverride: nil
+        )
+    }
+
     static func crossoverRequest(family: HarnessFamilyOverride) -> HarnessRequest {
         let logNs: [UInt32] = [18, 19, 20, 21, 22]
         let directions = ["Forward", "Inverse"]
@@ -342,6 +584,11 @@ enum ZkgpuBridge {
             familyOverride: family
         )
 
-        return HarnessRequest(suite: nil, spec: spec, familyOverride: nil)
+        return HarnessRequest(
+            suite: nil,
+            spec: spec,
+            hashSpec: nil,
+            familyOverride: nil
+        )
     }
 }

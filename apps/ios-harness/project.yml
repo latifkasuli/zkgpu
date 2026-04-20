@@ -55,3 +55,45 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: ZkgpuHarness
+
+  # Phase F.3.f: UI test target for BrowserStack XCUITest. BS App
+  # Automate only accepts UI-test targets (which produce a -Runner.app
+  # with a Payload/ wrapper suitable for .ipa upload); the shipped
+  # `bundle.unit-test` target is a PlugIn inside the host app and
+  # can't be submitted directly.
+  #
+  # The actual test code links the Rust static lib into the UI test
+  # binary itself (not via the host app), so tests run in the
+  # UITests process independently. Launches the host app only for
+  # environment completeness; all ZkgpuBridge calls happen in the
+  # test binary.
+  ZkgpuHarnessUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ZkgpuHarnessUITests
+        excludes:
+          - "**/.DS_Store"
+      # Reuse ZkgpuBridge.swift directly so there's one source of
+      # truth for the Codable types. The UI test process is separate
+      # from the host app, so @testable import isn't an option —
+      # compiling the same .swift into both binaries is fine for a
+      # test harness.
+      - path: ZkgpuHarness/ZkgpuBridge.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zkgpu.ZkgpuHarnessUITests
+        DEVELOPMENT_TEAM: WMG5Q625D5
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: true
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/RustBridge/include"
+        LIBRARY_SEARCH_PATHS:
+          - "$(SRCROOT)/RustBridge/build/device"
+        OTHER_LDFLAGS:
+          - "-lzkgpu_ffi"
+          - "-lresolv"
+        SWIFT_OBJC_BRIDGING_HEADER: ZkgpuHarnessUITests/ZkgpuHarnessUITests-Bridging-Header.h
+        TEST_TARGET_NAME: ZkgpuHarness
+    dependencies:
+      - target: ZkgpuHarness

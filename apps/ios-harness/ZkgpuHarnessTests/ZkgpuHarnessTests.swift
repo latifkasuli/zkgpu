@@ -139,14 +139,75 @@ final class ZkgpuHarnessTests: XCTestCase {
         print("Report saved: \(url.path)")
     }
 
+    // MARK: - Poseidon2 hash suite (Phase F.3.f)
+
+    /// BabyBear Poseidon2 smoke — 5 cases covering every input
+    /// pattern. Asserts `failed_cases == 0` and
+    /// `kernel.field == "BabyBear"`. Response carries `hashReport`
+    /// (not `report`) because of the F.3.e.1 FFI dispatch.
+    func testPoseidon2BabyBearSmokeSuitePasses() throws {
+        let request = ZkgpuBridge.poseidon2SmokeRequest(field: .babyBear)
+        let response = try ZkgpuBridge.run(request)
+        XCTAssertTrue(response.ok, response.error ?? "poseidon2 babybear smoke failed")
+        let report = try XCTUnwrap(response.hashReport,
+            "expected hash_report on hash path, got: \(String(describing: response))")
+        XCTAssertEqual(report.summary.failedCases, 0,
+            "failed=\(report.summary.failedCases)/\(report.summary.totalCases)")
+        XCTAssertEqual(report.summary.totalCases, 5)
+        XCTAssertEqual(report.kernel.field, "BabyBear")
+        XCTAssertEqual(report.kernel.nttVariant, "babybear-poseidon2")
+    }
+
+    /// Goldilocks Poseidon2 smoke — same cases routed through the
+    /// portable u32x2 plan on iOS Metal.
+    func testPoseidon2GoldilocksSmokeSuitePasses() throws {
+        let request = ZkgpuBridge.poseidon2SmokeRequest(field: .goldilocks)
+        let response = try ZkgpuBridge.run(request)
+        XCTAssertTrue(response.ok, response.error ?? "poseidon2 goldilocks smoke failed")
+        let report = try XCTUnwrap(response.hashReport)
+        XCTAssertEqual(report.summary.failedCases, 0,
+            "failed=\(report.summary.failedCases)/\(report.summary.totalCases)")
+        XCTAssertEqual(report.kernel.field, "Goldilocks")
+        XCTAssertEqual(report.kernel.nttVariant, "goldilocks-poseidon2-portable")
+    }
+
+    /// Benchmark ladder — both fields × (1024 / 16384 / 65536)
+    /// permutations. Logs `POSEIDON2_BENCH field=... n=... wall=...
+    /// M perms/s` rows so BrowserStack device-logs can be scraped
+    /// for throughput without re-running.
+    func testPoseidon2BenchmarkLadderBothFields() throws {
+        for field in [HashField.babyBear, HashField.goldilocks] {
+            let request = ZkgpuBridge.poseidon2BenchmarkRequest(field: field)
+            let response = try ZkgpuBridge.run(request)
+            XCTAssertTrue(response.ok,
+                "benchmark \(field.rawValue) failed: \(response.error ?? "<no err>")")
+            let report = try XCTUnwrap(response.hashReport)
+            XCTAssertEqual(report.summary.failedCases, 0,
+                "\(field.rawValue) benchmark failed=\(report.summary.failedCases)")
+
+            print("--- Poseidon2 benchmark \(field.rawValue) ---")
+            print("Device: \(report.device.name) [\(report.device.backend)]")
+            for c in report.cases {
+                let wallUs = c.timings.wallTimeNs.map { Double($0) / 1_000.0 } ?? 0
+                let permsPerSec = wallUs > 0
+                    ? Double(c.numPermutations) * 1_000_000.0 / wallUs
+                    : 0
+                let status = c.passed ? "PASS" : "FAIL(\(c.mismatchCount))"
+                let wallStr = String(format: "%.0fus", wallUs)
+                let mppsStr = String(format: "%.3fM perms/s", permsPerSec / 1e6)
+                print("POSEIDON2_BENCH field=\(field.rawValue) \(c.name) n=\(c.numPermutations) wall=\(wallStr) \(mppsStr) \(status)")
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func runSuite(_ suite: HarnessSuite) throws -> HarnessResponse {
-        try ZkgpuBridge.run(HarnessRequest(suite: suite, spec: nil, familyOverride: nil))
+        try ZkgpuBridge.run(HarnessRequest(suite: suite, spec: nil, hashSpec: nil, familyOverride: nil))
     }
 
     private func runSuiteWithFamily(_ suite: HarnessSuite, family: HarnessFamilyOverride) throws -> HarnessResponse {
-        try ZkgpuBridge.run(HarnessRequest(suite: suite, spec: nil, familyOverride: family))
+        try ZkgpuBridge.run(HarnessRequest(suite: suite, spec: nil, hashSpec: nil, familyOverride: family))
     }
 
     private func printReport(_ label: String, _ report: SuiteReport) {
@@ -164,11 +225,11 @@ final class ZkgpuHarnessTests: XCTestCase {
 
     private func persistReport(_ response: HarnessResponse, suite: HarnessSuite) throws {
         let json = try ZkgpuBridge.encodeRequest(
-            HarnessRequest(suite: suite, spec: nil, familyOverride: nil)
+            HarnessRequest(suite: suite, spec: nil, hashSpec: nil, familyOverride: nil)
         )
         _ = json // request json not needed for persistence
         let responseJson = try ZkgpuBridge.runRequestJson(
-            ZkgpuBridge.encodeRequest(HarnessRequest(suite: suite, spec: nil, familyOverride: nil))
+            ZkgpuBridge.encodeRequest(HarnessRequest(suite: suite, spec: nil, hashSpec: nil, familyOverride: nil))
         )
         let url = try ZkgpuBridge.persistResponseJson(responseJson, suite: suite)
         print("Report saved: \(url.path)")

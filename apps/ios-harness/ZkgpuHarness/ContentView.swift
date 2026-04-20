@@ -106,6 +106,7 @@ struct ContentView: View {
                 let request = HarnessRequest(
                     suite: suite,
                     spec: nil,
+                    hashSpec: nil,
                     familyOverride: family == .auto ? nil : family
                 )
                 let requestJson = try ZkgpuBridge.encodeRequest(request)
