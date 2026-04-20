@@ -18,6 +18,7 @@
 //! ```
 
 mod device;
+mod hash_runner;
 mod inputs;
 mod runner;
 mod validation;
@@ -133,6 +134,32 @@ pub async fn run_case(case_json: &str) -> String {
     match runner::run_single_case_async(&case, field).await {
         Ok(report) => serde_json::to_string(&report).unwrap_or_else(|e| {
             to_error_json(&format!("failed to serialize case report: {e}"))
+        }),
+        Err(e) => to_error_json(&e),
+    }
+}
+
+/// Run a hash suite by JSON-encoded [`HashSpec`].
+///
+/// Phase F.3.d — parallels `run_suite` but for the Poseidon2 surface.
+/// Takes a raw `HashSpec` (no envelope), runs it via the browser
+/// async hash runner, and returns the serialised [`HashSuiteReport`]
+/// on success or a [`HarnessResponse`] error shape on failure.
+///
+/// Wall-only timings until a future F.3.* sub-phase adds
+/// `execute_profiled_async` to the Poseidon2 plans.
+#[wasm_bindgen]
+pub async fn run_hash(spec_json: &str) -> String {
+    let spec: zkgpu_report::HashSpec = match serde_json::from_str(spec_json) {
+        Ok(s) => s,
+        Err(e) => {
+            return to_error_json(&format!("invalid HashSpec JSON: {e}"));
+        }
+    };
+
+    match hash_runner::run_hash_suite_async(&spec).await {
+        Ok(report) => serde_json::to_string(&report).unwrap_or_else(|e| {
+            to_error_json(&format!("failed to serialize hash report: {e}"))
         }),
         Err(e) => to_error_json(&e),
     }

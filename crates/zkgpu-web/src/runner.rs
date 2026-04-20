@@ -837,7 +837,9 @@ fn make_plan(
     WgpuNttPlan::new_with_policy(device, log_n, direction, &policy)
 }
 
-fn build_device_report_from(device: &WgpuDevice) -> DeviceReport {
+// Visible to sibling modules (e.g. `hash_runner`) so they don't
+// duplicate the device→report mapping.
+pub(crate) fn build_device_report_from(device: &WgpuDevice) -> DeviceReport {
     let caps = device.caps();
     DeviceReport {
         name: caps.device_name.clone(),

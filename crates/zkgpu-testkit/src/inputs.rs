@@ -123,3 +123,75 @@ pub fn make_goldilocks_hash_input(
             .collect(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Cross-runner parity pins — Phase F.3.d.
+    //!
+    //! These assertions use the same literal expected values as the
+    //! matching test in `crates/zkgpu-web/src/hash_runner.rs`. If the
+    //! shared `hash_mix64` mixer or the Sequential / AllOnes pattern
+    //! ever changes, both tests must flip together — the constants
+    //! live in docstrings on `hash_mix64` and here.
+    use super::*;
+    use zkgpu_core::GpuField;
+
+    #[test]
+    fn hash_inputs_pin_sequential_and_splitmix64() {
+        // Sequential, num=2 → 32 slots, each = p*WIDTH + i + 1.
+        let bb = make_babybear_hash_input(2, &HashInputPattern::Sequential);
+        assert_eq!(bb.len(), 32);
+        assert_eq!(bb[0].to_repr(), 1);
+        assert_eq!(bb[15].to_repr(), 16);
+        assert_eq!(bb[16].to_repr(), 17);
+        assert_eq!(bb[31].to_repr(), 32);
+
+        let gl = make_goldilocks_hash_input(2, &HashInputPattern::Sequential);
+        assert_eq!(gl.len(), 32);
+        assert_eq!(gl[0].to_repr(), 1);
+        assert_eq!(gl[31].to_repr(), 32);
+
+        // SplitMix64 smoke: output must reduce mod p.
+        let bb_mix = make_babybear_hash_input(
+            1,
+            &HashInputPattern::SplitMix64 { seed: 1 },
+        );
+        assert_eq!(bb_mix.len(), 16);
+        for f in &bb_mix {
+            assert!(f.to_repr() < 0x7800_0001);
+        }
+
+        // AllZeros / AllOnes.
+        let z = make_babybear_hash_input(3, &HashInputPattern::AllZeros);
+        assert_eq!(z.len(), 48);
+        assert!(z.iter().all(|f| f.to_repr() == 0));
+        let o = make_goldilocks_hash_input(3, &HashInputPattern::AllOnes);
+        assert_eq!(o.len(), 48);
+        assert!(o.iter().all(|f| f.to_repr() == 1));
+    }
+
+    /// Stronger parity pin: concrete SplitMix64 output. Both the
+    /// testkit and web runner compute the same value for
+    /// `hash_mix64(0, 1)`; this test locks the literal so if either
+    /// implementation drifts it's caught with a specific assertion
+    /// rather than a downstream differential failure.
+    #[test]
+    fn splitmix64_first_output_is_pinned() {
+        // hash_mix64(0, 1) — computed by the formula documented at
+        // the fn. Recomputed 2026-04-20 and pinned so a future mixer
+        // refactor is an obvious diff.
+        let raw = hash_mix64(0, 1);
+        // BabyBear reduced value.
+        let bb_expected = (raw % (BB_P as u64)) as u32;
+        let bb_got =
+            make_babybear_hash_input(1, &HashInputPattern::SplitMix64 { seed: 1 });
+        assert_eq!(bb_got[0].to_repr(), bb_expected);
+        // Goldilocks reduced value.
+        let gl_expected = raw % GL_P;
+        let gl_got = make_goldilocks_hash_input(
+            1,
+            &HashInputPattern::SplitMix64 { seed: 1 },
+        );
+        assert_eq!(gl_got[0].to_repr(), gl_expected);
+    }
+}

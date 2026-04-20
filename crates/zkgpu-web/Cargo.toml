@@ -15,6 +15,7 @@ zkgpu-core = { workspace = true }
 zkgpu-wgpu = { workspace = true }
 zkgpu-babybear = { workspace = true }
 zkgpu-goldilocks = { workspace = true }
+zkgpu-poseidon2 = { workspace = true }
 zkgpu-ntt = { workspace = true }
 zkgpu-report = { workspace = true }
 wgpu = { workspace = true }
