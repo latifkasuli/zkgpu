@@ -146,6 +146,11 @@ function onSuiteResult(response: HarnessResponse) {
   }
 
   lastReport = response.report;
+  // Clear hash-run state so a suite result following a hash result
+  // doesn't inherit the `zkgpu_hash_` download prefix or other
+  // hash-side metadata. Mirrors the `lastReport = null` in
+  // onHashResult() for full state symmetry on the __zkgpuWorker path.
+  lastHashReport = null;
   // Enrich with browser timing metadata before serializing
   const enriched = enrichResponse(response);
   lastResponseJson = JSON.stringify(enriched, null, 2);
