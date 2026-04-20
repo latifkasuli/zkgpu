@@ -6,6 +6,7 @@ Cargo.lock
 .DS_Store
 .idea/
 .vscode/
+.claude/
 *.profraw
 perf.data*
 flamegraph.svg
