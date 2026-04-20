@@ -10,7 +10,9 @@
 		40EA79C7DC24D6535A4EBBAE /* ZkgpuBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD751A067FEC826533AE019 /* ZkgpuBridge.swift */; };
 		8DB1EBC7BC52DD1CB0190236 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F6C7C79E794A648C34BCA917 /* Assets.xcassets */; };
 		95A5DA98B251B3FC0B40D959 /* ZkgpuHarnessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A365A23AE5B0859BDA1B66FF /* ZkgpuHarnessApp.swift */; };
+		AEF6A6B73BBF96B1E93CBDA7 /* ZkgpuHarnessPoseidon2UITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE2DA3BB88AE880826E58A5 /* ZkgpuHarnessPoseidon2UITests.swift */; };
 		C8E7D1F90383C1F6CB7F5549 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81FCD077A8B978CEADF8734 /* AppDelegate.swift */; };
+		DCA2A6B688D2AB74854C3C6B /* ZkgpuBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD751A067FEC826533AE019 /* ZkgpuBridge.swift */; };
 		E0748E55805A08E40AB4D78E /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B4299C8635B19F3AF393DF /* ContentView.swift */; };
 		FA23CE7C4D9CE0610D154DEA /* ZkgpuHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631E8B6E1E44DE892541A53C /* ZkgpuHarnessTests.swift */; };
 /* End PBXBuildFile section */
@@ -23,17 +25,27 @@
 			remoteGlobalIDString = CB156730A4B1AF7426057427;
 			remoteInfo = ZkgpuHarness;
 		};
+		46972994B4CD120F9078AFFE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CF4A74E83732422744324153 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CB156730A4B1AF7426057427;
+			remoteInfo = ZkgpuHarness;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		2E0C3867F5D3FB939671356A /* ZkgpuHarness.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ZkgpuHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3AE2DA3BB88AE880826E58A5 /* ZkgpuHarnessPoseidon2UITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZkgpuHarnessPoseidon2UITests.swift; sourceTree = "<group>"; };
 		41B4299C8635B19F3AF393DF /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		4DF486AC4ADB77BCDFBB8610 /* ZkgpuHarnessUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ZkgpuHarnessUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5304A220C7DAE86FD1493355 /* ZkgpuHarnessTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ZkgpuHarnessTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		631E8B6E1E44DE892541A53C /* ZkgpuHarnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZkgpuHarnessTests.swift; sourceTree = "<group>"; };
 		91335C888BC714B4570D845A /* ZkgpuHarness-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ZkgpuHarness-Bridging-Header.h"; sourceTree = "<group>"; };
 		A365A23AE5B0859BDA1B66FF /* ZkgpuHarnessApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZkgpuHarnessApp.swift; sourceTree = "<group>"; };
 		D63A397F173A0CE486A465E5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D81FCD077A8B978CEADF8734 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		ECC684535D2A3AAEB7049D1D /* ZkgpuHarnessUITests-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ZkgpuHarnessUITests-Bridging-Header.h"; sourceTree = "<group>"; };
 		EFD751A067FEC826533AE019 /* ZkgpuBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZkgpuBridge.swift; sourceTree = "<group>"; };
 		F6C7C79E794A648C34BCA917 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -52,6 +64,7 @@
 			children = (
 				2E0C3867F5D3FB939671356A /* ZkgpuHarness.app */,
 				5304A220C7DAE86FD1493355 /* ZkgpuHarnessTests.xctest */,
+				4DF486AC4ADB77BCDFBB8610 /* ZkgpuHarnessUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,6 +74,7 @@
 			children = (
 				5FD082C64C086C29DE9C803B /* ZkgpuHarness */,
 				92C81C5BEA134E627E9F7303 /* ZkgpuHarnessTests */,
+				DC8AB62E9421CD8867E61160 /* ZkgpuHarnessUITests */,
 				0D958A3B3AE42449FAF07BA7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -87,9 +101,36 @@
 			path = ZkgpuHarnessTests;
 			sourceTree = "<group>";
 		};
+		DC8AB62E9421CD8867E61160 /* ZkgpuHarnessUITests */ = {
+			isa = PBXGroup;
+			children = (
+				3AE2DA3BB88AE880826E58A5 /* ZkgpuHarnessPoseidon2UITests.swift */,
+				ECC684535D2A3AAEB7049D1D /* ZkgpuHarnessUITests-Bridging-Header.h */,
+			);
+			path = ZkgpuHarnessUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		2B85D7F0CAFE03F0B9190B00 /* ZkgpuHarnessUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6C3F36D0F0FD88A52C9DE1D9 /* Build configuration list for PBXNativeTarget "ZkgpuHarnessUITests" */;
+			buildPhases = (
+				990CAB99677307E0A8099610 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9985091DC243E8C4D00D29F5 /* PBXTargetDependency */,
+			);
+			name = ZkgpuHarnessUITests;
+			packageProductDependencies = (
+			);
+			productName = ZkgpuHarnessUITests;
+			productReference = 4DF486AC4ADB77BCDFBB8610 /* ZkgpuHarnessUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		594815751750D756E94E2C9F /* ZkgpuHarnessTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C80325BBBBE67CA314D50464 /* Build configuration list for PBXNativeTarget "ZkgpuHarnessTests" */;
@@ -135,6 +176,11 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1630;
 				TargetAttributes = {
+					2B85D7F0CAFE03F0B9190B00 = {
+						DevelopmentTeam = WMG5Q625D5;
+						ProvisioningStyle = Automatic;
+						TestTargetID = CB156730A4B1AF7426057427;
+					};
 					594815751750D756E94E2C9F = {
 						DevelopmentTeam = WMG5Q625D5;
 						ProvisioningStyle = Automatic;
@@ -161,6 +207,7 @@
 			targets = (
 				CB156730A4B1AF7426057427 /* ZkgpuHarness */,
 				594815751750D756E94E2C9F /* ZkgpuHarnessTests */,
+				2B85D7F0CAFE03F0B9190B00 /* ZkgpuHarnessUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -196,6 +243,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		990CAB99677307E0A8099610 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DCA2A6B688D2AB74854C3C6B /* ZkgpuBridge.swift in Sources */,
+				AEF6A6B73BBF96B1E93CBDA7 /* ZkgpuHarnessPoseidon2UITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -203,6 +259,11 @@
 			isa = PBXTargetDependency;
 			target = CB156730A4B1AF7426057427 /* ZkgpuHarness */;
 			targetProxy = 3C0DCE13B8AA38D60966E900 /* PBXContainerItemProxy */;
+		};
+		9985091DC243E8C4D00D29F5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CB156730A4B1AF7426057427 /* ZkgpuHarness */;
+			targetProxy = 46972994B4CD120F9078AFFE /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -323,6 +384,36 @@
 			};
 			name = Release;
 		};
+		9CFA03CC4CAE60291E3C8B36 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = WMG5Q625D5;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/include",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/build/device",
+				);
+				OTHER_LDFLAGS = (
+					"-lzkgpu_ffi",
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.zkgpu.ZkgpuHarnessUITests;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "ZkgpuHarnessUITests/ZkgpuHarnessUITests-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ZkgpuHarness;
+			};
+			name = Debug;
+		};
 		9F0FC710D5E6941C398699E3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -409,6 +500,36 @@
 			};
 			name = Debug;
 		};
+		E3BEC973DC2E3E80A9EF17DF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = WMG5Q625D5;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/include",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/RustBridge/build/device",
+				);
+				OTHER_LDFLAGS = (
+					"-lzkgpu_ffi",
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.zkgpu.ZkgpuHarnessUITests;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "ZkgpuHarnessUITests/ZkgpuHarnessUITests-Bridging-Header.h";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ZkgpuHarness;
+			};
+			name = Release;
+		};
 		EB70B49D0CE6834E6ADB6844 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -435,6 +556,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		6C3F36D0F0FD88A52C9DE1D9 /* Build configuration list for PBXNativeTarget "ZkgpuHarnessUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9CFA03CC4CAE60291E3C8B36 /* Debug */,
+				E3BEC973DC2E3E80A9EF17DF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		6F719DFE4A275052CCB79B26 /* Build configuration list for PBXNativeTarget "ZkgpuHarness" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
