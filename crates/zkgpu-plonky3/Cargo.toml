@@ -32,3 +32,13 @@ tracing = "0.1"
 p3-field-testing = "0.5"
 rand = "0.10"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
+
+# Phase 7.2.b — FRI commit parity tests. Same versions as
+# p3-zk-proofs (our correctness-oracle reference config) to minimize
+# resolver surface. Dev-dependency set only — not in release paths.
+p3-commit = { version = "0.5", features = ["test-utils"] }
+p3-challenger = "0.5"
+p3-fri = "0.5"
+p3-keccak = "0.5"
+p3-merkle-tree = "0.5"
+p3-symmetric = "0.5"
