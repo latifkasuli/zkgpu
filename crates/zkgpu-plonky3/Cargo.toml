@@ -46,3 +46,10 @@ p3-symmetric = "0.5"
 # Phase 7.2.c — end-to-end prove/verify with a minimal AIR.
 p3-air = "0.5"
 p3-uni-stark = "0.5"
+
+# Phase 7.4 — perf microbench.
+criterion = { workspace = true }
+
+[[bench]]
+name = "gpu_vs_cpu_dft"
+harness = false
