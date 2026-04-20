@@ -606,6 +606,61 @@ mod tests {
         assert_matrix_eq(&gpu_out, &cpu_out, "strict_gpu log_h=12 w=4");
     }
 
+    /// Phase 7.2.a — `coset_lde_batch` differential between GPU and
+    /// CPU DFTs at FRI-realistic sizes.
+    ///
+    /// `coset_lde_batch` is the single hottest DFT method in
+    /// `plonky3/fri/src/two_adic_pcs.rs` (two call sites in the
+    /// commit phase, plus one in `hiding_pcs.rs`). Default trait
+    /// decomposition composes our GPU `dft_batch` through `idft_batch`
+    /// (swap-and-scale) and `coset_dft_batch` (row-scale + dft). If
+    /// any step of that pipeline disagrees with the CPU impl, the
+    /// FRI commitment root will diverge — which is exactly what this
+    /// test prevents by comparing LDE output directly.
+    ///
+    /// Uses `strict_gpu()` so a silent fallback cannot make the
+    /// assertion pass on CPU.
+    #[test]
+    fn coset_lde_batch_matches_parallel() {
+        use p3_field::Field;
+        use p3_matrix::bitrev::BitReversibleMatrix;
+
+        // `shift` mirrors what `TwoAdicFriPcs::commit` uses:
+        // `Val::GENERATOR / domain.shift()` at the PCS layer. For a
+        // standalone test any non-trivial two-adic-field element works.
+        let shift = P3BabyBear::GENERATOR;
+
+        for &log_h in &[12usize, 14] {
+            for &w in &[1usize, 4] {
+                // `added_bits = 1` matches `StandardBackend`'s
+                // `log_blowup = 1` setting in p3-zk-proofs. The hiding
+                // path uses `log_blowup + 1 = 2`; we exercise both.
+                for &added_bits in &[1usize, 2] {
+                    let mat = random_matrix(log_h, w, 0x_C0DE_C07E_u64);
+
+                    let cpu_lde = Radix2DitParallel::<P3BabyBear>::default()
+                        .coset_lde_batch(mat.clone(), added_bits, shift)
+                        .bit_reverse_rows()
+                        .to_row_major_matrix();
+
+                    let gpu = GpuDft::<P3BabyBear>::strict_gpu();
+                    let gpu_lde = gpu
+                        .coset_lde_batch(mat, added_bits, shift)
+                        .bit_reverse_rows()
+                        .to_row_major_matrix();
+
+                    assert_matrix_eq(
+                        &gpu_lde,
+                        &cpu_lde,
+                        &format!(
+                            "coset_lde log_h={log_h} w={w} added_bits={added_bits}"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     /// Strict-mode panic path exercised via the internal
     /// `handle_gpu_step_err` seam. Testing through the full
     /// `dft_batch` entry point would require triggering one of the
