@@ -16,6 +16,14 @@ export type StockhamTailOverride = "Auto" | "Local" | "Global";
 export interface HarnessRequest {
   suite?: "Smoke" | "Validation" | "Benchmark";
   spec?: SuiteSpec;
+  /**
+   * Phase F.3.e hash dispatch. When `hash_spec` is set, the FFI
+   * router runs a hash suite and returns `hash_report` on the
+   * response instead of `report`. Exactly one of
+   * `{suite, spec, hash_spec}` should be populated; the router
+   * rejects ambiguous requests.
+   */
+  hash_spec?: HashSpec;
   family_override?: "Auto" | "Stockham" | "FourStep";
   /** Top-level override; if present, overrides any value on `spec`. */
   stockham_tail_override?: StockhamTailOverride;
@@ -53,6 +61,12 @@ export type InputPattern =
 export interface HarnessResponse {
   ok: boolean;
   report?: SuiteReport;
+  /**
+   * Phase F.3.e hash-path output. Populated when the caller set
+   * `hash_spec` on the request. `report` and `hash_report` are
+   * mutually exclusive — a single response only ever carries one.
+   */
+  hash_report?: HashSuiteReport;
   error?: string;
 }
 
@@ -141,11 +155,95 @@ export interface SuiteSummary {
   failed_cases: number;
 }
 
+// ---------- Hash surface (Phase F.3.e) ----------
+
+/**
+ * Which hash primitive a suite targets. Only Poseidon2 today;
+ * future algorithms extend this enum on the Rust side and here.
+ * Mirrors `zkgpu_report::HashAlgorithm`.
+ */
+export type HashAlgorithm = "Poseidon2";
+
+/**
+ * Which prime field a Poseidon2 suite targets. Mirrors
+ * `zkgpu_report::Field`.
+ */
+export type Field = "BabyBear" | "Goldilocks";
+
+/**
+ * Hash-case input pattern. Unit variants (`AllZeros`, `AllOnes`,
+ * `Sequential`) serialise as bare strings; `SplitMix64` carries a
+ * seed in a tagged envelope. Mirrors
+ * `zkgpu_report::HashInputPattern`.
+ */
+export type HashInputPattern =
+  | "AllZeros"
+  | "AllOnes"
+  | "Sequential"
+  | { SplitMix64: { seed: number } };
+
+export interface HashCaseSpec {
+  name: string;
+  /** Batch size — number of independent permutation instances. */
+  num_permutations: number;
+  input: HashInputPattern;
+  profile_gpu_timestamps: boolean;
+  iterations: number;
+  warmup_iterations: number;
+}
+
+export interface HashSpec {
+  kind: "Smoke" | "Validation" | "Benchmark" | "Soak";
+  cases: HashCaseSpec[];
+  fail_fast: boolean;
+  algorithm: HashAlgorithm;
+  field: Field;
+}
+
+export interface HashCaseReport {
+  name: string;
+  num_permutations: number;
+  input: HashInputPattern;
+  /**
+   * `"babybear-poseidon2"` / `"goldilocks-poseidon2-portable"` etc.
+   * Lets mixed-field aggregators distinguish rows without sniffing
+   * the spec.
+   */
+  kernel_family?: string;
+  passed: boolean;
+  mismatch_count: number;
+  /**
+   * `(permutation_index, slot_index)` tuple of the first mismatch.
+   * Serialised as a two-element array by serde. `undefined` when
+   * the case passed.
+   */
+  first_mismatch_index?: [number, number];
+  first_mismatch_gpu?: string;
+  first_mismatch_cpu?: string;
+  timings: TimingReport;
+  error?: string;
+}
+
+export interface HashSuiteReport {
+  schema_version: number;
+  suite: string;
+  device: DeviceReport;
+  kernel: KernelReport;
+  cases: HashCaseReport[];
+  summary: SuiteSummary;
+}
+
 // ---------- Worker Messages ----------
 
 export type WorkerRequest =
   | { type: "init" }
   | { type: "run_suite"; request: HarnessRequest }
+  /**
+   * Phase F.3.e hash-run worker message. Corresponds to the wasm
+   * `run_hash(spec_json)` entry point — worker receives a
+   * `HashSpec` directly (not the envelope carried by `run_suite`).
+   */
+  | { type: "run_hash"; spec: HashSpec }
   | { type: "version" };
 
 export type WorkerResponse =
@@ -153,5 +251,22 @@ export type WorkerResponse =
   | { type: "init_error"; error: string }
   | { type: "suite_result"; response: HarnessResponse }
   | { type: "suite_error"; error: string }
+  /**
+   * Hash result carries a `HashSuiteReport` directly (unwrapped
+   * from any envelope).
+   *
+   * Wire shape caveat: the wasm `run_hash` entry point today emits
+   * a **bare** `HashSuiteReport` on success and a
+   * `HarnessResponse`-shaped error object on failure. That's
+   * asymmetric with `run_suite` (which returns a
+   * `HarnessResponse` on both paths) — a future harmonization
+   * should wrap the hash-success path in `HarnessResponse { ok:
+   * true, hash_report: ... }` so browser workers can parse both
+   * endpoints uniformly. Until then, callers sniff whether the
+   * top-level JSON has `schema_version` (success bare report) or
+   * `ok: false` (error envelope).
+   */
+  | { type: "hash_result"; report: HashSuiteReport }
+  | { type: "hash_error"; error: string }
   | { type: "version_result"; version: unknown }
   | { type: "log"; level: string; message: string };

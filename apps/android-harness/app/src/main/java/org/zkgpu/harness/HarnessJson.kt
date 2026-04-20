@@ -231,14 +231,20 @@ object HarnessJson {
                     32,
                     JSONObject().put(
                         "SplitMix64",
-                        // Positive-in-i64 seed: 0xCAFE_BABE_L. The
-                        // Rust-side deserializer is `u64` and serde
-                        // rejects negative JSON numbers even when the
-                        // bit pattern would be a valid unsigned value.
-                        // Kotlin has no unsigned 64-bit literal syntax
-                        // here, so stay within [0, 2^63) to match what
-                        // serde will accept without a string envelope.
-                        JSONObject().put("seed", 0xCAFE_BABEL),
+                        // Canonical shipped-preset seed
+                        // `0xCAFE_BABE_DEAD_BEEF` matching
+                        // `zkgpu_report::poseidon2_smoke_suite()` on
+                        // the Rust side. The value is > 2^63 so a
+                        // plain Kotlin `Long` literal would be
+                        // negative and serde's `u64` deserializer
+                        // would refuse it. Route through BigInteger
+                        // instead: org.json writes BigInteger as a
+                        // raw JSON number, so serde sees the correct
+                        // unsigned value `14621396277992245487`.
+                        JSONObject().put(
+                            "seed",
+                            java.math.BigInteger("CAFEBABEDEADBEEF", 16)
+                        ),
                     ),
                 )
             )
@@ -271,7 +277,14 @@ object HarnessJson {
 
     fun parseSummary(responseJson: String): HarnessSummary {
         val root = JSONObject(responseJson)
-        val report = root.optJSONObject("report")
+        // Phase F.3.e post-review (P3.2): pick whichever report body
+        // is populated. The FFI router returns `report` for NTT
+        // suites and `hash_report` for hash suites (see
+        // HarnessRequest.hash_spec dispatch in zkgpu-ffi/src/json.rs).
+        // parseSummary previously only read `report`, so callers of
+        // poseidon2SmokeRequestJson / poseidon2BenchmarkRequestJson
+        // got null suite/case/device fields even on successful runs.
+        val report = root.optJSONObject("report") ?: root.optJSONObject("hash_report")
         val summary = report?.optJSONObject("summary")
         val device = report?.optJSONObject("device")
         return HarnessSummary(
