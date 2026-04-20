@@ -143,9 +143,11 @@ pub async fn run_case(case_json: &str) -> String {
 /// Run a hash suite by JSON-encoded [`HashSpec`].
 ///
 /// Phase F.3.d — parallels `run_suite` but for the Poseidon2 surface.
-/// Takes a raw `HashSpec` (no envelope), runs it via the browser
-/// async hash runner, and returns the serialised [`HashSuiteReport`]
-/// on success or a [`HarnessResponse`] error shape on failure.
+/// Takes a raw `HashSpec` (no envelope) and returns a JSON-encoded
+/// [`HarnessResponse`]. Success carries `ok: true` with the
+/// [`HashSuiteReport`] on `hash_report`; failure carries `ok: false`
+/// with `error`. Shape mirrors `run_suite`, so browser workers can
+/// parse both entry points uniformly.
 ///
 /// Wall-only timings until a future F.3.* sub-phase adds
 /// `execute_profiled_async` to the Poseidon2 plans.
@@ -159,9 +161,17 @@ pub async fn run_hash(spec_json: &str) -> String {
     };
 
     match hash_runner::run_hash_suite_async(&spec).await {
-        Ok(report) => serde_json::to_string(&report).unwrap_or_else(|e| {
-            to_error_json(&format!("failed to serialize hash report: {e}"))
-        }),
+        Ok(report) => {
+            let response = HarnessResponse {
+                ok: true,
+                report: None,
+                hash_report: Some(report),
+                error: None,
+            };
+            serde_json::to_string(&response).unwrap_or_else(|e| {
+                to_error_json(&format!("failed to serialize hash response: {e}"))
+            })
+        }
         Err(e) => to_error_json(&e),
     }
 }

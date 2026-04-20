@@ -17,7 +17,6 @@ import type {
   HarnessResponse,
   DeviceReport,
   HashSpec,
-  HashSuiteReport,
 } from "./types";
 
 // ---- State ----
@@ -152,13 +151,10 @@ async function handleRunSuite(request: import("./types").HarnessRequest) {
 /**
  * Drive a Poseidon2 hash suite through the wasm `run_hash` entry.
  *
- * Wire shape: the wasm entry emits a **bare** `HashSuiteReport` JSON
- * on success and a `HarnessResponse`-shaped error object on failure
- * (see `types.ts` `hash_result` for the harmonization TODO). This
- * handler sniffs which shape arrived by looking for the
- * `schema_version` key and dispatches to `hash_result` /
- * `hash_error` accordingly — the main-thread caller consumes a
- * uniform worker-API shape either way.
+ * Wire shape: mirrors `run_suite` — the wasm entry returns a
+ * `HarnessResponse` on both success and failure. Success carries
+ * `ok: true` with `hash_report`; failure carries `ok: false` with
+ * `error`. No shape sniffing required.
  */
 async function handleRunHash(spec: HashSpec) {
   if (!wasmReady || !wasmModule) {
@@ -177,23 +173,14 @@ async function handleRunHash(spec: HashSpec) {
     );
 
     const resultJson = await wasmModule.run_hash(specJson);
-    const parsed: unknown = JSON.parse(resultJson);
+    const response: HarnessResponse = JSON.parse(resultJson);
 
-    // Success: bare HashSuiteReport carries `schema_version` at the
-    // top level. Error: HarnessResponse-shaped object carries
-    // `ok: false` + `error`. Neither branch assumes the other's
-    // fields are present.
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "schema_version" in parsed
-    ) {
-      post({ type: "hash_result", report: parsed as HashSuiteReport });
+    if (response.ok && response.hash_report) {
+      post({ type: "hash_result", report: response.hash_report });
     } else {
-      const errObj = parsed as { error?: string };
       post({
         type: "hash_error",
-        error: errObj.error ?? "wasm run_hash returned unexpected shape",
+        error: response.error ?? "wasm run_hash returned unexpected shape",
       });
     }
   } catch (e) {

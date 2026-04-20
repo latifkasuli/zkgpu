@@ -22,10 +22,10 @@ declare module "../pkg/zkgpu_web" {
    *
    * Input: JSON-encoded `HashSpec` (no envelope; bare spec).
    *
-   * Wire shape asymmetry (flagged in types.ts for follow-up):
-   *   - success → bare `HashSuiteReport` JSON
-   *   - error   → `HarnessResponse`-shaped object (ok: false, error)
-   * Callers must sniff whichever shape arrived.
+   * Output: JSON-encoded `HarnessResponse` on both paths —
+   *   - success → `{ ok: true, hash_report: ... }`
+   *   - error   → `{ ok: false, error: ... }`
+   * Shape mirrors `run_suite` so callers parse uniformly.
    */
   export function run_hash(spec_json: string): Promise<string>;
 

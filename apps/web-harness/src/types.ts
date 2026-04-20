@@ -252,19 +252,11 @@ export type WorkerResponse =
   | { type: "suite_result"; response: HarnessResponse }
   | { type: "suite_error"; error: string }
   /**
-   * Hash result carries a `HashSuiteReport` directly (unwrapped
-   * from any envelope).
-   *
-   * Wire shape caveat: the wasm `run_hash` entry point today emits
-   * a **bare** `HashSuiteReport` on success and a
-   * `HarnessResponse`-shaped error object on failure. That's
-   * asymmetric with `run_suite` (which returns a
-   * `HarnessResponse` on both paths) — a future harmonization
-   * should wrap the hash-success path in `HarnessResponse { ok:
-   * true, hash_report: ... }` so browser workers can parse both
-   * endpoints uniformly. Until then, callers sniff whether the
-   * top-level JSON has `schema_version` (success bare report) or
-   * `ok: false` (error envelope).
+   * Hash result carries a `HashSuiteReport` unwrapped from the
+   * `HarnessResponse` envelope that wasm `run_hash` returns. The
+   * worker parses the envelope and forwards the inner report so the
+   * main-thread consumer sees a flat shape symmetric with
+   * `suite_result`.
    */
   | { type: "hash_result"; report: HashSuiteReport }
   | { type: "hash_error"; error: string }
