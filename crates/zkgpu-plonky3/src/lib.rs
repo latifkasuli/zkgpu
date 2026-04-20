@@ -6,6 +6,14 @@
 //! is inherited from the default implementations, which recurse back
 //! into `dft_batch`.
 //!
+//! Phase 7.2 — correctness oracle landed: `dft_batch`, `coset_lde_batch`,
+//! FRI commit root, and end-to-end prove/verify all match
+//! `Radix2DitParallel` under `strict_gpu()`.
+//!
+//! Phase 7.3 — lifecycle polish: plan cache warm-up via
+//! [`GpuDft::preload_plans`], `tracing::instrument` for profiler
+//! compatibility, cache-growth semantics documented below.
+//!
 //! # Strategy
 //!
 //! Plonky3's DFT operates on a [`RowMajorMatrix<F>`] where each
@@ -28,6 +36,14 @@
 //! `dft_batch` call above the fallback threshold. Init failure is
 //! cached — subsequent calls fall back to a local `Radix2DitParallel`
 //! without re-probing the GPU.
+//!
+//! The plan cache inside `GpuContext` is an unbounded `HashMap` keyed
+//! on `(log_h, direction)`. For typical Plonky3 workloads (single
+//! proof session, ≤10 distinct sizes across blowup/FRI-fold domains)
+//! the cache tops out at a few dozen entries, so no eviction policy
+//! is needed. Long-running services that drive many distinct sizes
+//! should call a fresh process rather than rely on pathological
+//! cache growth. See [`GpuDft::preload_plans`] for pre-warming.
 //!
 //! # Fallback policy
 //!
@@ -80,6 +96,11 @@ use zkgpu_wgpu::{WgpuDevice, WgpuNttPlan};
 /// if needed.
 static GPU_CONTEXT: OnceLock<Result<Arc<GpuContext>, String>> = OnceLock::new();
 
+/// Type alias for the plan-cache map. Extracted from the `GpuContext`
+/// field signature to satisfy clippy's `type_complexity` lint and
+/// to keep the struct header readable.
+type PlanCache = Mutex<HashMap<(u32, NttDirection), Arc<Mutex<WgpuNttPlan>>>>;
+
 struct GpuContext {
     device: WgpuDevice,
     /// Plan cache keyed on `(log_h, direction)`.
@@ -88,7 +109,7 @@ struct GpuContext {
     /// takes `&mut self` (it owns scratch buffers aliased across
     /// stages). Concurrent execution on the same plan would corrupt
     /// intermediate state.
-    plans: Mutex<HashMap<(u32, NttDirection), Arc<Mutex<WgpuNttPlan>>>>,
+    plans: PlanCache,
 }
 
 impl GpuContext {
@@ -250,6 +271,58 @@ where
     }
 }
 
+/// Lifecycle helpers. Always available, regardless of which field the
+/// `GpuDft` is parameterised over — they only touch the process-global
+/// context, not `F`.
+impl<F> GpuDft<F> {
+    /// Pre-build `WgpuNttPlan`s for the given sizes so that the first
+    /// real `dft_batch` call doesn't pay plan-construction cost.
+    ///
+    /// Useful for:
+    /// * Benchmarks that want to measure *execution* cost without the
+    ///   one-shot plan-build overhead polluting the numbers.
+    /// * Services that want deterministic first-call latency.
+    ///
+    /// Builds both forward and inverse plans for each supplied
+    /// `log_n`, since Plonky3's FRI uses both directions.
+    ///
+    /// Silently no-ops on device-init failure (same semantics as the
+    /// non-strict `dft_batch` path — preload is a hint, not a
+    /// correctness surface). Individual plan-build failures per
+    /// `log_n` are warned via `tracing::warn!` and skipped.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let dft = GpuDft::<BabyBear>::default();
+    /// // Warm up for the log sizes our FRI config will use.
+    /// dft.preload_plans(&[14, 16, 18, 20]);
+    /// // First real dft_batch at any of these sizes skips plan build.
+    /// ```
+    pub fn preload_plans(&self, log_ns: &[u32]) {
+        let ctx = match get_context() {
+            Ok(ctx) => ctx.clone(),
+            Err(e) => {
+                tracing::warn!(
+                    target: "zkgpu_plonky3",
+                    "preload_plans: GPU unavailable, skipping all preloads: {e}"
+                );
+                return;
+            }
+        };
+        for &log_n in log_ns {
+            for direction in [NttDirection::Forward, NttDirection::Inverse] {
+                if let Err(e) = ctx.get_or_build_plan(log_n, direction) {
+                    tracing::warn!(
+                        target: "zkgpu_plonky3",
+                        "preload_plans: skipping log_n={log_n} {direction:?}: {e}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Read `ZKGPU_PLONKY3_FORCE_GPU`. Any non-empty value other than
 /// `0` / `false` / `FALSE` turns the override on.
 fn env_force_gpu() -> bool {
@@ -333,6 +406,12 @@ fn handle_gpu_step_err(context_tag: &str, log_h: u32, strict: bool, err: String)
 impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
     type Evaluations = BitReversedMatrixView<RowMajorMatrix<P3BabyBear>>;
 
+    #[tracing::instrument(
+        name = "zkgpu_plonky3::dft_batch",
+        level = "debug",
+        skip_all,
+        fields(h = mat.height(), w = mat.width(), force_gpu = self.force_gpu, strict = self.strict)
+    )]
     fn dft_batch(&self, mat: RowMajorMatrix<P3BabyBear>) -> Self::Evaluations {
         let h = mat.height();
         let w = mat.width();
@@ -395,6 +474,12 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
 
 /// Core column-loop execution. Pulled out for clarity and to keep the
 /// trait method focused on control flow.
+#[tracing::instrument(
+    name = "zkgpu_plonky3::run_column_loop",
+    level = "debug",
+    skip_all,
+    fields(h = mat.height(), w = mat.width())
+)]
 fn run_column_loop(
     ctx: &Arc<GpuContext>,
     plan_handle: &Arc<Mutex<WgpuNttPlan>>,
@@ -700,6 +785,25 @@ mod tests {
         // correct. (tracing::warn! output is not asserted — verifying
         // log output in a unit test couples to the tracing
         // subscriber, which is out of scope.)
+    }
+
+    /// `preload_plans` warms the cache without panicking when the
+    /// sizes are valid. Follow-up `dft_batch` calls at the same sizes
+    /// should work correctly — we can't measure "faster" deterministically
+    /// in a unit test but we can verify correctness is unaffected.
+    #[test]
+    fn preload_plans_is_noop_correctness_wise() {
+        let gpu = GpuDft::<P3BabyBear>::strict_gpu();
+        gpu.preload_plans(&[12, 14]);
+
+        // After preload, a strict dft_batch at the preloaded size must
+        // still succeed and produce the correct answer.
+        let mat = random_matrix(12, 2, 0xBAD_CAFE_u64);
+        let cpu_out = Radix2DitParallel::<P3BabyBear>::default()
+            .dft_batch(mat.clone())
+            .to_row_major_matrix();
+        let gpu_out = gpu.dft_batch(mat).to_row_major_matrix();
+        assert_matrix_eq(&gpu_out, &cpu_out, "post-preload dft_batch");
     }
 
     /// Sanity-check field conversion round-trips.
