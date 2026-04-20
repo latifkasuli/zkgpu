@@ -1,5 +1,5 @@
 use serde_json::json;
-use zkgpu_testkit::run_suite;
+use zkgpu_testkit::{run_hash_suite, run_suite};
 
 // Re-export for backward compatibility (ffi/lib.rs re-exports these).
 pub use zkgpu_report::{HarnessRequest, HarnessResponse, VersionResponse};
@@ -8,6 +8,31 @@ use zkgpu_report::SuiteKind;
 pub const FFI_API_VERSION: u32 = 1;
 
 pub fn run_request(request: HarnessRequest) -> HarnessResponse {
+    // Phase F.3.e dispatch: hash_spec wins over the NTT suite/spec
+    // surface when present. A request carrying *both* is rejected —
+    // caller must pick one. Having hash_spec AND family/tail
+    // overrides is tolerated (the overrides are NTT-only; they don't
+    // affect the hash path — same "warn but proceed" shape the CLI
+    // uses).
+    if let Some(hash_spec) = request.hash_spec {
+        if request.spec.is_some() || request.suite.is_some() {
+            return error_response(
+                "harness request must not combine `hash_spec` with `spec` / \
+                 `suite`; pick one dispatch surface"
+                    .to_string(),
+            );
+        }
+        return match run_hash_suite(&hash_spec) {
+            Ok(report) => HarnessResponse {
+                ok: true,
+                report: None,
+                hash_report: Some(report),
+                error: None,
+            },
+            Err(err) => error_response(err.to_string()),
+        };
+    }
+
     let result = if let Some(mut spec) = request.spec {
         // A top-level `stockham_tail_override` on the request always wins
         // over whatever the spec itself carries — it lets harness callers
@@ -55,6 +80,7 @@ pub fn run_request(request: HarnessRequest) -> HarnessResponse {
         Ok(report) => HarnessResponse {
             ok: true,
             report: Some(report),
+            hash_report: None,
             error: None,
         },
         Err(err) => error_response(err.to_string()),
@@ -94,6 +120,7 @@ pub fn error_response(error: String) -> HarnessResponse {
     HarnessResponse {
         ok: false,
         report: None,
+        hash_report: None,
         error: Some(error),
     }
 }
@@ -137,15 +164,68 @@ mod tests {
         let response = run_request(HarnessRequest {
             suite: None,
             spec: None,
+            hash_spec: None,
             family_override: None,
             stockham_tail_override: None,
             r8_max_log_leaf_override: None,
         });
         assert!(!response.ok);
         assert!(response.report.is_none());
+        assert!(response.hash_report.is_none());
         assert_eq!(
             response.error.as_deref(),
             Some("harness request must include either `spec` or `suite`")
+        );
+    }
+
+    /// Phase F.3.e: combining `hash_spec` with NTT `spec` / `suite`
+    /// must be rejected structurally — caller must pick one dispatch
+    /// surface per request. No GPU needed since the check fires
+    /// before testkit dispatch.
+    #[test]
+    fn hash_spec_combined_with_ntt_spec_is_rejected() {
+        let response = run_request(HarnessRequest {
+            suite: Some(SuiteKind::Smoke),
+            spec: None,
+            hash_spec: Some(zkgpu_report::poseidon2_smoke_suite()),
+            family_override: None,
+            stockham_tail_override: None,
+            r8_max_log_leaf_override: None,
+        });
+        assert!(!response.ok);
+        assert!(response.report.is_none());
+        assert!(response.hash_report.is_none());
+        let err = response.error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("hash_spec") && err.contains("spec"),
+            "error should name both dispatch surfaces: {err}"
+        );
+    }
+
+    /// Phase F.3.e: a JSON request with `hash_spec` only (no
+    /// suite/spec) must parse cleanly and route to the hash path.
+    /// Exercised via run_request_json to cover the JSON round-trip
+    /// too.
+    #[test]
+    fn hash_spec_only_request_parses_and_routes() {
+        let body = serde_json::json!({
+            "hash_spec": {
+                "kind": "Smoke",
+                "cases": [],
+                "fail_fast": true,
+                "algorithm": "Poseidon2",
+                "field": "BabyBear"
+            }
+        });
+        let response = run_request_json(&body.to_string());
+        // Empty-cases rejection — this test doesn't need a GPU; the
+        // empty-suite gate fires before device init. Confirms the
+        // router got as far as the hash path.
+        assert!(!response.ok);
+        let err = response.error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("at least one case"),
+            "expected empty-cases rejection, got: {err}"
         );
     }
 
@@ -162,6 +242,7 @@ mod tests {
                 stockham_tail_override: zkgpu_report::StockhamTailOverride::Auto,
                 r8_max_log_leaf_override: None,
             }),
+            hash_spec: None,
             family_override: None,
             stockham_tail_override: None,
             r8_max_log_leaf_override: None,
@@ -190,6 +271,7 @@ mod tests {
                 stockham_tail_override: zkgpu_report::StockhamTailOverride::Auto,
                 r8_max_log_leaf_override: None,
             }),
+            hash_spec: None,
             family_override: None,
             stockham_tail_override: Some(zkgpu_report::StockhamTailOverride::Global),
             r8_max_log_leaf_override: None,

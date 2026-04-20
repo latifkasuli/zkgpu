@@ -646,6 +646,15 @@ pub struct HashSuiteReport {
 pub struct HarnessRequest {
     pub suite: Option<SuiteKind>,
     pub spec: Option<SuiteSpec>,
+    /// Phase F.3.e: hash-surface dispatch. When `hash_spec` is set
+    /// (instead of `spec` / `suite`), the FFI router executes a hash
+    /// suite via `zkgpu_testkit::run_hash_suite` and returns a
+    /// `HashSuiteReport` on [`HarnessResponse::hash_report`].
+    ///
+    /// Exactly one of `{suite, spec, hash_spec}` should be populated;
+    /// the router rejects ambiguous requests with a structured error.
+    #[serde(default)]
+    pub hash_spec: Option<HashSpec>,
     #[serde(default)]
     pub family_override: Option<FamilyOverride>,
     #[serde(default)]
@@ -663,6 +672,12 @@ pub struct HarnessRequest {
 pub struct HarnessResponse {
     pub ok: bool,
     pub report: Option<SuiteReport>,
+    /// Phase F.3.e: hash-surface report. Populated when the caller's
+    /// request carried a `hash_spec`. Always `None` for NTT requests.
+    /// Callers that share one response shape across both surfaces
+    /// sniff whichever of `{report, hash_report}` is `Some`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash_report: Option<HashSuiteReport>,
     pub error: Option<String>,
 }
 
@@ -1008,6 +1023,7 @@ mod tests {
         let req = HarnessRequest {
             suite: Some(SuiteKind::Smoke),
             spec: None,
+            hash_spec: None,
             family_override: None,
             stockham_tail_override: None,
             r8_max_log_leaf_override: None,
@@ -1015,6 +1031,44 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let parsed: HarnessRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.suite, Some(SuiteKind::Smoke));
+    }
+
+    /// Phase F.3.e: pre-F.3.e HarnessRequest JSON (no `hash_spec`
+    /// key) must still deserialize cleanly. This locks the
+    /// backward-compat contract — the NTT FFI surface from prior
+    /// phases keeps working with unmodified callers.
+    #[test]
+    fn harness_request_without_hash_spec_round_trips() {
+        let json = r#"{
+            "suite": "Smoke",
+            "spec": null,
+            "family_override": null,
+            "stockham_tail_override": null,
+            "r8_max_log_leaf_override": null
+        }"#;
+        let parsed: HarnessRequest = serde_json::from_str(json).unwrap();
+        assert!(parsed.hash_spec.is_none());
+        assert_eq!(parsed.suite, Some(SuiteKind::Smoke));
+    }
+
+    #[test]
+    fn harness_request_with_hash_spec_parses() {
+        let spec = poseidon2_smoke_suite();
+        let req = HarnessRequest {
+            suite: None,
+            spec: None,
+            hash_spec: Some(spec),
+            family_override: None,
+            stockham_tail_override: None,
+            r8_max_log_leaf_override: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: HarnessRequest = serde_json::from_str(&json).unwrap();
+        assert!(parsed.hash_spec.is_some());
+        assert_eq!(
+            parsed.hash_spec.unwrap().algorithm,
+            HashAlgorithm::Poseidon2
+        );
     }
 
     #[test]

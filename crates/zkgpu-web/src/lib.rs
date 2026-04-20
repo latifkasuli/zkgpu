@@ -88,6 +88,7 @@ pub async fn run_suite(request_json: &str) -> String {
             let response = HarnessResponse {
                 ok: true,
                 report: Some(report),
+                hash_report: None,
                 error: None,
             };
             serde_json::to_string(&response).unwrap_or_else(|e| {
@@ -180,6 +181,7 @@ fn to_error_json(msg: &str) -> String {
     let response = HarnessResponse {
         ok: false,
         report: None,
+        hash_report: None,
         error: Some(msg.to_string()),
     };
     serde_json::to_string(&response)
