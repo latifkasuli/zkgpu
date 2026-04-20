@@ -13,6 +13,8 @@ import type {
   SuiteReport,
   CaseReport,
   DeviceReport,
+  HashCaseReport,
+  HashInputPattern,
   HashSuiteReport,
 } from "./types";
 
@@ -179,6 +181,12 @@ function onHashResult(report: HashSuiteReport) {
   const enriched = enrichHashReport(report);
   lastResponseJson = JSON.stringify(enriched, null, 2);
 
+  // Re-render summary + rows so any stale NTT case table from a
+  // previous `run_suite` is replaced — otherwise the DOM would show
+  // NTT kernel labels while `lastResponseJson` / download now point
+  // at the hash report.
+  renderHashReport(report);
+
   exportBtn.disabled = false;
   copyBtn.disabled = false;
   downloadBtn.disabled = false;
@@ -218,6 +226,65 @@ function renderReport(report: SuiteReport) {
   resultsBody.innerHTML = "";
   for (const c of report.cases) {
     renderCaseRow(c, resultsBody);
+  }
+}
+
+// Hash-specific rendering. The table headers in index.html are fixed
+// for the NTT schema (log_n / Direction), so hash rows overload those
+// two columns with the closest analogues: permutation count and input
+// pattern. Kernel / timings / mismatches map 1:1. Keeps the UI state
+// self-consistent for __zkgpuWorker consumers without needing a second
+// table element.
+function renderHashReport(report: HashSuiteReport) {
+  const s = report.summary;
+  summaryDiv.innerHTML = [
+    `<span class="summary-item"><span class="summary-label">Total:</span> ${s.total_cases}</span>`,
+    `<span class="summary-item pass"><span class="summary-label">Passed:</span> ${s.passed_cases}</span>`,
+    `<span class="summary-item fail"><span class="summary-label">Failed:</span> ${s.failed_cases}</span>`,
+    `<span class="summary-item"><span class="summary-label">Kernel:</span> ${escapeHtml(report.kernel.field)} poseidon2</span>`,
+  ].join("");
+  summaryDiv.classList.add("visible");
+
+  resultsBody.innerHTML = "";
+  for (const c of report.cases) {
+    renderHashCaseRow(c, resultsBody);
+  }
+}
+
+function formatHashInput(p: HashInputPattern): string {
+  if (typeof p === "string") return p;
+  if ("SplitMix64" in p) return `SplitMix64(${p.SplitMix64.seed})`;
+  return "?";
+}
+
+function renderHashCaseRow(c: HashCaseReport, tbody: HTMLTableSectionElement) {
+  const tr = document.createElement("tr");
+
+  const statusClass = c.passed ? "pass" : "fail";
+  const statusText = c.passed ? "PASS" : "FAIL";
+  const wallMs = c.timings.wall_time_ns != null ? (c.timings.wall_time_ns / 1e6).toFixed(2) : "-";
+  const gpuMs = c.timings.gpu_total_ns != null ? (c.timings.gpu_total_ns / 1e6).toFixed(2) : "-";
+  const mismatches = c.mismatch_count > 0
+    ? `${c.mismatch_count} (first @ [${c.first_mismatch_index?.join(",") ?? "?"}])`
+    : "0";
+
+  tr.innerHTML = [
+    `<td class="${statusClass}">${statusText}</td>`,
+    `<td>${escapeHtml(c.name)}</td>`,
+    `<td>${c.num_permutations}</td>`,
+    `<td>${escapeHtml(formatHashInput(c.input))}</td>`,
+    `<td>${escapeHtml(c.kernel_family ?? "-")}</td>`,
+    `<td class="timing">${wallMs}</td>`,
+    `<td class="timing">${gpuMs}</td>`,
+    `<td>${mismatches}</td>`,
+  ].join("");
+
+  tbody.appendChild(tr);
+
+  if (c.error) {
+    const errTr = document.createElement("tr");
+    errTr.innerHTML = `<td></td><td colspan="7" class="fail" style="font-size:0.75rem">${escapeHtml(c.error)}</td>`;
+    tbody.appendChild(errTr);
   }
 }
 
