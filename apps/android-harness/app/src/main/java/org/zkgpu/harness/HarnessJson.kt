@@ -231,7 +231,14 @@ object HarnessJson {
                     32,
                     JSONObject().put(
                         "SplitMix64",
-                        JSONObject().put("seed", -0x3501_4541_2521_4111L), // 0xCAFE_BABE_DEAD_BEEF as signed long
+                        // Positive-in-i64 seed: 0xCAFE_BABE_L. The
+                        // Rust-side deserializer is `u64` and serde
+                        // rejects negative JSON numbers even when the
+                        // bit pattern would be a valid unsigned value.
+                        // Kotlin has no unsigned 64-bit literal syntax
+                        // here, so stay within [0, 2^63) to match what
+                        // serde will accept without a string envelope.
+                        JSONObject().put("seed", 0xCAFE_BABEL),
                     ),
                 )
             )
