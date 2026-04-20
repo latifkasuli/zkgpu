@@ -678,6 +678,13 @@ pub struct HarnessResponse {
     /// sniff whichever of `{report, hash_report}` is `Some`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash_report: Option<HashSuiteReport>,
+    /// Single-case report. Populated by the wasm `run_case` entry point
+    /// when it succeeds; always `None` for the FFI `run_request` path
+    /// (which only dispatches whole suites). Harmonizes `run_case`'s
+    /// wire shape with `run_suite` / `run_hash`: success carries the
+    /// payload here with `ok: true`; error carries `ok: false` + `error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_report: Option<CaseReport>,
     pub error: Option<String>,
 }
 

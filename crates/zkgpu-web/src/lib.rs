@@ -89,6 +89,7 @@ pub async fn run_suite(request_json: &str) -> String {
                 ok: true,
                 report: Some(report),
                 hash_report: None,
+                case_report: None,
                 error: None,
             };
             serde_json::to_string(&response).unwrap_or_else(|e| {
@@ -99,9 +100,13 @@ pub async fn run_suite(request_json: &str) -> String {
     }
 }
 
-/// Run a single test case by JSON spec. Returns JSON `CaseReport`.
+/// Run a single test case by JSON spec. Returns a JSON-encoded
+/// [`HarnessResponse`]: success carries the [`CaseReport`] on
+/// `case_report`, failure carries `ok: false` + `error`. Shape mirrors
+/// `run_suite` and `run_hash` so browser callers parse all three wasm
+/// entry points uniformly.
 ///
-/// Accepts two JSON shapes, tried in this order:
+/// Accepts two JSON shapes on input, tried in this order:
 ///   1. `SingleCaseRequest` envelope: `{"case": {...}, "field": "goldilocks"}`
 ///      (Phase E.2.b+) — lets a browser caller pick the target field
 ///      for a one-off case, matching `run_suite`'s `spec.field`.
@@ -133,9 +138,18 @@ pub async fn run_case(case_json: &str) -> String {
     };
 
     match runner::run_single_case_async(&case, field).await {
-        Ok(report) => serde_json::to_string(&report).unwrap_or_else(|e| {
-            to_error_json(&format!("failed to serialize case report: {e}"))
-        }),
+        Ok(report) => {
+            let response = HarnessResponse {
+                ok: true,
+                report: None,
+                hash_report: None,
+                case_report: Some(report),
+                error: None,
+            };
+            serde_json::to_string(&response).unwrap_or_else(|e| {
+                to_error_json(&format!("failed to serialize case response: {e}"))
+            })
+        }
         Err(e) => to_error_json(&e),
     }
 }
@@ -166,6 +180,7 @@ pub async fn run_hash(spec_json: &str) -> String {
                 ok: true,
                 report: None,
                 hash_report: Some(report),
+                case_report: None,
                 error: None,
             };
             serde_json::to_string(&response).unwrap_or_else(|e| {
@@ -192,6 +207,7 @@ fn to_error_json(msg: &str) -> String {
         ok: false,
         report: None,
         hash_report: None,
+        case_report: None,
         error: Some(msg.to_string()),
     };
     serde_json::to_string(&response)

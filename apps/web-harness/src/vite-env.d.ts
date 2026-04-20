@@ -14,7 +14,16 @@ declare module "../pkg/zkgpu_web" {
   /** Run a test suite from JSON HarnessRequest. Returns JSON HarnessResponse. */
   export function run_suite(request_json: string): Promise<string>;
 
-  /** Run a single test case from JSON CaseSpec. Returns JSON CaseReport. */
+  /**
+   * Run a single test case. Input: JSON `SingleCaseRequest` envelope
+   * (or legacy bare `CaseSpec`, BabyBear-only).
+   *
+   * Output: JSON-encoded `HarnessResponse` on both paths —
+   *   - success → `{ ok: true, case_report: ... }`
+   *   - error   → `{ ok: false, error: ... }`
+   * Shape mirrors `run_suite` and `run_hash` so callers parse all
+   * three wasm entry points uniformly.
+   */
   export function run_case(case_json: string): Promise<string>;
 
   /**

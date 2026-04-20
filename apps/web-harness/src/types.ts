@@ -67,6 +67,13 @@ export interface HarnessResponse {
    * mutually exclusive — a single response only ever carries one.
    */
   hash_report?: HashSuiteReport;
+  /**
+   * Single-case output from the wasm `run_case` entry point. `None`
+   * for all FFI `run_request` paths (which only dispatch whole
+   * suites) and for the wasm `run_suite` / `run_hash` paths. Present
+   * only when a caller invokes `run_case` directly.
+   */
+  case_report?: CaseReport;
   error?: string;
 }
 

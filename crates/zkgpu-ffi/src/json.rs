@@ -27,6 +27,7 @@ pub fn run_request(request: HarnessRequest) -> HarnessResponse {
                 ok: true,
                 report: None,
                 hash_report: Some(report),
+                case_report: None,
                 error: None,
             },
             Err(err) => error_response(err.to_string()),
@@ -81,6 +82,7 @@ pub fn run_request(request: HarnessRequest) -> HarnessResponse {
             ok: true,
             report: Some(report),
             hash_report: None,
+            case_report: None,
             error: None,
         },
         Err(err) => error_response(err.to_string()),
@@ -121,6 +123,7 @@ pub fn error_response(error: String) -> HarnessResponse {
         ok: false,
         report: None,
         hash_report: None,
+        case_report: None,
         error: Some(error),
     }
 }
