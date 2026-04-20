@@ -49,6 +49,15 @@ enum class TailChoice(val wireValue: String?) {
     }
 }
 
+/**
+ * Which prime field a Poseidon2 hash suite targets. Phase F.3.e.
+ * Wire value matches the serde encoding of `zkgpu_report::Field`.
+ */
+enum class HashField(val wireValue: String) {
+    BabyBear("BabyBear"),
+    Goldilocks("Goldilocks"),
+}
+
 data class HarnessSummary(
     val ok: Boolean,
     val error: String?,
@@ -152,6 +161,98 @@ object HarnessJson {
         }
         return obj.toString()
     }
+
+    /**
+     * Build a Poseidon2 hash-suite request. Phase F.3.e — the FFI
+     * router dispatches on the presence of `hash_spec` in the request
+     * (instead of `spec` / `suite`) and calls `run_hash_suite` under
+     * the hood. `field` selects BabyBear or Goldilocks; both fields
+     * route to their respective GPU Poseidon2 plan.
+     *
+     * `profile_gpu_timestamps = false` for every case — the Poseidon2
+     * plans have no `execute_profiled` yet (the testkit rejects the
+     * flag with a structured error). When profiled-execute lands in a
+     * future F.3.* sub-phase, flip this to `true` in the same commit.
+     */
+    fun poseidon2BenchmarkRequestJson(
+        permutationCounts: IntArray,
+        field: HashField,
+    ): String {
+        val cases = JSONArray()
+        for (num in permutationCounts) {
+            cases.put(
+                JSONObject()
+                    .put("name", "android_poseidon2_n${num}")
+                    .put("num_permutations", num)
+                    .put("input", JSONObject().put("SplitMix64", JSONObject().put("seed", 1)))
+                    .put("profile_gpu_timestamps", false)
+                    .put("iterations", 5)
+                    .put("warmup_iterations", 1)
+            )
+        }
+
+        val hashSpec = JSONObject()
+            .put("kind", "Benchmark")
+            .put("cases", cases)
+            .put("fail_fast", false)
+            .put("algorithm", "Poseidon2")
+            .put("field", field.wireValue)
+
+        return JSONObject()
+            .put("hash_spec", hashSpec)
+            .toString()
+    }
+
+    /**
+     * Shipped `poseidon2_smoke_suite` preset — 5 small cases covering
+     * AllZeros / AllOnes / Sequential / SplitMix64 inputs and a
+     * prime-17 batch that exercises the 2D-fold dispatch path. Good
+     * first validation target on an unknown Android GPU.
+     */
+    fun poseidon2SmokeRequestJson(field: HashField): String {
+        // Matches `zkgpu_report::poseidon2_smoke_suite()`. Inline here
+        // because the Kotlin side has no Rust-bridge call for "give me
+        // the shipped smoke spec as JSON"; easier to transcribe.
+        val cases = JSONArray()
+            .put(smokeCase("poseidon2_smoke_single", 1, sequentialInput()))
+            .put(smokeCase("poseidon2_smoke_batch17", 17, sequentialInput()))
+            .put(smokeCase("poseidon2_smoke_zeros", 8, JSONObject().put("AllZeros", JSONObject())))
+            .put(smokeCase("poseidon2_smoke_ones", 8, JSONObject().put("AllOnes", JSONObject())))
+            .put(
+                smokeCase(
+                    "poseidon2_smoke_rng",
+                    32,
+                    JSONObject().put(
+                        "SplitMix64",
+                        JSONObject().put("seed", -0x3501_4541_2521_4111L), // 0xCAFE_BABE_DEAD_BEEF as signed long
+                    ),
+                )
+            )
+
+        val hashSpec = JSONObject()
+            .put("kind", "Smoke")
+            .put("cases", cases)
+            .put("fail_fast", true)
+            .put("algorithm", "Poseidon2")
+            .put("field", field.wireValue)
+
+        return JSONObject().put("hash_spec", hashSpec).toString()
+    }
+
+    private fun smokeCase(name: String, num: Int, input: Any): JSONObject =
+        JSONObject()
+            .put("name", name)
+            .put("num_permutations", num)
+            .put("input", input)
+            .put("profile_gpu_timestamps", false)
+            .put("iterations", 1)
+            .put("warmup_iterations", 0)
+
+    private fun sequentialInput(): Any =
+        // `InputPattern::Sequential` / `HashInputPattern::Sequential`
+        // is a unit variant; serde encodes it as the bare string
+        // "Sequential" (no wrapper object).
+        "Sequential"
 
     fun syntheticErrorJson(message: String): String =
         JSONObject()

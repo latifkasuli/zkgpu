@@ -365,6 +365,114 @@ class ZkgpuInstrumentedTest {
         return JSONObject(responseJson)
     }
 
+    // === Phase F.3.e: Poseidon2 hash suite ===
+
+    /**
+     * BabyBear Poseidon2 smoke — 5 cases covering every input
+     * pattern plus the prime-17 batch that exercises 2D-fold
+     * dispatch on mobile. Every case must pass against the CPU
+     * reference in `zkgpu-poseidon2`. The response shape uses
+     * `hash_report` instead of `report` (F.3.e FFI dispatch).
+     */
+    @Test
+    fun poseidon2BabyBearSmokeSuitePasses() {
+        val response = runPoseidon2Smoke(HashField.BabyBear)
+        assertTrue(response.optString("error"), response.optBoolean("ok", false))
+
+        val hashReport = response.optJSONObject("hash_report")
+        assertNotNull("response must carry hash_report on the hash path", hashReport)
+        val summary = hashReport!!.getJSONObject("summary")
+        assertEquals(0, summary.getInt("failed_cases"))
+        assertEquals(5, summary.getInt("total_cases"))
+
+        val kernel = hashReport.getJSONObject("kernel")
+        assertEquals("BabyBear", kernel.getString("field"))
+        assertEquals("babybear-poseidon2", kernel.getString("ntt_variant"))
+    }
+
+    /**
+     * Goldilocks Poseidon2 smoke — same case set, routed through the
+     * portable u32x2 GPU plan. Catches any drift between the 32-bit
+     * and 64-bit WGSL kernels on the target device.
+     */
+    @Test
+    fun poseidon2GoldilocksSmokeSuitePasses() {
+        val response = runPoseidon2Smoke(HashField.Goldilocks)
+        assertTrue(response.optString("error"), response.optBoolean("ok", false))
+
+        val hashReport = response.optJSONObject("hash_report")
+        assertNotNull("response must carry hash_report on the hash path", hashReport)
+        val summary = hashReport!!.getJSONObject("summary")
+        assertEquals(0, summary.getInt("failed_cases"))
+
+        val kernel = hashReport.getJSONObject("kernel")
+        assertEquals("Goldilocks", kernel.getString("field"))
+        assertEquals("goldilocks-poseidon2-portable", kernel.getString("ntt_variant"))
+    }
+
+    /**
+     * Poseidon2 benchmark ladder — 1k / 16k / 65k permutations,
+     * both fields. Wall-time-only on this phase (profiled-execute
+     * not yet wired on Poseidon2 plans); log throughput per case so
+     * Firebase/BrowserStack captures per-device M perms/s without
+     * an external CSV step.
+     */
+    @Test
+    fun poseidon2BenchmarkLadderBothFields() {
+        for (field in arrayOf(HashField.BabyBear, HashField.Goldilocks)) {
+            val requestJson = HarnessJson.poseidon2BenchmarkRequestJson(
+                permutationCounts = POSEIDON2_BENCH_LADDER,
+                field = field,
+            )
+            val responseJson = ZkgpuBridge.runRequestJson(requestJson)
+            val file = HarnessStorage.writeLatestReport(context, responseJson)
+            Log.i(
+                TAG,
+                "poseidon2_bench field=${field.wireValue} path=${file.absolutePath}",
+            )
+            val response = JSONObject(responseJson)
+            assertTrue(response.optString("error"), response.optBoolean("ok", false))
+
+            val hashReport = response.getJSONObject("hash_report")
+            val summary = hashReport.getJSONObject("summary")
+            assertEquals(
+                "benchmark ladder failed on field=${field.wireValue}",
+                0,
+                summary.getInt("failed_cases"),
+            )
+
+            val cases = hashReport.getJSONArray("cases")
+            for (i in 0 until cases.length()) {
+                val c = cases.getJSONObject(i)
+                val name = c.optString("name")
+                val n = c.optInt("num_permutations", 0)
+                val timings = c.optJSONObject("timings")
+                val wallNs = timings?.optLong("wall_time_ns", -1) ?: -1L
+                val wallUs = if (wallNs > 0) wallNs / 1_000.0 else -1.0
+                val permsPerSec = if (wallUs > 0 && n > 0) {
+                    n.toDouble() * 1_000_000.0 / wallUs
+                } else {
+                    0.0
+                };
+                Log.i(
+                    TAG,
+                    "POSEIDON2_BENCH field=${field.wireValue} $name n=$n " +
+                        "wall=${"%.0f".format(wallUs)}us " +
+                        "${"%.3f".format(permsPerSec / 1e6)}M perms/s",
+                )
+            }
+        }
+    }
+
+    private fun runPoseidon2Smoke(field: HashField): JSONObject {
+        val responseJson = ZkgpuBridge.runRequestJson(
+            HarnessJson.poseidon2SmokeRequestJson(field),
+        )
+        val file = HarnessStorage.writeLatestReport(context, responseJson)
+        Log.i(TAG, "poseidon2_smoke field=${field.wireValue} path=${file.absolutePath}")
+        return JSONObject(responseJson)
+    }
+
     companion object {
         private const val TAG = "ZkgpuHarnessTest"
 
@@ -378,6 +486,16 @@ class ZkgpuInstrumentedTest {
         // would cover the outer edge but risks OOM on BrowserStack
         // devices with ~4 GB RAM; omit for the initial sweep.
         private val R8_AB_LOG_N = intArrayOf(18, 20, 22)
+
+        /**
+         * Phase F.3.e: Poseidon2 benchmark batch sizes. Smaller than
+         * the desktop ladder (CLI default is 1024/16384/65536/262144)
+         * so the test completes in a few seconds on a mobile GPU. The
+         * top end (65k permutations × 16-slot state × 4-byte limb =
+         * ~4 MB for BabyBear, ~8 MB for Goldilocks) stays well within
+         * every Adreno/Mali/Xclipse buffer budget in the cohort.
+         */
+        private val POSEIDON2_BENCH_LADDER = intArrayOf(1_024, 16_384, 65_536)
     }
 }
 
