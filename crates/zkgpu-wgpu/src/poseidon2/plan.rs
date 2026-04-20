@@ -6,6 +6,7 @@ use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuBuffer, GpuDevice, ZkGpuError};
 use zkgpu_poseidon2::{Poseidon2Params, WIDTH};
 
+use crate::async_util;
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 use crate::dispatch::{plan_linear_dispatch, LinearDispatch};
@@ -226,16 +227,68 @@ impl WgpuBabyBearPoseidon2Plan {
         WIDTH
     }
 
-    /// Permute each `WIDTH`-element block of `buf` in place.
+    /// Permute each `WIDTH`-element block of `buf` in place (blocking).
     ///
     /// `buf.len()` must equal `num_permutations * WIDTH` — the kernel
     /// treats the buffer as a flat concatenation of independent
-    /// state vectors.
+    /// state vectors. For browser / async callers use
+    /// [`execute_async`](Self::execute_async).
     pub fn execute(
         &mut self,
         device: &WgpuDevice,
         buf: &mut WgpuBuffer<BabyBear>,
     ) -> Result<(), ZkGpuError> {
+        let Some(encoder) = self.encode(device, buf)? else {
+            return Ok(()); // empty batch
+        };
+        device.raw_queue().submit(Some(encoder.finish()));
+        device
+            .raw_device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
+        Ok(())
+    }
+
+    /// Async variant of [`execute`](Self::execute). Browser-safe.
+    ///
+    /// Phase F.3.d — mirrors `WgpuGoldilocksNttPlan::execute_async`
+    /// (Phase E.2.a). Encode path is identical to the sync version;
+    /// only the post-submit synchronisation differs. On native the
+    /// async helper drives `device.poll(wait_indefinitely)` internally;
+    /// on wasm it's a no-op (map_async downstream handles sync), so
+    /// callers don't block the browser event loop.
+    pub async fn execute_async(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<BabyBear>,
+    ) -> Result<(), ZkGpuError> {
+        let Some(encoder) = self.encode(device, buf)? else {
+            return Ok(()); // empty batch
+        };
+        device.raw_queue().submit(Some(encoder.finish()));
+        async_util::wait_for_submission(device.raw_device(), device.raw_queue())
+            .await
+    }
+
+    /// Build the compute-pass command buffer without submitting.
+    ///
+    /// Shared encode path for [`execute`](Self::execute) and
+    /// [`execute_async`](Self::execute_async). Returns:
+    /// - `Ok(Some(encoder))` when there's work to submit
+    /// - `Ok(None)` when the batch is empty (zero permutations —
+    ///   caller should return success without submitting)
+    /// - `Err(_)` on mis-sized input or dispatch-plan failure
+    ///
+    /// The caller is responsible for `queue.submit` and the completion
+    /// wait (sync `device.poll` vs async `async_util::wait_for_submission`).
+    /// A future F.3.* sub-phase will extend this helper to accept an
+    /// optional `ComputePassTimestampWrites` for profiled-execute, same
+    /// shape as the Goldilocks NTT `encode` helper.
+    fn encode(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &WgpuBuffer<BabyBear>,
+    ) -> Result<Option<wgpu::CommandEncoder>, ZkGpuError> {
         if buf.len() % WIDTH != 0 {
             return Err(ZkGpuError::InvalidNttSize(format!(
                 "Poseidon2 state buffer length {} is not a multiple of \
@@ -245,10 +298,7 @@ impl WgpuBabyBearPoseidon2Plan {
         }
         let num_permutations = (buf.len() / WIDTH) as u32;
         if num_permutations == 0 {
-            // Empty batch — nothing to dispatch. Caller still gets a
-            // successful result so the harness can treat batch=0 as
-            // a no-op instead of a configuration error.
-            return Ok(());
+            return Ok(None);
         }
 
         // --- 2D-folded dispatch planning ------------------------------
@@ -326,12 +376,7 @@ impl WgpuBabyBearPoseidon2Plan {
             pass.dispatch_workgroups(dispatch.x, dispatch.y, 1);
         }
 
-        device.raw_queue().submit(Some(encoder.finish()));
-        device
-            .raw_device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
-        Ok(())
+        Ok(Some(encoder))
     }
 }
 
@@ -575,6 +620,67 @@ mod tests {
         assert_eq!(params.alpha, WgpuBabyBearPoseidon2Plan::SUPPORTED_ALPHA);
         let _plan = WgpuBabyBearPoseidon2Plan::new(&device, params)
             .expect("default BabyBear params (alpha=7) must build cleanly");
+    }
+
+    /// Phase F.3.d canary: `execute_async` must produce bit-identical
+    /// output to the sync `execute`. Only the post-submit sync path
+    /// differs, but the encode refactor (sync + async now share a
+    /// single `encode` helper) is exactly the kind of change this
+    /// test catches if a bind-group or dispatch parameter silently
+    /// diverges between the two code paths.
+    #[test]
+    fn poseidon2_execute_async_matches_sync() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let params = Poseidon2Params::<BabyBear, WIDTH>::babybear_default();
+
+        // 17 permutations (prime — exercises 2D-fold) with distinct
+        // per-slot inputs.
+        let num = 17usize;
+        let mut input: Vec<BabyBear> = Vec::with_capacity(num * WIDTH);
+        for p in 0..num {
+            for i in 0..WIDTH {
+                input.push(BabyBear::new(((p as u32) * 31 + i as u32 + 1) & 0x7FFF_FFFF));
+            }
+        }
+
+        // Sync reference
+        let mut sync_plan =
+            WgpuBabyBearPoseidon2Plan::new(&device, params.clone()).unwrap();
+        let mut sync_buf = device.upload::<BabyBear>(&input).unwrap();
+        sync_plan.execute(&device, &mut sync_buf).unwrap();
+        let sync_out = sync_buf.read_to_vec_blocking().unwrap();
+
+        // Async under pollster — drives device.poll on native.
+        let mut async_plan =
+            WgpuBabyBearPoseidon2Plan::new(&device, params).unwrap();
+        let mut async_buf = device.upload::<BabyBear>(&input).unwrap();
+        pollster::block_on(async_plan.execute_async(&device, &mut async_buf))
+            .unwrap();
+        let async_out = async_buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(
+            sync_out, async_out,
+            "execute_async must match sync execute bit-for-bit",
+        );
+    }
+
+    /// Empty-batch path must short-circuit before submit on both
+    /// sync and async paths. Regression guard for the `encode`
+    /// returning `Ok(None)` contract.
+    #[test]
+    fn poseidon2_execute_async_empty_batch_is_noop() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let params = Poseidon2Params::<BabyBear, WIDTH>::babybear_default();
+        let mut plan = WgpuBabyBearPoseidon2Plan::new(&device, params).unwrap();
+        let empty: Vec<BabyBear> = Vec::new();
+        let mut buf = device.upload::<BabyBear>(&empty).unwrap();
+        pollster::block_on(plan.execute_async(&device, &mut buf)).unwrap();
     }
 
     /// Determinism: running the same input twice (including across

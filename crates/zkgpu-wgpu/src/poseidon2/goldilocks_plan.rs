@@ -19,6 +19,7 @@ use zkgpu_core::{GpuBuffer, GpuDevice, ZkGpuError};
 use zkgpu_goldilocks::Goldilocks;
 use zkgpu_poseidon2::{Poseidon2Params, WIDTH};
 
+use crate::async_util;
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 use crate::dispatch::{plan_linear_dispatch, LinearDispatch};
@@ -193,12 +194,55 @@ impl WgpuGoldilocksPoseidon2Plan {
         WIDTH
     }
 
-    /// Permute each `WIDTH`-element block of `buf` in place.
+    /// Permute each `WIDTH`-element block of `buf` in place (blocking).
+    ///
+    /// For browser / async callers use
+    /// [`execute_async`](Self::execute_async).
     pub fn execute(
         &mut self,
         device: &WgpuDevice,
         buf: &mut WgpuBuffer<Goldilocks>,
     ) -> Result<(), ZkGpuError> {
+        let Some(encoder) = self.encode(device, buf)? else {
+            return Ok(());
+        };
+        device.raw_queue().submit(Some(encoder.finish()));
+        device
+            .raw_device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
+        Ok(())
+    }
+
+    /// Async variant of [`execute`](Self::execute). Browser-safe.
+    ///
+    /// Phase F.3.d — same pattern as the BabyBear twin and as
+    /// `WgpuGoldilocksNttPlan::execute_async` (Phase E.2.a). On native
+    /// the helper drives `device.poll(wait_indefinitely)` internally;
+    /// on wasm it's a no-op (map_async downstream handles sync).
+    pub async fn execute_async(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &mut WgpuBuffer<Goldilocks>,
+    ) -> Result<(), ZkGpuError> {
+        let Some(encoder) = self.encode(device, buf)? else {
+            return Ok(());
+        };
+        device.raw_queue().submit(Some(encoder.finish()));
+        async_util::wait_for_submission(device.raw_device(), device.raw_queue())
+            .await
+    }
+
+    /// Build the compute-pass command buffer without submitting.
+    ///
+    /// See the BabyBear twin's `encode` for the full contract. Shared
+    /// encode path for sync / async executes; extending to profiled-
+    /// execute is a future F.3.* sub-phase.
+    fn encode(
+        &mut self,
+        device: &WgpuDevice,
+        buf: &WgpuBuffer<Goldilocks>,
+    ) -> Result<Option<wgpu::CommandEncoder>, ZkGpuError> {
         if buf.len() % WIDTH != 0 {
             return Err(ZkGpuError::InvalidNttSize(format!(
                 "Poseidon2 state buffer length {} is not a multiple of \
@@ -208,7 +252,7 @@ impl WgpuGoldilocksPoseidon2Plan {
         }
         let num_permutations = (buf.len() / WIDTH) as u32;
         if num_permutations == 0 {
-            return Ok(());
+            return Ok(None);
         }
 
         let max_wg = device.caps.max_compute_workgroups_per_dimension;
@@ -282,12 +326,7 @@ impl WgpuGoldilocksPoseidon2Plan {
             pass.dispatch_workgroups(dispatch.x, dispatch.y, 1);
         }
 
-        device.raw_queue().submit(Some(encoder.finish()));
-        device
-            .raw_device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| ZkGpuError::BackendError(Box::new(e)))?;
-        Ok(())
+        Ok(Some(encoder))
     }
 }
 
@@ -480,6 +519,59 @@ mod tests {
             matches!(err, Err(ZkGpuError::InvalidNttSize(_))),
             "expected InvalidNttSize, got {err:?}"
         );
+    }
+
+    /// Phase F.3.d canary: `execute_async` must match sync `execute`
+    /// bit-for-bit on the Goldilocks path too. Separate from the
+    /// BabyBear twin because the Goldilocks u32x2 arithmetic takes a
+    /// different code path through the kernel; a regression in either
+    /// path would otherwise hide.
+    #[test]
+    fn gl_poseidon2_execute_async_matches_sync() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let params = Poseidon2Params::<Goldilocks, WIDTH>::goldilocks_default();
+
+        let num = 17usize;
+        let mut input: Vec<Goldilocks> = Vec::with_capacity(num * WIDTH);
+        for p in 0..num {
+            for i in 0..WIDTH {
+                let v = ((p as u64).wrapping_mul(0x9E3779B97F4A7C15))
+                    .wrapping_add((i as u64).wrapping_mul(0xBF58476D1CE4E5B9));
+                input.push(Goldilocks::new(v));
+            }
+        }
+
+        let mut sync_plan =
+            WgpuGoldilocksPoseidon2Plan::new(&device, params.clone()).unwrap();
+        let mut sync_buf = device.upload::<Goldilocks>(&input).unwrap();
+        sync_plan.execute(&device, &mut sync_buf).unwrap();
+        let sync_out = sync_buf.read_to_vec_blocking().unwrap();
+
+        let mut async_plan =
+            WgpuGoldilocksPoseidon2Plan::new(&device, params).unwrap();
+        let mut async_buf = device.upload::<Goldilocks>(&input).unwrap();
+        pollster::block_on(async_plan.execute_async(&device, &mut async_buf))
+            .unwrap();
+        let async_out = async_buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(sync_out, async_out);
+    }
+
+    #[test]
+    fn gl_poseidon2_execute_async_empty_batch_is_noop() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let params = Poseidon2Params::<Goldilocks, WIDTH>::goldilocks_default();
+        let mut plan =
+            WgpuGoldilocksPoseidon2Plan::new(&device, params).unwrap();
+        let empty: Vec<Goldilocks> = Vec::new();
+        let mut buf = device.upload::<Goldilocks>(&empty).unwrap();
+        pollster::block_on(plan.execute_async(&device, &mut buf)).unwrap();
     }
 
     #[test]
