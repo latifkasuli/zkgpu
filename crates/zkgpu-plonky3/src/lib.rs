@@ -156,6 +156,13 @@ pub struct GpuDft<F> {
     /// `Default` construction when the `ZKGPU_PLONKY3_FORCE_GPU` env
     /// var is set.
     force_gpu: bool,
+    /// If `true`, any fallback to CPU panics instead of silently
+    /// routing through `Radix2DitParallel`. See [`Self::strict_gpu`]
+    /// for rationale — this is the signal a correctness oracle needs
+    /// to prove the GPU path was actually exercised.
+    ///
+    /// Implies `force_gpu = true`.
+    strict: bool,
     /// Pre-constructed CPU fallback. Allocating it here (rather than
     /// lazily per call) keeps the fallback hot path allocation-free.
     cpu_fallback: Radix2DitParallel<F>,
@@ -169,6 +176,7 @@ where
     fn default() -> Self {
         Self {
             force_gpu: env_force_gpu(),
+            strict: false,
             cpu_fallback: Radix2DitParallel::default(),
             _phantom: core::marker::PhantomData,
         }
@@ -187,9 +195,11 @@ where
     /// including `p3-zk-proofs`'s tiny trace heights (see spec §6.4
     /// and §8).
     ///
-    /// Device-init-failure and buffer-size-too-large fallbacks still
-    /// apply; this is a tuning-threshold override, not a correctness
-    /// override.
+    /// Device-init-failure, plan-build-failure, and execute-failure
+    /// fallbacks still apply silently (via `tracing::warn!`). If you
+    /// need a fail-loud version for a correctness oracle, use
+    /// [`Self::strict_gpu`] instead — `force_gpu()` alone is **not**
+    /// sufficient to guarantee the test exercised the GPU path.
     pub fn force_gpu() -> Self {
         tracing::warn!(
             target: "zkgpu_plonky3",
@@ -197,6 +207,43 @@ where
         );
         Self {
             force_gpu: true,
+            strict: false,
+            cpu_fallback: Radix2DitParallel::default(),
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    /// Construct a `GpuDft` that **panics on any fallback to CPU**
+    /// rather than routing through the CPU impl silently.
+    ///
+    /// Intended for correctness-oracle test paths (e.g. when using
+    /// `p3-zk-proofs` to validate the GPU adapter end-to-end). Without
+    /// this, a proof can pass entirely on CPU — device-init failure,
+    /// plan build failure, and execute failure all silently fall back
+    /// under `force_gpu()` — and the test appears green while the GPU
+    /// code path was never exercised.
+    ///
+    /// Implies `force_gpu` (the size threshold is also bypassed).
+    ///
+    /// # Panics
+    ///
+    /// Panics from `dft_batch` (and therefore from any default-trait
+    /// method that routes through it) whenever:
+    ///   * GPU device init failed on first use,
+    ///   * plan build fails for the requested `log_h`,
+    ///   * plan execution returns an error for any column.
+    ///
+    /// This is intentional — the sync `TwoAdicSubgroupDft::dft_batch`
+    /// signature can't return a `Result`, and a strict-mode caller by
+    /// definition wants loud failure.
+    pub fn strict_gpu() -> Self {
+        tracing::warn!(
+            target: "zkgpu_plonky3",
+            "GpuDft::strict_gpu() in use — any CPU fallback will panic"
+        );
+        Self {
+            force_gpu: true,
+            strict: true,
             cpu_fallback: Radix2DitParallel::default(),
             _phantom: core::marker::PhantomData,
         }
@@ -268,7 +315,10 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
         let w = mat.width();
 
         // Degenerate cases: empty matrix or single-row. Delegate to
-        // the CPU impl — its default handles both correctly.
+        // the CPU impl — its default handles both correctly. Even in
+        // strict mode, `h <= 1` is a correctness-forced fallback (no
+        // NTT to run), not a GPU-availability fallback, so we don't
+        // panic.
         if h <= 1 {
             return self.cpu_fallback.dft_batch(mat);
         }
@@ -276,17 +326,35 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
         let log_h = log2_strict_usize(h) as u32;
 
         if should_fallback(log_h, w, self.force_gpu) {
+            // Size threshold — already bypassed when force_gpu=true, so
+            // this path only triggers for default-mode `GpuDft`. No
+            // strict-mode concern here (strict implies force_gpu).
             return self.cpu_fallback.dft_batch(mat);
         }
 
         let ctx = match get_context() {
             Ok(ctx) => ctx.clone(),
-            Err(_) => return self.cpu_fallback.dft_batch(mat),
+            Err(e) => {
+                if self.strict {
+                    panic!(
+                        "GpuDft::strict_gpu(): device init failed and \
+                         strict mode forbids CPU fallback: {e}"
+                    );
+                }
+                return self.cpu_fallback.dft_batch(mat);
+            }
         };
 
         let plan = match ctx.get_or_build_plan(log_h, NttDirection::Forward) {
             Ok(p) => p,
             Err(e) => {
+                if self.strict {
+                    panic!(
+                        "GpuDft::strict_gpu(): plan build failed at \
+                         log_h={log_h} and strict mode forbids CPU \
+                         fallback: {e}"
+                    );
+                }
                 tracing::warn!(
                     target: "zkgpu_plonky3",
                     "plan build failed at log_h={log_h}, falling back: {e}"
@@ -300,6 +368,13 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
         let natural = match run_column_loop(&ctx, &plan, &mat) {
             Ok(out) => out,
             Err(e) => {
+                if self.strict {
+                    panic!(
+                        "GpuDft::strict_gpu(): GPU execution failed at \
+                         log_h={log_h} and strict mode forbids CPU \
+                         fallback: {e}"
+                    );
+                }
                 tracing::warn!(
                     target: "zkgpu_plonky3",
                     "GPU execution failed at log_h={log_h}, falling back: {e}"
@@ -512,6 +587,49 @@ mod tests {
         // At log_h=4, should_fallback=true → cpu_fallback path.
         let out = gpu_default.dft_batch(mat).to_row_major_matrix();
         assert_matrix_eq(&out, &naive_out, "default-threshold small size");
+    }
+
+    /// Strict mode: a differential test against `Radix2DitParallel`
+    /// must pass when GPU is available. If a silent CPU fallback were
+    /// happening under `force_gpu()`, this test would still be green;
+    /// `strict_gpu()` guarantees the result came from the GPU path by
+    /// panicking on any fallback. Pair with the differential assertion
+    /// and we have an asserted GPU-path signal.
+    #[test]
+    fn strict_gpu_succeeds_when_device_available() {
+        let mat = random_matrix(12, 4, 0x51EADF15);
+        let cpu_out = Radix2DitParallel::<P3BabyBear>::default()
+            .dft_batch(mat.clone())
+            .to_row_major_matrix();
+
+        let gpu = GpuDft::<P3BabyBear>::strict_gpu();
+        let gpu_out = gpu.dft_batch(mat).to_row_major_matrix();
+
+        assert_matrix_eq(&gpu_out, &cpu_out, "strict_gpu log_h=12 w=4");
+    }
+
+    /// Strict mode is advertised as panicking in `dft_batch` when a
+    /// fallback would occur. We can't reliably force a device-init
+    /// failure in-process (the context is process-global and may
+    /// already be initialised), but we can demonstrate the panic
+    /// mechanism fires on plan-build failure by requesting a
+    /// `log_n` beyond BabyBear's 2-adicity cap (27). The plan
+    /// constructor rejects this, which under strict mode must panic.
+    #[test]
+    #[should_panic(expected = "strict mode forbids CPU fallback")]
+    fn strict_gpu_panics_on_plan_build_failure() {
+        // log_h = 28 exceeds BabyBear's TWO_ADICITY = 27, so
+        // `WgpuNttPlan::new` returns an error. Under `strict_gpu`,
+        // this must panic rather than silently route to CPU.
+        //
+        // Using a tiny width to keep the matrix under ~1 GiB even at
+        // log_h=28 (2^28 * 4 bytes = 1 GiB); we're testing the error
+        // path, not real execution.
+        let h = 1usize << 28;
+        let values = vec![P3BabyBear::new(0); h];
+        let mat = RowMajorMatrix::new(values, 1);
+        let gpu = GpuDft::<P3BabyBear>::strict_gpu();
+        let _ = gpu.dft_batch(mat); // expected to panic
     }
 
     /// Sanity-check field conversion round-trips.
