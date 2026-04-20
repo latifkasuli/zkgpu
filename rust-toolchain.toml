@@ -1,3 +1,5 @@
 [toolchain]
-channel = "1.87.0"
+# Bumped 2026-04-20 from 1.87 → 1.88 for Phase 7.1 (Plonky3 adapter).
+# p3-field 0.5.2 requires the `slice_as_chunks` stabilisation in 1.88.
+channel = "1.88.0"
 components = ["rustfmt", "clippy"]

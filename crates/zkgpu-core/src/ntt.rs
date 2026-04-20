@@ -4,7 +4,7 @@ use crate::field::GpuField;
 use crate::thread_safety::MaybeSendSync;
 
 /// Direction of the NTT transform.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NttDirection {
     Forward,
     Inverse,

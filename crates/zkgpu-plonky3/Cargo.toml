@@ -12,3 +12,23 @@ publish = false
 zkgpu-core = { workspace = true }
 zkgpu-babybear = { workspace = true }
 zkgpu-wgpu = { workspace = true }
+
+# Plonky3 0.5 — matches p3-zk-proofs pin, which is our primary
+# correctness-oracle consumer crate.
+p3-baby-bear = "0.5"
+p3-dft = "0.5"
+p3-field = "0.5"
+p3-matrix = "0.5"
+p3-util = "0.5"
+
+pollster = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+# `NaiveDft` and `Radix2DitParallel` both live in `p3-dft` (already
+# pulled in via the main dep). `p3-field-testing` provides Criterion
+# helpers and proptest harnesses that we may leverage in the 7.4
+# microbench; included here so tests share the same utilities.
+p3-field-testing = "0.5"
+rand = "0.10"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
