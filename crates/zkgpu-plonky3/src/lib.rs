@@ -74,10 +74,21 @@
 //!
 //! # Fallback policy
 //!
-//! Per Codex review: the 7.1 threshold is purely `log_h < 14` — no
-//! width-based rule. Under the column-loop architecture, width is
-//! just a multiplier on invocations, not true batching, so conflating
-//! it into the threshold misleads the policy.
+//! Evolved through 7.1 → 7.5 as more measurement landed:
+//!
+//! * **7.1 (spec) / 7.4 (data)**: threshold `log_h < 14` for all
+//!   widths. Width was considered invocation-count multiplier, not
+//!   true batching under Path A.
+//! * **7.5 (data)**: bench on RTX 4090 + Ryzen 9 7950X showed CPU
+//!   beats the best GPU path at every `w > 1, log_h` tested. Path B
+//!   closed the worst Path A regressions but not the gap vs a
+//!   32-thread AVX2 CPU.
+//!
+//! So the shipped default is now **performance-safe**: `Default`
+//! routes any `w > 1` call to CPU, and keeps the `log_h ≥ 14`
+//! threshold for `w == 1`. Width-agnostic GPU dispatch is available
+//! via [`GpuDft::force_gpu`] (opt-in) or [`GpuDft::strict_gpu`]
+//! (opt-in plus loud panics on fallback).
 //!
 //! Two opt-in bypass mechanisms exist so the GPU path remains
 //! exercised during correctness validation (e.g. via `p3-zk-proofs`,
@@ -429,21 +440,56 @@ fn env_force_gpu() -> bool {
 
 // -- Fallback policy ----------------------------------------------------------
 
-/// Size-based fallback decision. See spec §6.2.
+/// Size-based fallback decision. See spec §6.2 and the 7.5 bench
+/// findings (`research/phase-7-plonky3-adapter/7-4-bench/findings-pathb.md`).
 ///
 /// Returns `true` if this `(log_h, width)` invocation should be
 /// handled by the CPU `Radix2DitParallel` rather than by GPU.
 ///
-/// Per Codex review: width is intentionally not factored into the
-/// threshold under Path A, since width is invocation-count multiplier
-/// rather than true batching. Width re-enters policy only when Path B
-/// (2D batched plan) lands in 7.5.
-fn should_fallback(log_h: u32, _width: usize, force_gpu: bool) -> bool {
+/// # Default-mode policy
+///
+/// Under the measured 7.5 bench on RTX 4090 + Ryzen 9 7950X, the
+/// best GPU path — auto-selected per `(log_h, w)` between Path A
+/// (column loop over `WgpuNttPlan`) and Path B (`WgpuBatchedNttPlan`,
+/// R2-only) — is consistently slower than parallel CPU DFT at
+/// every tested `w > 1` size. Concretely, at `w=8` CPU beats the
+/// best GPU path by 1.27× (log_h=16), 1.64× (log_h=14, 18), up to
+/// 3.14× at log_h=12.
+///
+/// So under `Default` (performance-safe mode), any `w > 1` call
+/// routes to CPU. The single-column path keeps its original
+/// `log_h ≥ 14` threshold where GPU wins 1.77-2.44× on the same
+/// host.
+///
+/// # Overrides
+///
+/// * [`GpuDft::force_gpu`] bypasses this rule — the adapter then
+///   picks the better GPU path per `(log_h, w)` regardless. Use
+///   when a consumer knows their hardware profile (slower CPU, for
+///   example) or explicitly wants GPU-exercise correctness validation.
+/// * [`GpuDft::strict_gpu`] same bypass plus loud panics on any
+///   fallback — the correctness-oracle constructor.
+///
+/// # Future
+///
+/// The width-based CPU shunt is conservative until **Path C** lands
+/// (R4-batched kernel + workgroup-local fused tail in the batched
+/// plan). Expected post-Path-C behavior: GPU beats CPU at `w > 1`
+/// for `log_h ≥ 16` on discrete NVIDIA. At that point this
+/// predicate simplifies back to a pure `log_h` threshold.
+fn should_fallback(log_h: u32, width: usize, force_gpu: bool) -> bool {
     if force_gpu {
         return false;
     }
-    // Empirical floor: below log_h=14, wgpu dispatch + upload/download
-    // overhead dominates even a single-column run. Refined in 7.4.
+    // Width > 1: CPU wins at every measured size on the strongest
+    // consumer CPU on the market. Until Path C flips that regime,
+    // default mode keeps consumers out of the GPU-regression zone.
+    if width > 1 {
+        return true;
+    }
+    // Width == 1: GPU wins cleanly at log_h ≥ 16 on discrete NVIDIA.
+    // log_h=14 is nearly tied; keep as-is for the conservative
+    // threshold.
     log_h < 14
 }
 
@@ -639,8 +685,25 @@ fn run_batched(
     plan_handle: &Arc<Mutex<WgpuBatchedNttPlan>>,
     mat: &RowMajorMatrix<P3BabyBear>,
 ) -> Result<RowMajorMatrix<P3BabyBear>, String> {
-    let h = mat.height();
     let w = mat.width();
+    // Sanity-check the plan's shape matches the matrix. Cheap compared
+    // to the GPU round-trip and cuts off confusing errors downstream
+    // if the plan cache ever ages out of sync with caller shapes.
+    let h = mat.height();
+    {
+        let plan_peek = plan_handle
+            .lock()
+            .map_err(|_| "batched plan mutex poisoned".to_string())?;
+        if plan_peek.width() != w as u32 || (1u32 << plan_peek.log_n()) != h as u32 {
+            return Err(format!(
+                "batched plan shape mismatch: plan=({}, w={}), matrix=({}, w={})",
+                1u32 << plan_peek.log_n(),
+                plan_peek.width(),
+                h,
+                w
+            ));
+        }
+    }
 
     let mut plan = plan_handle
         .lock()

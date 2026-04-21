@@ -124,14 +124,32 @@ impl WgpuBatchedNttPlan {
         }
 
         let n = 1u32 << log_n;
-        let total_bytes = (n as u64) * (width as u64) * 4;
+        let per_buffer_bytes = (n as u64) * (width as u64) * 4;
+        let twiddle_bytes = ((n - 1) as u64) * 4;
+
+        // Per-buffer preflight: each individual buffer must fit the
+        // device's single-storage-buffer cap. Matches the pattern in
+        // `WgpuNttPlan::new_with_policy` (ntt/mod.rs). The largest
+        // individual buffer here is user-data or scratch at h*w*4.
         let storage_limit = device.caps.max_storage_buffer_size();
-        // Need headroom for both the user's buffer and our scratch,
-        // so effectively 2× total_bytes live on the GPU at once.
-        if total_bytes > storage_limit {
+        if per_buffer_bytes > storage_limit {
             return Err(ZkGpuError::BufferSize {
-                requested: total_bytes,
+                requested: per_buffer_bytes,
                 limit: storage_limit,
+            });
+        }
+
+        // Aggregate preflight: total live footprint at execute time is
+        //   user data + scratch + twiddles + twiddles_prime
+        //   = 2*(h*w*4) + 2*((n-1)*4)
+        // Check against max_buffer_size as a practical-device-capacity
+        // proxy, same as `WgpuNttPlan::new_with_policy` does for the
+        // single-column case.
+        let total_live_bytes = 2 * per_buffer_bytes + 2 * twiddle_bytes;
+        if total_live_bytes > device.caps.max_buffer_size {
+            return Err(ZkGpuError::BufferSize {
+                requested: total_live_bytes,
+                limit: device.caps.max_buffer_size,
             });
         }
 
@@ -284,7 +302,7 @@ impl WgpuBatchedNttPlan {
         // --- Scratch buffer (h × w × 4 bytes) ---
         let scratch_buffer = device.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Batched NTT scratch"),
-            size: total_bytes,
+            size: per_buffer_bytes,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
