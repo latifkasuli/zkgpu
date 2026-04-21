@@ -686,28 +686,26 @@ fn run_batched(
     mat: &RowMajorMatrix<P3BabyBear>,
 ) -> Result<RowMajorMatrix<P3BabyBear>, String> {
     let w = mat.width();
-    // Sanity-check the plan's shape matches the matrix. Cheap compared
-    // to the GPU round-trip and cuts off confusing errors downstream
-    // if the plan cache ever ages out of sync with caller shapes.
     let h = mat.height();
-    {
-        let plan_peek = plan_handle
-            .lock()
-            .map_err(|_| "batched plan mutex poisoned".to_string())?;
-        if plan_peek.width() != w as u32 || (1u32 << plan_peek.log_n()) != h as u32 {
-            return Err(format!(
-                "batched plan shape mismatch: plan=({}, w={}), matrix=({}, w={})",
-                1u32 << plan_peek.log_n(),
-                plan_peek.width(),
-                h,
-                w
-            ));
-        }
-    }
 
     let mut plan = plan_handle
         .lock()
         .map_err(|_| "batched plan mutex poisoned".to_string())?;
+
+    // Sanity-check the plan's shape matches the matrix. Cheap
+    // compared to the GPU round-trip, and cuts off confusing errors
+    // downstream if the plan cache ever ages out of sync with caller
+    // shapes. Folded into the same mutex acquisition as execution —
+    // no separate peek lock needed on this hot path.
+    if plan.width() != w as u32 || (1u32 << plan.log_n()) != h as u32 {
+        return Err(format!(
+            "batched plan shape mismatch: plan=({}, w={}), matrix=({}, w={})",
+            1u32 << plan.log_n(),
+            plan.width(),
+            h,
+            w
+        ));
+    }
 
     // Monty → canonical, flat row-major. This is a single host-side
     // pass over `h * w` elements — no per-column loop overhead.
