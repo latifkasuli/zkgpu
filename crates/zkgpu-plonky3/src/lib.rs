@@ -20,12 +20,23 @@
 //! * **Single-polynomial (width=1)**: GPU wins at `log_h ≥ 16`;
 //!   peak 2.44× at `log_h=18` for `dft_batch`, 1.73× at `log_h=20`
 //!   for `coset_lde_batch`.
-//! * **Wide-batch (width=8)**: GPU loses at every tested size under
-//!   Path A (column-loop). Best case at `log_h=20`: CPU 100 ms /
-//!   GPU 111 ms (1.11× CPU win). This is the motivating data point
-//!   for Phase 7.5 (Path B — 2D batched plan).
 //! * **Fallback threshold holds**: `log_h < 14 → CPU` is
 //!   empirically correct on discrete NVIDIA.
+//!
+//! Phase 7.5 — Path B (2D-batched NTT plan, [`zkgpu_wgpu::WgpuBatchedNttPlan`]).
+//! Adapter auto-selects the best GPU path per `(log_h, w)`:
+//!
+//! * **`log_h ≤ 16, w > 1` → Path B**: halves Path A column-loop time
+//!   at small-to-medium `log_h`. Peak improvement 2.59× over Path A
+//!   at `log_h=12, w=8`. Doesn't yet beat the 32-thread Ryzen CPU at
+//!   these sizes (Path B still ~1.3-3× slower than CPU) but closes
+//!   most of the gap.
+//! * **`log_h ≥ 18, w > 1` → Path A**: single-column plan's R4 +
+//!   workgroup-local fused tail is 2-3× faster per element than the
+//!   batched R2-only kernel; upload amortization alone doesn't
+//!   overcome the radix gap. A follow-up that adds R4 to the batched
+//!   kernel would push the threshold higher and likely flip this
+//!   regime to Path B.
 //!
 //! Run the bench with
 //! `cargo bench -p zkgpu-plonky3 --bench gpu_vs_cpu_dft`.
@@ -523,16 +534,29 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
             }
         };
 
-        // Phase 7.5 Path B — if width > 1 and the batched plan can be
-        // built at this `(log_h, w)`, use it. Otherwise fall through
-        // to Path A's column loop. Strict mode treats batched-plan
-        // build failures as a panic-worthy fallback the same way
-        // single-column failures are treated.
+        // Phase 7.5 Path B — use the batched plan when it's
+        // empirically the better GPU choice.
         //
-        // Width=1 stays on the original single-column Path A
-        // (WgpuNttPlan) because it supports the full Stockham/Four-Step
-        // policy machinery whereas the batched plan is R2-only.
-        if w > 1 {
+        // Per 7.5 bench on RTX 4090 + Ryzen 9 7950X:
+        //   * log_h <= 16, w > 1 → Path B (batched R2) beats Path A
+        //     column-loop because per-column launch overhead
+        //     dominated Path A here, and upload amortization wins.
+        //   * log_h >= 18, w > 1 → Path A beats Path B because the
+        //     single-column plan uses R4 + workgroup-local fused tail
+        //     (≈2-3× per-element faster than batched's R2-only
+        //     kernel), and arithmetic dominates launch overhead at
+        //     these sizes.
+        //
+        // Threshold `log_h <= 16` is conservative — at log_h=16 on
+        // RTX 4090 Path B was 1.31× faster than Path A, a meaningful
+        // win. Future Phase (7.5 follow-up) adds R4 to the batched
+        // kernel to push this threshold higher; when that lands the
+        // policy simplifies to "always Path B when w > 1".
+        //
+        // Width=1 always takes Path A (single-column WgpuNttPlan)
+        // regardless — the batched plan is pure overhead there.
+        const PATH_B_MAX_LOG_H: u32 = 16;
+        if w > 1 && log_h <= PATH_B_MAX_LOG_H {
             match ctx.get_or_build_batched_plan(log_h, w as u32, NttDirection::Forward) {
                 Ok(plan) => {
                     match run_batched(&ctx, &plan, &mat) {
