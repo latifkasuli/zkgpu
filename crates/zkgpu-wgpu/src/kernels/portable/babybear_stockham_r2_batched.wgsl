@@ -35,12 +35,15 @@ struct BatchedStockhamParams {
     // Number of columns in the batch (each an independent polynomial
     // of length `n`). Total butterfly-element threads = (n/2) * width.
     width: u32,
+    // Padded stride in u32 elements (>= width, rounded up to 8 for
+    // 32-byte-aligned row starts). Phase 7.5 C.1 added this to
+    // match the R4-batched kernel's pitched layout.
+    pitch: u32,
     // 2D-folded dispatch: reconstruct tid as
     //   tid = gid.x + gid.y * groups_per_row * WORKGROUP_SIZE
     // Same pattern as the single-poly kernel.
     groups_per_row: u32,
     _pad0: u32,
-    _pad1: u32,
 }
 
 @group(0) @binding(3) var<uniform> params: BatchedStockhamParams;
@@ -90,6 +93,7 @@ fn batched_stockham_r2_butterfly(@builtin(global_invocation_id) gid: vec3<u32>) 
     let s = params.s;
     let m = params.m;
     let w = params.width;
+    let pitch = params.pitch;
 
     // Total butterflies per stage = n/2 = m * s. Column is the
     // low-index dimension for coalesced memory access.
@@ -111,15 +115,16 @@ fn batched_stockham_r2_butterfly(@builtin(global_invocation_id) gid: vec3<u32>) 
     let dst_row_0 = q + s * (2u * p);
     let dst_row_1 = q + s * (2u * p + 1u);
 
-    // Flat memory indices: row_major[row, c] = row * w + c.
-    let a = src[src_row_a * w + c];
-    let b = src[src_row_b * w + c];
+    // Flat memory indices use pitched rows: `row * pitch + c` where
+    // `pitch >= width`. Padding columns beyond `width` are unused.
+    let a = src[src_row_a * pitch + c];
+    let b = src[src_row_b * pitch + c];
 
     let tw = twiddles[params.twiddle_offset + p];
     let tw_prime = twiddles_prime[params.twiddle_offset + p];
 
-    dst[dst_row_0 * w + c] = mod_add(a, b);
-    dst[dst_row_1 * w + c] = mod_mul_shoup(mod_sub(a, b), tw, tw_prime);
+    dst[dst_row_0 * pitch + c] = mod_add(a, b);
+    dst[dst_row_1 * pitch + c] = mod_mul_shoup(mod_sub(a, b), tw, tw_prime);
 }
 
 // The inverse-scale pass is handled by reusing `babybear_scale.wgsl`

@@ -707,13 +707,19 @@ fn run_batched(
         ));
     }
 
-    // Monty → canonical, flat row-major. This is a single host-side
-    // pass over `h * w` elements — no per-column loop overhead.
-    let canonical: Vec<ZkgpuBabyBear> = mat
-        .values
-        .iter()
-        .map(|e| ZkgpuBabyBear(e.as_canonical_u32()))
-        .collect();
+    // Phase C.1: pitched storage. Upload `h × pitch` where
+    // `pitch = round_up(w, 8)`. Padding columns `[w, pitch)` hold
+    // zero; they flow through the butterfly network harmlessly and
+    // are stripped on download.
+    let pitch = plan.pitch() as usize;
+
+    let mut canonical: Vec<ZkgpuBabyBear> = vec![ZkgpuBabyBear(0); h * pitch];
+    for r in 0..h {
+        for c in 0..w {
+            canonical[r * pitch + c] =
+                ZkgpuBabyBear(mat.values[r * w + c].as_canonical_u32());
+        }
+    }
 
     let mut gpu_buf = ctx
         .device
@@ -727,11 +733,15 @@ fn run_batched(
         .read_to_vec()
         .map_err(|e| format!("batched readback failed: {e}"))?;
 
-    // Canonical → Monty, flat row-major.
-    let output_vals: Vec<P3BabyBear> = result_canonical
-        .iter()
-        .map(|e| P3BabyBear::new(e.0))
-        .collect();
+    // Strip pitch padding: extract `h × w` from the `h × pitch`
+    // buffer and convert canonical → Monty in the same pass.
+    let mut output_vals: Vec<P3BabyBear> = vec![P3BabyBear::new(0); h * w];
+    for r in 0..h {
+        for c in 0..w {
+            output_vals[r * w + c] =
+                P3BabyBear::new(result_canonical[r * pitch + c].0);
+        }
+    }
 
     Ok(RowMajorMatrix::new(output_vals, w))
 }
