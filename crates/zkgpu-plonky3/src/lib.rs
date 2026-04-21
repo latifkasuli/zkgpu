@@ -94,7 +94,7 @@ use p3_util::log2_strict_usize;
 
 use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
 use zkgpu_core::{GpuBuffer, GpuDevice, NttDirection};
-use zkgpu_wgpu::{WgpuDevice, WgpuNttPlan};
+use zkgpu_wgpu::{WgpuBatchedNttPlan, WgpuDevice, WgpuNttPlan};
 
 // -- Process-global GPU context ----------------------------------------------
 
@@ -112,20 +112,30 @@ use zkgpu_wgpu::{WgpuDevice, WgpuNttPlan};
 /// if needed.
 static GPU_CONTEXT: OnceLock<Result<Arc<GpuContext>, String>> = OnceLock::new();
 
-/// Type alias for the plan-cache map. Extracted from the `GpuContext`
-/// field signature to satisfy clippy's `type_complexity` lint and
-/// to keep the struct header readable.
+/// Type alias for the single-column plan-cache map. Extracted from
+/// the `GpuContext` field signature to satisfy clippy's
+/// `type_complexity` lint.
 type PlanCache = Mutex<HashMap<(u32, NttDirection), Arc<Mutex<WgpuNttPlan>>>>;
+
+/// Type alias for the Phase 7.5 batched plan-cache map. Keyed on
+/// `(log_h, width, direction)` — width matters because the batched
+/// plan's scratch buffer and twiddle-indexing bake it in at build time.
+type BatchedPlanCache =
+    Mutex<HashMap<(u32, u32, NttDirection), Arc<Mutex<WgpuBatchedNttPlan>>>>;
 
 struct GpuContext {
     device: WgpuDevice,
-    /// Plan cache keyed on `(log_h, direction)`.
+    /// Single-column plan cache keyed on `(log_h, direction)`.
     ///
     /// Each plan is wrapped in `Mutex` because `WgpuNttPlan::execute`
     /// takes `&mut self` (it owns scratch buffers aliased across
     /// stages). Concurrent execution on the same plan would corrupt
     /// intermediate state.
     plans: PlanCache,
+    /// Batched plan cache for Phase 7.5 Path B. Keyed on
+    /// `(log_h, width, direction)`; built lazily the first time a
+    /// matching `dft_batch(w > 1)` call arrives.
+    batched_plans: BatchedPlanCache,
 }
 
 impl GpuContext {
@@ -138,10 +148,11 @@ impl GpuContext {
         Ok(Self {
             device,
             plans: Mutex::new(HashMap::new()),
+            batched_plans: Mutex::new(HashMap::new()),
         })
     }
 
-    /// Get (and cache) a plan for the given size/direction.
+    /// Get (and cache) a single-column plan for the given size/direction.
     fn get_or_build_plan(
         &self,
         log_n: u32,
@@ -157,6 +168,30 @@ impl GpuContext {
         }
         let plan = WgpuNttPlan::new(&self.device, log_n, direction)
             .map_err(|e| format!("plan build failed for log_n={log_n}: {e}"))?;
+        let wrapped = Arc::new(Mutex::new(plan));
+        plans.insert(key, wrapped.clone());
+        Ok(wrapped)
+    }
+
+    /// Get (and cache) a batched plan for the given
+    /// `(log_h, width, direction)`. Phase 7.5 Path B.
+    fn get_or_build_batched_plan(
+        &self,
+        log_n: u32,
+        width: u32,
+        direction: NttDirection,
+    ) -> Result<Arc<Mutex<WgpuBatchedNttPlan>>, String> {
+        let key = (log_n, width, direction);
+        let mut plans = self
+            .batched_plans
+            .lock()
+            .map_err(|_| "batched plan cache mutex poisoned".to_string())?;
+        if let Some(existing) = plans.get(&key) {
+            return Ok(existing.clone());
+        }
+        let plan = WgpuBatchedNttPlan::new(&self.device, log_n, width, direction).map_err(
+            |e| format!("batched plan build failed for log_n={log_n} w={width}: {e}"),
+        )?;
         let wrapped = Arc::new(Mutex::new(plan));
         plans.insert(key, wrapped.clone());
         Ok(wrapped)
@@ -337,6 +372,36 @@ impl<F> GpuDft<F> {
             }
         }
     }
+
+    /// Phase 7.5 — preload batched plans at the given
+    /// `(log_h, width)` pairs. Same semantics as `preload_plans`, but
+    /// warms the batched cache instead of (or in addition to) the
+    /// single-column cache.
+    ///
+    /// Use before a benchmark or prove run that will hit `dft_batch`
+    /// with `width > 1` — lets the first batched call skip plan build.
+    pub fn preload_batched_plans(&self, shapes: &[(u32, u32)]) {
+        let ctx = match get_context() {
+            Ok(ctx) => ctx.clone(),
+            Err(e) => {
+                tracing::warn!(
+                    target: "zkgpu_plonky3",
+                    "preload_batched_plans: GPU unavailable: {e}"
+                );
+                return;
+            }
+        };
+        for &(log_n, w) in shapes {
+            for direction in [NttDirection::Forward, NttDirection::Inverse] {
+                if let Err(e) = ctx.get_or_build_batched_plan(log_n, w, direction) {
+                    tracing::warn!(
+                        target: "zkgpu_plonky3",
+                        "preload_batched_plans: skipping log_n={log_n} w={w} {direction:?}: {e}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Read `ZKGPU_PLONKY3_FORCE_GPU`. Any non-empty value other than
@@ -458,6 +523,52 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
             }
         };
 
+        // Phase 7.5 Path B — if width > 1 and the batched plan can be
+        // built at this `(log_h, w)`, use it. Otherwise fall through
+        // to Path A's column loop. Strict mode treats batched-plan
+        // build failures as a panic-worthy fallback the same way
+        // single-column failures are treated.
+        //
+        // Width=1 stays on the original single-column Path A
+        // (WgpuNttPlan) because it supports the full Stockham/Four-Step
+        // policy machinery whereas the batched plan is R2-only.
+        if w > 1 {
+            match ctx.get_or_build_batched_plan(log_h, w as u32, NttDirection::Forward) {
+                Ok(plan) => {
+                    match run_batched(&ctx, &plan, &mat) {
+                        Ok(out) => {
+                            let mut natural = out;
+                            reverse_matrix_index_bits(&mut natural);
+                            return BitReversalPerm::new_view(natural);
+                        }
+                        Err(e) => {
+                            handle_gpu_step_err(
+                                "batched GPU execution failed",
+                                log_h,
+                                self.strict,
+                                e,
+                            );
+                            return self.cpu_fallback.dft_batch(mat);
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Batched plan-build failure is usually a size-limit
+                    // (log_n > MAX_BATCHED_LOG_N or buffer > device cap).
+                    // Fall through to Path A column loop rather than
+                    // abort — Path A can handle larger single-column
+                    // sizes via Four-Step. Strict mode already panics
+                    // inside handle_gpu_step_err if force_gpu is on.
+                    tracing::debug!(
+                        target: "zkgpu_plonky3",
+                        "batched plan unavailable at log_h={log_h} w={w}, trying Path A: {e}"
+                    );
+                }
+            }
+        }
+
+        // Path A: column loop. For each column, gather → upload →
+        // execute → download → scatter. See spec §4.3.
         let plan = match ctx.get_or_build_plan(log_h, NttDirection::Forward) {
             Ok(p) => p,
             Err(e) => {
@@ -466,8 +577,6 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
             }
         };
 
-        // Path A: column loop. For each column, gather → upload →
-        // execute → download → scatter. See spec §4.3.
         let natural = match run_column_loop(&ctx, &plan, &mat) {
             Ok(out) => out,
             Err(e) => {
@@ -486,6 +595,60 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
         reverse_matrix_index_bits(&mut natural);
         BitReversalPerm::new_view(natural)
     }
+}
+
+/// Phase 7.5 Path B — run the entire `h × w` matrix through the
+/// batched plan in a single GPU round-trip. No column loop.
+///
+/// The matrix is uploaded as a flat `h * w` buffer (row-major,
+/// matching Plonky3's `RowMajorMatrix::values` layout), converted
+/// Monty → canonical in the upload-side pass and back again on
+/// download.
+#[tracing::instrument(
+    name = "zkgpu_plonky3::run_batched",
+    level = "debug",
+    skip_all,
+    fields(h = mat.height(), w = mat.width())
+)]
+fn run_batched(
+    ctx: &Arc<GpuContext>,
+    plan_handle: &Arc<Mutex<WgpuBatchedNttPlan>>,
+    mat: &RowMajorMatrix<P3BabyBear>,
+) -> Result<RowMajorMatrix<P3BabyBear>, String> {
+    let h = mat.height();
+    let w = mat.width();
+
+    let mut plan = plan_handle
+        .lock()
+        .map_err(|_| "batched plan mutex poisoned".to_string())?;
+
+    // Monty → canonical, flat row-major. This is a single host-side
+    // pass over `h * w` elements — no per-column loop overhead.
+    let canonical: Vec<ZkgpuBabyBear> = mat
+        .values
+        .iter()
+        .map(|e| ZkgpuBabyBear(e.as_canonical_u32()))
+        .collect();
+
+    let mut gpu_buf = ctx
+        .device
+        .upload(&canonical)
+        .map_err(|e| format!("batched upload failed: {e}"))?;
+
+    plan.execute(&ctx.device, &mut gpu_buf)
+        .map_err(|e| format!("batched execute failed: {e}"))?;
+
+    let result_canonical = gpu_buf
+        .read_to_vec()
+        .map_err(|e| format!("batched readback failed: {e}"))?;
+
+    // Canonical → Monty, flat row-major.
+    let output_vals: Vec<P3BabyBear> = result_canonical
+        .iter()
+        .map(|e| P3BabyBear::new(e.0))
+        .collect();
+
+    Ok(RowMajorMatrix::new(output_vals, w))
 }
 
 /// Core column-loop execution. Pulled out for clarity and to keep the
@@ -705,6 +868,67 @@ mod tests {
         let gpu_out = gpu.dft_batch(mat).to_row_major_matrix();
 
         assert_matrix_eq(&gpu_out, &cpu_out, "strict_gpu log_h=12 w=4");
+    }
+
+    /// Phase 7.5 Path B — differential test at widths that exercise
+    /// the batched plan directly. Unlike the earlier medium/naive
+    /// tests (which also routed through Path B at w=4 post-7.5), this
+    /// fixture sweeps the widths where Path A loses hardest in 7.4's
+    /// data: w=8, w=16. A pass proves the batched plan is correct at
+    /// the sizes where its perf advantage matters.
+    #[test]
+    fn path_b_dft_batch_matches_parallel() {
+        let gpu = GpuDft::<P3BabyBear>::strict_gpu();
+        for &log_h in &[12usize, 14, 16] {
+            for &w in &[8usize, 16] {
+                let mat = random_matrix(log_h, w, 0xC01DB10C ^ (log_h as u64) << 16 ^ (w as u64));
+                let cpu_out = Radix2DitParallel::<P3BabyBear>::default()
+                    .dft_batch(mat.clone())
+                    .to_row_major_matrix();
+                let gpu_out = gpu.dft_batch(mat).to_row_major_matrix();
+                assert_matrix_eq(
+                    &gpu_out,
+                    &cpu_out,
+                    &format!("Path B log_h={log_h} w={w}"),
+                );
+            }
+        }
+    }
+
+    /// Path B + coset LDE. `coset_lde_batch` default decomposition
+    /// calls our `dft_batch` twice internally (idft + coset_dft after
+    /// resize); both invocations at w > 1 route through the batched
+    /// plan. This test confirms the full FRI-commit-critical pipeline
+    /// is correct under Path B at realistic widths.
+    #[test]
+    fn path_b_coset_lde_matches_parallel() {
+        use p3_field::Field;
+        use p3_matrix::bitrev::BitReversibleMatrix;
+
+        let shift = P3BabyBear::GENERATOR;
+        let gpu = GpuDft::<P3BabyBear>::strict_gpu();
+        for &log_h in &[12usize, 14] {
+            for &w in &[8usize, 16] {
+                for &added_bits in &[1usize, 2] {
+                    let mat = random_matrix(log_h, w, 0x5E77E1 ^ (log_h as u64) << 8 ^ (w as u64));
+                    let cpu_lde = Radix2DitParallel::<P3BabyBear>::default()
+                        .coset_lde_batch(mat.clone(), added_bits, shift)
+                        .bit_reverse_rows()
+                        .to_row_major_matrix();
+                    let gpu_lde = gpu
+                        .coset_lde_batch(mat, added_bits, shift)
+                        .bit_reverse_rows()
+                        .to_row_major_matrix();
+                    assert_matrix_eq(
+                        &gpu_lde,
+                        &cpu_lde,
+                        &format!(
+                            "Path B coset_lde log_h={log_h} w={w} added_bits={added_bits}"
+                        ),
+                    );
+                }
+            }
+        }
     }
 
     /// Phase 7.2.a — `coset_lde_batch` differential between GPU and

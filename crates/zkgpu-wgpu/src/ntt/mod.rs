@@ -1,3 +1,4 @@
+mod batched;
 mod common;
 mod four_step;
 mod planner;
@@ -9,6 +10,8 @@ pub(crate) mod stockham;
 // Goldilocks-side planning / resolver surface.
 pub(crate) mod babybear_twiddles;
 pub mod goldilocks;
+
+pub use batched::WgpuBatchedNttPlan;
 
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{NttDirection, NttPlan, ZkGpuError};
