@@ -1,38 +1,55 @@
 //! Phase 7 Step 3 — GPU Poseidon2 MMCS adapter.
 //!
 //! Implements [`p3_commit::Mmcs<BabyBear>`] with a GPU-accelerated
-//! `commit()`. Designed to be the *bench-gate* adapter: it produces
-//! the same commitment root as Plonky3's
+//! `commit()` and opening path that matches Plonky3's
 //! `MerkleTreeMmcs<Packing, Packing, Poseidon2Sponge, Poseidon2Compression, 2, 8>`
-//! while keeping the commit path entirely on the GPU — **no CPU tree
-//! is materialized until [`Mmcs::open_batch`] or
-//! [`Mmcs::verify_batch`] is called**.
+//! bit-for-bit at `cap_height = 0`.
 //!
-//! # Why lazy prover data matters
+//! # Scope (Step 3.c)
 //!
-//! Plonky3's `MerkleTreeMmcs::commit` eagerly constructs a full
-//! `MerkleTree` (all interior layers) as part of its `ProverData`.
-//! That CPU work is the thing the GPU is supposed to replace. If the
-//! adapter's `commit()` paid that cost up front, the Step 3
-//! `fri_commit` bench would just measure "GPU hash + CPU hash", and
-//! the GPU win would be hidden. This adapter's `ProverData` is
-//! therefore a bare `Vec<M>` — commit runs the GPU kernel, wraps the
-//! root, and returns. No CPU tree is ever materialised.
+//! **Binary N=2 tree, same-height inputs, power-of-two height, cap_height=0.**
+//! Supports the two matrix-count shapes that show up in the target
+//! stack's full prove path:
 //!
-//! # Scope
+//! * **Single matrix** — the trace commit
+//!   (`uni-stark::prover::prove` → `pcs.commit(vec![(domain, trace)])`).
+//! * **N same-height matrices** — the quotient-chunk batch
+//!   (`uni-stark::prover::commit_quotient` splits the quotient into
+//!   `k` equal-height matrices and commits them all together).
 //!
-//! **Commit-only. Single-matrix, power-of-two height.** The Step 3
-//! bench gate times `TwoAdicFriPcs::commit` (one call into
-//! `mmcs.commit`, one matrix); FRI `open_batch` / `verify_batch` are
-//! out of scope for this bench and `open_batch` therefore panics
-//! loudly if called. Multi-matrix commits (Plonky3's
-//! `compress_and_inject` injection pattern) and opening support
-//! belong in a future hybrid adapter (Step 3.c).
+//! Plonky3's `first_digest_layer` hashes row *i* of each tallest
+//! matrix into one leaf digest via `flat_map` (see
+//! `p3_merkle_tree::merkle_tree.rs` line 300). The adapter mirrors
+//! that by flattening row-*i* of every input matrix into a single
+//! wide row and running the existing single-matrix GPU leaf sponge —
+//! no new kernel required.
 //!
-//! Silent CPU fallback is intentionally *not* used: it would let a
-//! multi-matrix or opening-path caller produce a "GPU" bench number
-//! that actually measured CPU, and the fri_commit go/no-go gate
-//! can't survive that kind of contamination.
+//! # Out of scope
+//!
+//! * Multi-matrix with **differing** heights → needs
+//!   `compress_and_inject` (DAG-shaped tree with injection at
+//!   height-specific levels). Not needed for the target stack; a
+//!   future adapter can layer it on top.
+//! * `cap_height > 0` → this adapter returns a single-digest cap
+//!   shaped for the root-only convention; see `SUPPORTED_CAP_HEIGHT`.
+//!
+//! # Opening path — GPU-retained layers, no CPU tree rebuild
+//!
+//! The reviewer's Step 3.c direction (option 3): keep the digest
+//! layers the GPU commit already produced and serve openings by
+//! indexing into them, instead of materialising a CPU
+//! `MerkleTreeMmcs` prover tree on demand. Every `commit()` now calls
+//! `WgpuPoseidon2MerkleCommit::commit_host_matrix_with_layers`, which
+//! writes per-level buffers on the GPU and downloads them once.
+//! `open_batch` then walks those layers (log₂(h) sibling lookups) and
+//! reads opened row values directly from the stored input matrices —
+//! no CPU hash is ever computed.
+//!
+//! VRAM cost per commit: `(2h - 1) * DIGEST_LEN * 4` bytes ≈ 16·h
+//! bytes (≈4 MiB at h=2¹⁸). Host cost is the same (we download the
+//! layers). ICICLE-style "retain upper levels, recompute lower layers
+//! on demand" belongs in a follow-up — for the initial multi-query
+//! claim this is fine.
 
 use std::sync::{Arc, Mutex};
 
@@ -44,7 +61,7 @@ use p3_symmetric::{MerkleCap, PaddingFreeSponge, TruncatedPermutation};
 
 use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
 use zkgpu_poseidon2::Poseidon2Params;
-use zkgpu_wgpu::{WgpuDevice, WgpuPoseidon2MerkleCommit};
+use zkgpu_wgpu::{RetainedLayersHost, WgpuDevice, WgpuPoseidon2MerkleCommit};
 
 use crate::poseidon2_bridge::p3_to_zkgpu;
 
@@ -62,8 +79,9 @@ pub type P3Poseidon2Sponge = PaddingFreeSponge<Perm24, 24, 16, DIGEST_LEN>;
 /// Plonky3 tree compression used by `Poseidon2MerkleMmcs`.
 pub type P3Poseidon2Compression = TruncatedPermutation<Perm16, 2, DIGEST_LEN, 16>;
 
-/// CPU fallback MMCS — only used for `open_batch` / `verify_batch`
-/// (and `get_matrices`), built lazily per-commit.
+/// CPU MMCS type whose commit/open_batch this adapter produces
+/// bit-identical output for. Kept here for `verify_batch` delegation
+/// and for tests.
 type CpuValMmcs = MerkleTreeMmcs<
     <P3BabyBear as p3_field::Field>::Packing,
     <P3BabyBear as p3_field::Field>::Packing,
@@ -73,63 +91,41 @@ type CpuValMmcs = MerkleTreeMmcs<
     DIGEST_LEN,
 >;
 
+/// Cap height supported by this adapter.
+///
+/// `commit()` wraps the GPU-computed root as a single-digest
+/// `MerkleCap`, which only matches Plonky3's `MerkleTreeMmcs` output
+/// at `cap_height = 0`. Any other value would ask for `2^cap_height`
+/// sibling digests one layer below the root — which the GPU pipeline
+/// doesn't surface in this adapter. A future wider-cap adapter would
+/// change the commit shape anyway.
+const SUPPORTED_CAP_HEIGHT: usize = 0;
+
 // ---------------------------------------------------------------------------
 // GpuPoseidon2Mmcs
 // ---------------------------------------------------------------------------
 
-/// GPU-accelerated Poseidon2 MMCS adapter for the Step 3 bench gate.
+/// GPU-accelerated Poseidon2 MMCS. See module doc for scope.
 ///
-/// `Clone` semantics: cheap — internal state is shared via `Arc`.
-/// The GPU plan sits behind a `Mutex` because
-/// `WgpuPoseidon2MerkleCommit::commit` takes `&mut self` (owns
-/// internal scratch/pipeline state), and Plonky3's `Mmcs::commit`
-/// takes `&self`. Concurrent commits from one adapter instance
-/// serialize on that mutex; in the bench workload, `commit` is a
-/// single synchronous call per PCS, so there's no contention.
+/// `Clone` is cheap — internal state is shared via `Arc`. The GPU
+/// plan sits behind a `Mutex` because `WgpuPoseidon2MerkleCommit::
+/// commit_with_retained_layers` takes `&mut self`, and
+/// `Mmcs::commit` takes `&self`. Concurrent commits on one adapter
+/// instance serialise on the mutex; the target-stack prover commits
+/// the trace and the quotient back-to-back on a single thread, so
+/// there's no contention.
 #[derive(Clone)]
 pub struct GpuPoseidon2Mmcs {
     device: Arc<WgpuDevice>,
     gpu_commit: Arc<Mutex<WgpuPoseidon2MerkleCommit>>,
-    /// CPU-side (hash, compress) instances — stored here so that
-    /// `open_batch` / `verify_batch` can build a fresh `CpuValMmcs`
-    /// lazily per-commit without threading them through the trait
-    /// API.
     cpu_hash: P3Poseidon2Sponge,
     cpu_compress: P3Poseidon2Compression,
 }
 
-/// Cap height supported by this adapter.
-///
-/// `commit()` wraps the GPU-computed 8-element root as a single-digest
-/// `MerkleCap`, which only matches Plonky3's `MerkleTreeMmcs` output at
-/// `cap_height = 0`. Any other value would ask for `2^cap_height`
-/// sibling digests one layer below the root — which the GPU commit
-/// pipeline doesn't surface (the orchestrator ping-pongs through
-/// scratch buffers and only the final root is read back). The
-/// constructor rejects non-zero values rather than silently producing
-/// a wrong-shape commitment that would still *look* like a valid cap
-/// to downstream code.
-///
-/// This matches the FRI configuration used by the target-stack bench
-/// (`build_mmcs` sets cap_height=0). A future multi-height / wider-cap
-/// adapter would need a new constructor anyway.
-const SUPPORTED_CAP_HEIGHT: usize = 0;
-
 impl GpuPoseidon2Mmcs {
-    /// Construct a GPU MMCS from matched Plonky3 `(Perm16, Perm24)`
-    /// constants. `leaf_params` and `compress_params` must be the
-    /// Plonky3-variant, α=7 Poseidon2 params produced by
-    /// [`crate::poseidon2_bridge::babybear_plonky3_params`] at widths
-    /// 24 and 16 respectively.
+    /// Construct from matched Plonky3 `(Perm16, Perm24)` constants.
     ///
-    /// # `cap_height`
-    ///
-    /// Must be `0`. `commit()` returns a single-digest cap shaped
-    /// for the root-only convention, which is only correct at
-    /// `cap_height = 0`. Passing any other value returns `Err` rather
-    /// than silently producing a commitment of the wrong shape.
-    /// See the `SUPPORTED_CAP_HEIGHT` private constant for the full
-    /// rationale.
+    /// * `cap_height` must be `0`. See `SUPPORTED_CAP_HEIGHT`.
     pub fn new(
         device: Arc<WgpuDevice>,
         perm24: Perm24,
@@ -141,10 +137,7 @@ impl GpuPoseidon2Mmcs {
         if cap_height != SUPPORTED_CAP_HEIGHT {
             return Err(format!(
                 "GpuPoseidon2Mmcs: cap_height={cap_height} not supported; \
-                 this bench-gate adapter only implements cap_height={SUPPORTED_CAP_HEIGHT} \
-                 (root-only commitment). A larger cap would need 2^cap_height \
-                 sibling digests one layer below the root, which the GPU commit \
-                 pipeline doesn't surface."
+                 this adapter only implements cap_height={SUPPORTED_CAP_HEIGHT}"
             ));
         }
 
@@ -166,10 +159,6 @@ impl GpuPoseidon2Mmcs {
         })
     }
 
-    /// Build a CPU `MerkleTreeMmcs` configured to produce byte-
-    /// identical commitments to this adapter. Used for the
-    /// `verify_batch` helper. Hardcoded at `SUPPORTED_CAP_HEIGHT`
-    /// since the constructor has already enforced it.
     fn cpu_mmcs(&self) -> CpuValMmcs {
         CpuValMmcs::new(
             self.cpu_hash.clone(),
@@ -177,22 +166,32 @@ impl GpuPoseidon2Mmcs {
             SUPPORTED_CAP_HEIGHT,
         )
     }
+
+    /// Extract the 8-element root from a cap produced by this adapter
+    /// (or by Plonky3's CPU equivalent with cap_height=0).
+    pub fn root(
+        cap: &MerkleCap<P3BabyBear, [P3BabyBear; DIGEST_LEN]>,
+    ) -> Option<[P3BabyBear; DIGEST_LEN]> {
+        let slice: &[[P3BabyBear; DIGEST_LEN]] = cap.as_ref();
+        slice.first().copied()
+    }
 }
 
 // ---------------------------------------------------------------------------
 // GpuProverData<M>
 // ---------------------------------------------------------------------------
 
-/// Prover data for [`GpuPoseidon2Mmcs`] — commit-only scope.
+/// Prover data produced by [`GpuPoseidon2Mmcs::commit`]. Holds the
+/// input matrices (for row-level opened-values lookups) and the
+/// per-level digest stack the GPU retained during commit, so
+/// [`Mmcs::open_batch`] can answer openings without touching a CPU
+/// hash.
 ///
-/// Holds just the input matrices (for [`Mmcs::get_matrices`] lookups).
-/// No CPU tree is ever built: this adapter is commit-only and
-/// `Mmcs::open_batch` panics if called (see module doc). A future
-/// hybrid adapter that needs opening will either build the CPU tree
-/// lazily here or split the API across two adapters.
+/// Memory: `matrices` cost is caller-defined; retained layers cost
+/// `≈ 16·h` bytes on host (≈4 MiB at h=2¹⁸).
 pub struct GpuProverData<M> {
-    /// The matrices committed to.
     matrices: Vec<M>,
+    layers: RetainedLayersHost,
 }
 
 // ---------------------------------------------------------------------------
@@ -208,85 +207,125 @@ impl Mmcs<P3BabyBear> for GpuPoseidon2Mmcs {
     fn commit<M: Matrix<P3BabyBear>>(
         &self,
         inputs: Vec<M>,
-    ) -> (Self::Commitment, <Self as Mmcs<P3BabyBear>>::ProverData<M>) {
-        // --- Hard-scope: single matrix only. See module doc. ---
+    ) -> (Self::Commitment, Self::ProverData<M>) {
         assert!(
             !inputs.is_empty(),
             "GpuPoseidon2Mmcs::commit: called with 0 matrices"
         );
-        assert_eq!(
-            inputs.len(),
-            1,
-            "GpuPoseidon2Mmcs is a single-matrix adapter for the Step 3 bench gate; \
-             received {} matrices. Multi-matrix commit (Plonky3 compress_and_inject) \
-             is deferred — either split the call or use the hybrid adapter.",
-            inputs.len(),
-        );
 
-        let mat = &inputs[0];
-        let h = mat.height();
-        let w = mat.width();
+        // All inputs must be same height + same power-of-two height,
+        // and each must have width ≥ 1. Mixed-height batches need
+        // Plonky3's `compress_and_inject` injection DAG, which this
+        // adapter doesn't implement.
+        let h = inputs[0].height();
+        let mut total_width: usize = 0;
+        for (i, mat) in inputs.iter().enumerate() {
+            let mh = mat.height();
+            let mw = mat.width();
+            assert_eq!(
+                mh, h,
+                "GpuPoseidon2Mmcs::commit: matrix {i} has height {mh}, expected {h} \
+                 (this adapter only supports same-height batches; mixed-height \
+                 injection is not implemented)"
+            );
+            assert!(
+                mw > 0,
+                "GpuPoseidon2Mmcs::commit: matrix {i} has width 0"
+            );
+            total_width = total_width
+                .checked_add(mw)
+                .expect("total width overflow");
+        }
         assert!(h > 0, "GpuPoseidon2Mmcs::commit: h must be ≥ 1");
-        assert!(w > 0, "GpuPoseidon2Mmcs::commit: w must be ≥ 1");
         assert!(
             h.is_power_of_two(),
             "GpuPoseidon2Mmcs::commit: h must be a power of two (got {h})"
         );
 
-        // Flatten row-major h × w matrix into a `Vec<ZkgpuBabyBear>`,
-        // with Monty → canonical conversion in the same pass. Row
-        // iteration goes through `Matrix::row`, which works for both
-        // `RowMajorMatrix` (Plonky3's default) and
-        // `BitReversedMatrixView` (the shape returned from
-        // `coset_lde_batch`) without forcing a full materialisation.
-        let mut flat: Vec<ZkgpuBabyBear> = Vec::with_capacity(h * w);
+        // Flatten: one logical row of the "joint" matrix is the
+        // concatenation of the same row across every input, in input
+        // order — exactly what Plonky3's `first_digest_layer` feeds
+        // the leaf hasher for same-height tallest matrices.
+        let mut flat: Vec<ZkgpuBabyBear> = Vec::with_capacity(h * total_width);
         for r in 0..h {
-            for v in mat.row(r).expect("matrix row access").into_iter() {
-                flat.push(p3_to_zkgpu(v));
+            for mat in &inputs {
+                for v in mat.row(r).expect("matrix row access").into_iter() {
+                    flat.push(p3_to_zkgpu(v));
+                }
             }
         }
 
-        // GPU commit: upload, dispatch leaf sponge + log(h) tree
-        // compressions, read back the 8-element root. Nothing else —
-        // no CPU tree, no sibling pre-computation.
-        let gpu_root: [ZkgpuBabyBear; DIGEST_LEN] = {
+        let layers: RetainedLayersHost = {
             let mut plan = self.gpu_commit.lock().expect("gpu commit mutex");
-            plan.commit_host_matrix(
+            plan.commit_host_matrix_with_layers(
                 self.device.as_ref(),
                 &flat,
                 h as u32,
-                w as u32,
+                total_width as u32,
             )
             .expect("GpuPoseidon2Mmcs::commit: GPU commit failed")
         };
 
-        // Wrap the root in a MerkleCap — matches the type returned by
-        // Plonky3's MerkleTreeMmcs at cap_height = 0.
+        // Convert the root from zkgpu BabyBear (canonical u32) to p3
+        // BabyBear (Monty) and wrap as a 1-element MerkleCap.
+        let gpu_root = layers.root();
         let root_p3: [P3BabyBear; DIGEST_LEN] =
             gpu_root.map(|x| P3BabyBear::new(x.0));
         let cap = MerkleCap::from(vec![root_p3]);
 
-        let prover_data = GpuProverData { matrices: inputs };
+        let prover_data = GpuProverData {
+            matrices: inputs,
+            layers,
+        };
         (cap, prover_data)
     }
 
     fn open_batch<M: Matrix<P3BabyBear>>(
         &self,
-        _index: usize,
-        _prover_data: &<Self as Mmcs<P3BabyBear>>::ProverData<M>,
+        index: usize,
+        prover_data: &<Self as Mmcs<P3BabyBear>>::ProverData<M>,
     ) -> BatchOpening<P3BabyBear, Self> {
-        // Commit-only scope for the Step 3 bench gate. Opening
-        // support requires a CPU sibling tree — either built eagerly
-        // (which defeats the purpose of the GPU commit) or lazily
-        // here (which requires `M: Clone`, a bound the Mmcs trait
-        // doesn't provide). Both options belong in a future hybrid
-        // adapter; this one panics instead of silently producing a
-        // "GPU" bench number that actually measured CPU.
-        unimplemented!(
-            "GpuPoseidon2Mmcs is a commit-only bench-gate adapter; \
-             opening (and verification of openings) is not implemented. \
-             Use Plonky3's MerkleTreeMmcs directly for paths that open."
+        // All matrices are same-height by construction (enforced in
+        // commit), so `max_height == matrix.height()` and the
+        // Plonky3 `bits_reduced = log_max_height - log_height` is 0
+        // for every matrix. `opened_values[i] = matrices[i].row(index)`.
+        let h = prover_data.layers.num_leaves();
+        assert!(
+            index < h,
+            "GpuPoseidon2Mmcs::open_batch: index {index} out of bounds (h={h})"
         );
+
+        let opened_values: Vec<Vec<P3BabyBear>> = prover_data
+            .matrices
+            .iter()
+            .map(|m| {
+                m.row(index)
+                    .expect("row access at valid index")
+                    .into_iter()
+                    .collect()
+            })
+            .collect();
+
+        // Sibling path: for each tree level `k` in `0..log₂(h)`,
+        // push the sibling of the node at `index >> k`, i.e. index
+        // `(index >> k) ^ 1` of `layers[k]`. Bottom-up order matches
+        // Plonky3's `MerkleTreeMmcs::open_batch`.
+        let log_h = h.trailing_zeros() as usize;
+        let mut proof: Vec<[P3BabyBear; DIGEST_LEN]> = Vec::with_capacity(log_h);
+        let mut idx = index;
+        for layer_idx in 0..log_h {
+            let sibling_idx = idx ^ 1;
+            let sib_zkgpu = prover_data
+                .layers
+                .digest_at(layer_idx, sibling_idx)
+                .expect("sibling digest in retained layers");
+            let sib_p3: [P3BabyBear; DIGEST_LEN] =
+                sib_zkgpu.map(|x| P3BabyBear::new(x.0));
+            proof.push(sib_p3);
+            idx >>= 1;
+        }
+
+        BatchOpening::new(opened_values, proof)
     }
 
     fn get_matrices<'a, M: Matrix<P3BabyBear>>(
@@ -303,48 +342,16 @@ impl Mmcs<P3BabyBear> for GpuPoseidon2Mmcs {
         index: usize,
         batch_opening: BatchOpeningRef<'_, P3BabyBear, Self>,
     ) -> Result<(), Self::Error> {
-        // Verify by delegating to a fresh CPU `MerkleTreeMmcs` — the
-        // root + sibling path are valid Plonky3 proof artefacts by
-        // construction, so the verifier side can be checked CPU-side
-        // without needing a pre-built tree. (The bench doesn't call
-        // this, but providing it keeps the trait impl complete so
-        // the type plugs cleanly into `TwoAdicFriPcs::commit`.)
+        // Delegate verification to a fresh CPU `MerkleTreeMmcs`. The
+        // root + sibling chain are valid Plonky3 proof artefacts by
+        // construction (matched constants, same tree shape, same
+        // compression), so a verifier built from the same Poseidon2
+        // params accepts them. This keeps verify_batch CPU-side,
+        // which is correct for the prove path where the verifier is
+        // itself CPU.
         let cpu = self.cpu_mmcs();
         let cpu_ref: BatchOpeningRef<'_, P3BabyBear, CpuValMmcs> =
             BatchOpeningRef::new(batch_opening.opened_values, batch_opening.opening_proof);
         cpu.verify_batch(commit, dimensions, index, cpu_ref)
     }
-}
-
-// ---------------------------------------------------------------------------
-// Convenience: BabyBear-root accessor (bench-friendly)
-// ---------------------------------------------------------------------------
-
-impl GpuPoseidon2Mmcs {
-    /// Extract the 8-element BabyBear root from a `MerkleCap`
-    /// produced by this adapter (or by Plonky3's CPU equivalent —
-    /// same concrete type, same cap_height convention).
-    ///
-    /// Returns `None` if the cap has fewer than one element, which
-    /// shouldn't happen under our `cap_height = 0` contract but is
-    /// checked defensively.
-    pub fn root(
-        cap: &MerkleCap<P3BabyBear, [P3BabyBear; DIGEST_LEN]>,
-    ) -> Option<[P3BabyBear; DIGEST_LEN]> {
-        let slice: &[[P3BabyBear; DIGEST_LEN]] = cap.as_ref();
-        slice.first().copied()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tests (unit-level — the full Mmcs parity test lives in
-// `tests/poseidon2_mmcs_gpu.rs`).
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    // Unit-test coverage lives in the integration test file
-    // `tests/poseidon2_mmcs_gpu.rs` where we can import
-    // `rand::distr::StandardUniform` / SmallRng without pulling them
-    // into the library build.
 }
