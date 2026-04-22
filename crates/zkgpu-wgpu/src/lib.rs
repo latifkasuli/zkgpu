@@ -18,7 +18,8 @@ pub use device::WgpuDevice;
 pub use ntt::goldilocks::{WgpuGoldilocksNttPlan, MAX_GOLDILOCKS_LOG_N};
 pub use ntt::{NttTimings, PlannerPolicy, StockhamTailOverride, WgpuBatchedNttPlan, WgpuNttPlan};
 pub use poseidon2::{
-    WgpuBabyBearPoseidon2Plan, WgpuBabyBearPoseidon2PlonkyW16Plan,
+    MERKLE_DIGEST_LEN, WgpuBabyBearPoseidon2Plan, WgpuBabyBearPoseidon2PlonkyW16Plan,
     WgpuBabyBearPoseidon2PlonkyW24Plan, WgpuGoldilocksPoseidon2Plan,
+    WgpuPoseidon2MerkleLeafPlan,
 };
 pub use profiling::{GpuProfiler, GpuTiming, TimestampSpan};

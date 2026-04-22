@@ -17,8 +17,19 @@
 //!   Goldilocks twin. Same structure, `vec2<u32>` limbs via
 //!   `goldilocks_arith_helpers.wgsl` prelude; pinned against
 //!   `goldilocks_regression_state_0001`.
+//! - [`WgpuBabyBearPoseidon2PlonkyW16Plan`],
+//!   [`WgpuBabyBearPoseidon2PlonkyW24Plan`] — Phase 7 Step 1.5b
+//!   Plonky3-variant twins (M_4 = circ(2,3,1,1)). Consumed by Plonky3's
+//!   `Poseidon2MerkleMmcs` via the `zkgpu-plonky3::poseidon2_bridge`
+//!   adapter.
+//! - [`WgpuPoseidon2MerkleLeafPlan`] — Phase 7 Step 3.a GPU leaf
+//!   sponge: runs `PaddingFreeSponge<Perm24, 24, 16, 8>` over each row
+//!   of a matrix in one dispatch. Packed-constants BGL (3 storage + 1
+//!   uniform) to fit the WebGPU baseline 4-storage cap.
 //!
 //! Not yet:
+//! - Step 3.b tree-compression kernel + `WgpuPoseidon2MerkleCommit`
+//!   orchestrator (width-16 `TruncatedPermutation` path).
 //! - Testkit / CLI / web harness wiring for Poseidon2 suites
 //!   (Phase F.3).
 //!
@@ -35,10 +46,12 @@
 //! `max_compute_workgroups_per_dimension`.
 
 mod goldilocks_plan;
+mod merkle_leaf;
 mod plan;
 mod plonky3_plan;
 
 pub use goldilocks_plan::WgpuGoldilocksPoseidon2Plan;
+pub use merkle_leaf::{WgpuPoseidon2MerkleLeafPlan, DIGEST_LEN as MERKLE_DIGEST_LEN};
 pub use plan::WgpuBabyBearPoseidon2Plan;
 pub use plonky3_plan::{
     WgpuBabyBearPoseidon2PlonkyW16Plan, WgpuBabyBearPoseidon2PlonkyW24Plan,
