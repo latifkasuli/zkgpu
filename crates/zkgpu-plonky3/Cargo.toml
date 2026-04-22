@@ -47,9 +47,19 @@ p3-symmetric = "0.5"
 p3-air = "0.5"
 p3-uni-stark = "0.5"
 
+# Phase 7 Step 1 (2026-04-22) — Poseidon2 MMCS target stack.
+# CPU Poseidon2 implementation for parity witness and the Merkle-MMCS
+# path that zkgpu-plonky3 optimizes against.
+p3-poseidon2 = "0.5"
+
 # Phase 7.4 — perf microbench.
 criterion = { workspace = true }
 
 [[bench]]
 name = "gpu_vs_cpu_dft"
+harness = false
+
+# Phase 7 Step 1 — prover hot path (LDE + commit + prove) bench.
+[[bench]]
+name = "prover_hot_path"
 harness = false
