@@ -62,8 +62,30 @@ pub const WIDTH: usize = 16;
 /// Block size of the external MDS matrix `M_4`.
 pub const M4_WIDTH: usize = 4;
 
-/// Number of `M_4` blocks composing the width-16 external layer.
-const NUM_BLOCKS: usize = WIDTH / M4_WIDTH;
+/// Which variant of the 4×4 inner MDS matrix `M_4` the permutation uses.
+///
+/// The Poseidon2 paper leaves `M_4` under-specified — any MDS matrix
+/// works for the proof, but concrete implementations pick a fixed one
+/// for interop. The two in the wild:
+///
+/// - **[`M4Variant::HorizonLabs`]** — `circ(2, 1, 1, 1)`. The simpler
+///   matrix; what this crate originally shipped.
+/// - **[`M4Variant::Plonky3`]** — `circ(2, 3, 1, 1)` — the
+///   "fastest 4×4 MDS matrix" choice used by Plonky3 (`apply_mat4` in
+///   `plonky3/poseidon2/src/external.rs`). Required for bit-identical
+///   output against `p3_baby_bear::Poseidon2BabyBear`.
+///
+/// Callers that need Plonky3-output parity must set this explicitly;
+/// the default stays `HorizonLabs` to keep existing regression pins
+/// valid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum M4Variant {
+    /// `M_4 = circ(2, 1, 1, 1)`. Output row `i` is `sum + x[i]`.
+    HorizonLabs,
+    /// `M_4 = circ(2, 3, 1, 1)`. Matches Plonky3's `apply_mat4`
+    /// (`poseidon2/src/external.rs`).
+    Plonky3,
+}
 
 /// Full-width round parameters for Poseidon2 at a fixed `WIDTH`.
 ///
@@ -102,7 +124,19 @@ pub struct Poseidon2Params<F: GpuField, const W: usize> {
     /// picks small-integer entries per field; this crate uses
     /// `diagonal[i] = F::from_repr(i + 1)` from the placeholder
     /// generator.
+    ///
+    /// **Convention.** Our `mul_internal` computes
+    /// `y[i] = sum + (d[i] - 1) * x[i]` which matches the paper's
+    /// `J + Diag(V)` form with `V[i] = d[i] - 1`. Plonky3's `V` values
+    /// (e.g. `[-2, 1, 2, 1/2, ...]` for BabyBear16) must therefore be
+    /// stored here as `V + 1` (e.g. `[-1, 2, 3, 3/2, ...]`). The
+    /// zkgpu-plonky3 bridge handles this translation automatically.
     pub internal_diagonal: [F; W],
+
+    /// Which 4×4 MDS matrix the external layer uses. Default is
+    /// [`M4Variant::HorizonLabs`] for backward compatibility; Plonky3-
+    /// bridge constructors set this to [`M4Variant::Plonky3`].
+    pub m4_variant: M4Variant,
 }
 
 /// Deterministic placeholder constant generator.
@@ -169,6 +203,10 @@ impl PlaceholderConstants {
 impl<F: GpuField, const W: usize> Poseidon2Params<F, W> {
     /// Construct params with all fields supplied explicitly. Useful for
     /// plugging in external (e.g. Plonky3) constants later.
+    ///
+    /// Defaults `m4_variant` to [`M4Variant::HorizonLabs`]. Callers that
+    /// need Plonky3 output parity should use [`Self::with_m4_variant`]
+    /// or construct via the zkgpu-plonky3 bridge.
     pub fn new(
         alpha: u64,
         rounds_f_half: usize,
@@ -194,7 +232,14 @@ impl<F: GpuField, const W: usize> Poseidon2Params<F, W> {
             external_constants,
             internal_constants,
             internal_diagonal,
+            m4_variant: M4Variant::HorizonLabs,
         }
+    }
+
+    /// Set the 4×4 MDS matrix variant (builder-style).
+    pub fn with_m4_variant(mut self, variant: M4Variant) -> Self {
+        self.m4_variant = variant;
+        self
     }
 }
 
@@ -299,39 +344,47 @@ impl<F: GpuField, const W: usize> Poseidon2<F, W> {
         state[0] = state[0].pow(self.params.alpha);
     }
 
-    /// External matrix `M_E ⊗ M_4` where `M_4 = circ(2,1,1,1)` and
+    /// External matrix `M_E ⊗ M_4` where `M_4` is the 4×4 MDS matrix
+    /// (variant selected by `self.params.m4_variant`) and
     /// `M_E(i,j) = 2·M_4 if i == j else M_4`.
     ///
+    /// Supports any `W` that is a positive multiple of 4. Width-16
+    /// and width-24 are both exercised (the latter by the Plonky3
+    /// Poseidon2 MMCS sponge).
+    ///
     /// Implemented in two passes:
-    /// 1. Apply `M_4` to each 4-element block independently.
-    /// 2. Mix blocks: for each position `j ∈ 0..4`, each block receives
-    ///    the sum of all blocks' `j`-th positions plus itself (the
-    ///    diagonal doubling).
+    /// 1. Apply `M_4` to each 4-element block independently (variant
+    ///    selected at runtime by a single branch per call).
+    /// 2. Mix blocks: for each column `j ∈ 0..4`, each block receives
+    ///    the sum of all blocks' `j`-th positions plus itself — that
+    ///    is the diagonal-doubling pattern of `M_E`.
     fn mul_external(&self, state: &mut [F; W]) {
-        assert_eq!(W, WIDTH, "external matrix is specialised to W=16");
+        assert!(W > 0 && W % M4_WIDTH == 0, "W must be a positive multiple of 4");
+        let num_blocks = W / M4_WIDTH;
 
-        // Step 1: M_4 per block.
-        let mut blocks: [[F; M4_WIDTH]; NUM_BLOCKS] =
-            [[F::ZERO; M4_WIDTH]; NUM_BLOCKS];
-        for (b, block) in blocks.iter_mut().enumerate() {
-            for i in 0..M4_WIDTH {
-                block[i] = state[b * M4_WIDTH + i];
-            }
-            *block = m4_times(*block);
-        }
+        // Step 1: M_4 per block. Heap-allocate to avoid tying num_blocks
+        // to a const; the cost is one Vec allocation per external step.
+        let mut blocks: Vec<[F; M4_WIDTH]> = (0..num_blocks)
+            .map(|b| {
+                let mut block = [F::ZERO; M4_WIDTH];
+                for (i, slot) in block.iter_mut().enumerate() {
+                    *slot = state[b * M4_WIDTH + i];
+                }
+                match self.params.m4_variant {
+                    M4Variant::HorizonLabs => m4_times_horizonlabs(block),
+                    M4Variant::Plonky3 => m4_times_plonky3(block),
+                }
+            })
+            .collect();
 
         // Step 2: cross-block sum + diagonal doubling.
-        // For each column j, sum_all[j] = Σ_b blocks[b][j].
         let mut sum_all = [F::ZERO; M4_WIDTH];
         for block in blocks.iter() {
             for j in 0..M4_WIDTH {
                 sum_all[j] = sum_all[j].add(block[j]);
             }
         }
-        // Each block's j-th slot becomes blocks[b][j] + sum_all[j].
-        // That implements M_E(i,i) = 2·M_4 and M_E(i,j) = M_4 — the
-        // doubled-on-diagonal block matrix.
-        for (b, block) in blocks.iter().enumerate() {
+        for (b, block) in blocks.iter_mut().enumerate() {
             for j in 0..M4_WIDTH {
                 state[b * M4_WIDTH + j] = block[j].add(sum_all[j]);
             }
@@ -389,17 +442,16 @@ impl<F: GpuField, const W: usize> Poseidon2<F, W> {
     }
 }
 
-/// `M_4 = circ(2, 1, 1, 1)` applied to a 4-element block.
+/// `M_4 = circ(2, 1, 1, 1)` applied to a 4-element block (Horizon Labs
+/// convention — what zkgpu-poseidon2 originally shipped).
 ///
-/// Explicit form (expressed without a subtraction so both BabyBear and
-/// KoalaBear's `add` suffice):
 /// ```text
 /// y[0] = 2*x[0] + x[1] + x[2] + x[3]
 /// y[1] = x[0] + 2*x[1] + x[2] + x[3]
 /// y[2] = x[0] + x[1] + 2*x[2] + x[3]
 /// y[3] = x[0] + x[1] + x[2] + 2*x[3]
 /// ```
-fn m4_times<F: GpuField>(x: [F; M4_WIDTH]) -> [F; M4_WIDTH] {
+fn m4_times_horizonlabs<F: GpuField>(x: [F; M4_WIDTH]) -> [F; M4_WIDTH] {
     let sum = x[0].add(x[1]).add(x[2]).add(x[3]);
     [
         sum.add(x[0]),
@@ -407,6 +459,43 @@ fn m4_times<F: GpuField>(x: [F; M4_WIDTH]) -> [F; M4_WIDTH] {
         sum.add(x[2]),
         sum.add(x[3]),
     ]
+}
+
+/// `M_4 = circ(2, 3, 1, 1)` applied to a 4-element block (Plonky3
+/// convention — `apply_mat4` in `plonky3/poseidon2/src/external.rs`).
+///
+/// Matrix rows:
+/// ```text
+/// [ 2 3 1 1 ]
+/// [ 1 2 3 1 ]
+/// [ 1 1 2 3 ]
+/// [ 3 1 1 2 ]
+/// ```
+///
+/// Implementation mirrors Plonky3's ordering so both produce the same
+/// arithmetic tree and therefore identical output (modulo field repr):
+/// - `t01    = x[0] + x[1]`
+/// - `t23    = x[2] + x[3]`
+/// - `t0123  = t01 + t23`
+/// - `t01123 = t0123 + x[1]`
+/// - `t01233 = t0123 + x[3]`
+/// - `y[3] = t01233 + 2*x[0]`
+/// - `y[1] = t01123 + 2*x[2]`
+/// - `y[0] = t01123 + t01`
+/// - `y[2] = t01233 + t23`
+fn m4_times_plonky3<F: GpuField>(x: [F; M4_WIDTH]) -> [F; M4_WIDTH] {
+    let t01 = x[0].add(x[1]);
+    let t23 = x[2].add(x[3]);
+    let t0123 = t01.add(t23);
+    let t01123 = t0123.add(x[1]);
+    let t01233 = t0123.add(x[3]);
+    let double_x0 = x[0].add(x[0]);
+    let double_x2 = x[2].add(x[2]);
+    let y3 = t01233.add(double_x0);
+    let y1 = t01123.add(double_x2);
+    let y0 = t01123.add(t01);
+    let y2 = t01233.add(t23);
+    [y0, y1, y2, y3]
 }
 
 #[cfg(test)]
@@ -484,9 +573,19 @@ mod tests {
     }
 
     #[test]
-    fn m4_times_linearity() {
+    fn m4_times_horizonlabs_linearity() {
+        m4_linearity_check(m4_times_horizonlabs::<zkgpu_babybear::BabyBear>);
+    }
+
+    #[test]
+    fn m4_times_plonky3_linearity() {
+        m4_linearity_check(m4_times_plonky3::<zkgpu_babybear::BabyBear>);
+    }
+
+    /// Shared body — M_4 is linear, so M_4(x + y) == M_4(x) + M_4(y)
+    /// for any variant. Exercise both variants with this one body.
+    fn m4_linearity_check(m4: fn([zkgpu_babybear::BabyBear; 4]) -> [zkgpu_babybear::BabyBear; 4]) {
         use zkgpu_babybear::BabyBear;
-        // M_4 is linear, so M_4(x + y) should equal M_4(x) + M_4(y).
         let x: [BabyBear; 4] = [
             BabyBear::new(11),
             BabyBear::new(22),
@@ -503,9 +602,9 @@ mod tests {
         for i in 0..4 {
             xy[i] = x[i].add(y[i]);
         }
-        let mx = m4_times(x);
-        let my = m4_times(y);
-        let mxy = m4_times(xy);
+        let mx = m4(x);
+        let my = m4(y);
+        let mxy = m4(xy);
         for i in 0..4 {
             assert_eq!(
                 mxy[i].to_repr(),

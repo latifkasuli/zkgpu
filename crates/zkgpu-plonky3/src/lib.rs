@@ -113,6 +113,8 @@
 //! Buffer-size preflight and device-init-failure fallbacks still
 //! apply under both overrides (those are correctness constraints).
 
+pub mod poseidon2_bridge;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 

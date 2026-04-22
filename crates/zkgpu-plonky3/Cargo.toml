@@ -12,6 +12,9 @@ publish = false
 zkgpu-core = { workspace = true }
 zkgpu-babybear = { workspace = true }
 zkgpu-wgpu = { workspace = true }
+# Step 1.5a — Plonky3-interop Poseidon2 params in the bridge module.
+zkgpu-poseidon2 = { workspace = true }
+p3-poseidon2 = "0.5"
 
 # Plonky3 0.5 — matches p3-zk-proofs pin, which is our primary
 # correctness-oracle consumer crate.
