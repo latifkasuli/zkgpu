@@ -31,6 +31,7 @@ use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
 use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
+use zkgpu_core::GpuDevice;
 use zkgpu_plonky3::poseidon2_bridge::{babybear_plonky3_params, p3_to_zkgpu};
 use zkgpu_wgpu::{WgpuDevice, WgpuPoseidon2MerkleCommit};
 
@@ -280,5 +281,130 @@ fn commit_rejects_zero_height() {
     assert!(
         err.is_err(),
         "commit must reject h=0 (Plonky3 also panics on h=0), got Ok"
+    );
+}
+
+// -- GPU-resident `commit()` seam --------------------------------------
+//
+// The production path (Step 2 GPU-resident coset LDE, Plonky3 `Mmcs`
+// adapter) calls `WgpuPoseidon2MerkleCommit::commit` directly with an
+// already-uploaded matrix buffer, bypassing `commit_host_matrix`. All
+// shape guards must live on the GPU-resident seam too — otherwise a
+// GPU-resident caller gets weaker contract enforcement than the host
+// convenience wrapper.
+
+/// Parity: the GPU-resident `commit()` entry point (what the Plonky3
+/// `Mmcs` adapter will call) must produce the same root as the host
+/// convenience wrapper, which is already pinned against Plonky3 by
+/// the tests above. This locks the production seam, not just the
+/// convenience path.
+#[test]
+fn commit_gpu_resident_matches_plonky3() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (mmcs, mut commit) = build_matched(&device, 0x_C0FF_EE_39_u64);
+    // One shape from each major regime: short row (leaf partial),
+    // exact chunk boundary, deeper tree.
+    for &(h, w) in &[(8usize, 5usize), (16, 16), (64, 8)] {
+        let (p3_mat, gpu_flat) = random_matrix(h, w, 0x_D006_9000_u64 ^ (h as u64) << 16 ^ (w as u64));
+        let cpu = cpu_root(&mmcs, p3_mat);
+
+        // Upload the matrix and call the GPU-resident seam directly.
+        let matrix_buf = device.upload::<ZkgpuBabyBear>(&gpu_flat).unwrap();
+        let gpu = commit
+            .commit(&device, &matrix_buf, h as u32, w as u32)
+            .unwrap();
+        assert_roots_match(cpu, gpu, &format!("GPU-resident commit (h={h}, w={w})"));
+    }
+}
+
+/// The P2 review finding: `commit()` must reject `w == 0` up front,
+/// not just `commit_host_matrix`. A GPU-resident caller who uploads a
+/// zero-length buffer and passes `h > 0, w == 0` must see an error,
+/// not a silently produced root.
+#[test]
+fn commit_gpu_resident_rejects_zero_width() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (_mmcs, mut commit) = build_matched(&device, 0x_C0FF_EE_3A_u64);
+    // Upload a 1-element placeholder — wgpu rejects zero-size buffer
+    // init, so we need *some* buffer to pass into commit(). The shape
+    // check inside commit() is what we're testing: (h=4, w=0) ⇒
+    // expected_input_len = 0 ≠ buffer.len() = 1, but the w==0 guard
+    // fires FIRST, so the error message should be the "w must be ≥ 1"
+    // one — not the length-mismatch one.
+    let placeholder = device
+        .upload::<ZkgpuBabyBear>(&[ZkgpuBabyBear(0)])
+        .unwrap();
+    let err = commit.commit(&device, &placeholder, 4, 0);
+    match err {
+        Err(zkgpu_core::ZkGpuError::InvalidNttSize(msg)) => {
+            assert!(
+                msg.contains("w must be ≥ 1"),
+                "expected w==0 guard to fire first, got: {msg}"
+            );
+        }
+        Err(e) => panic!("expected InvalidNttSize(w must be ≥ 1), got {e:?}"),
+        Ok(_) => panic!("commit() must reject w=0, got Ok"),
+    }
+}
+
+/// Same P2 finding, surfaced through the host wrapper: it must still
+/// reject `w == 0` (delegation to `commit()` must actually run the
+/// guard).
+#[test]
+fn commit_host_wrapper_rejects_zero_width() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (_mmcs, mut commit) = build_matched(&device, 0x_C0FF_EE_3B_u64);
+    let empty: Vec<ZkgpuBabyBear> = Vec::new();
+    let err = commit.commit_host_matrix(&device, &empty, 4, 0);
+    assert!(
+        err.is_err(),
+        "commit_host_matrix must reject w=0 via delegated commit() guard, got Ok"
+    );
+}
+
+/// `commit()` must also enforce power-of-two h on the GPU-resident
+/// seam, not just in the convenience wrapper.
+#[test]
+fn commit_gpu_resident_rejects_non_power_of_two_height() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (_mmcs, mut commit) = build_matched(&device, 0x_C0FF_EE_3C_u64);
+    let bogus: Vec<ZkgpuBabyBear> = vec![ZkgpuBabyBear(1); 3 * 8];
+    let buf = device.upload::<ZkgpuBabyBear>(&bogus).unwrap();
+    let err = commit.commit(&device, &buf, 3, 8);
+    assert!(
+        err.is_err(),
+        "commit() must reject non-power-of-two h (got h=3), got Ok"
+    );
+}
+
+/// `commit()` must enforce `matrix.len() == h*w` on the GPU-resident
+/// seam — a caller who uploads the wrong-sized buffer must see an
+/// error, not a corrupted root.
+#[test]
+fn commit_gpu_resident_rejects_shape_mismatch() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (_mmcs, mut commit) = build_matched(&device, 0x_C0FF_EE_3D_u64);
+    // Upload 30 elements but claim h=4, w=8 (expects 32).
+    let bogus: Vec<ZkgpuBabyBear> = vec![ZkgpuBabyBear(1); 30];
+    let buf = device.upload::<ZkgpuBabyBear>(&bogus).unwrap();
+    let err = commit.commit(&device, &buf, 4, 8);
+    assert!(
+        err.is_err(),
+        "commit() must reject matrix.len() != h*w, got Ok"
     );
 }

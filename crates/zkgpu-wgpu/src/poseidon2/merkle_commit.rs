@@ -75,10 +75,21 @@ impl WgpuPoseidon2MerkleCommit {
     /// Commit a GPU-resident `h × w` row-major matrix and return the
     /// 8-element Merkle root.
     ///
+    /// This is the production seam — Step 2's future GPU-resident
+    /// `coset_lde_batch` will feed its output directly into here, and
+    /// the Plonky3 `Mmcs` adapter routes through this path. All shape
+    /// guards live here (not just in [`Self::commit_host_matrix`]) so
+    /// that GPU-resident callers can't bypass them.
+    ///
     /// # Preconditions
-    /// * `h` must be a power of two (Step 3.b scope).
-    /// * `h ≥ 1`. `h == 1` is valid — no compression runs and the
-    ///   leaf-sponge output IS the root.
+    /// * `h` must be `≥ 1` and a power of two (Step 3.b scope).
+    ///   `h == 1` is valid — no compression runs and the leaf-sponge
+    ///   output IS the root.
+    /// * `w` must be `≥ 1`. Plonky3's `MerkleTreeMmcs::commit` panics
+    ///   on an `h × 0` matrix (a row with no field elements has no
+    ///   meaningful digest in the target stack); we reject it up front
+    ///   rather than letting the kernel produce an arbitrary constant
+    ///   digest that no CPU reference would agree with.
     /// * `matrix.len() == h * w`.
     pub fn commit(
         &mut self,
@@ -90,6 +101,13 @@ impl WgpuPoseidon2MerkleCommit {
         if h == 0 {
             return Err(ZkGpuError::InvalidNttSize(
                 "Merkle commit: h must be ≥ 1 (empty matrix not supported)".into(),
+            ));
+        }
+        if w == 0 {
+            return Err(ZkGpuError::InvalidNttSize(
+                "Merkle commit: w must be ≥ 1 (zero-width rows have no \
+                 defined digest in the Plonky3 target stack)"
+                    .into(),
             ));
         }
         if !h.is_power_of_two() {
@@ -170,6 +188,14 @@ impl WgpuPoseidon2MerkleCommit {
     ///
     /// Prefer [`Self::commit`] with GPU-resident buffers in production
     /// (e.g. fed by a GPU coset-LDE in Step 2) to avoid the round-trip.
+    ///
+    /// Shape contract is whatever [`Self::commit`] enforces — this
+    /// wrapper only performs pre-upload validation so we don't feed
+    /// wgpu's `create_buffer_init` a zero-length slice when `h` or `w`
+    /// is zero (wgpu rejects that with a panic deep in the buffer
+    /// init path, which is a worse failure mode than our explicit
+    /// error). All other guards (power-of-two, `matrix.len == h*w`)
+    /// fire inside `commit()` itself.
     pub fn commit_host_matrix(
         &mut self,
         device: &WgpuDevice,
@@ -177,7 +203,11 @@ impl WgpuPoseidon2MerkleCommit {
         h: u32,
         w: u32,
     ) -> Result<[BabyBear; DIGEST_LEN], ZkGpuError> {
-        // Validate shape before any GPU work.
+        // Pre-upload shape check: `h * w` might overflow u32, and
+        // upload on an empty slice panics inside wgpu. Both are
+        // recoverable as `InvalidNttSize` errors; surface them
+        // ourselves so the caller sees a clean error rather than a
+        // panic.
         let expected_len = (h as usize)
             .checked_mul(w as usize)
             .ok_or_else(|| {
@@ -194,20 +224,17 @@ impl WgpuPoseidon2MerkleCommit {
                 expected_len,
             )));
         }
-        if h == 0 {
-            return Err(ZkGpuError::InvalidNttSize(
-                "Merkle commit: h must be ≥ 1".into(),
-            ));
-        }
-        // wgpu rejects zero-size buffer inits; `h * w == 0` would be
-        // caught below, but when w == 0 and h ≥ 1 we still need to
-        // upload a 1-element placeholder. Simpler: guard w == 0 here.
-        // (Plonky3's commit on a `0 × w`-or-`h × 0` matrix isn't
-        // well-defined in the target stack; reject explicitly.)
-        if w == 0 {
-            return Err(ZkGpuError::InvalidNttSize(
-                "Merkle commit: w must be ≥ 1".into(),
-            ));
+        // Delegate the h==0 / w==0 / power-of-two rejections to
+        // `commit()` so there's exactly one source of truth for the
+        // shape contract. Special-case only the upload step: wgpu's
+        // `create_buffer_init` panics on an empty slice, and
+        // `expected_len == 0` is one of the two zero-shape inputs
+        // `commit()` rejects — short-circuit into `commit()` with a
+        // dummy 1-element buffer so `commit()` errors cleanly without
+        // tripping the wgpu panic on the way in.
+        if expected_len == 0 {
+            let dummy = device.upload::<BabyBear>(&[BabyBear::new(0)])?;
+            return self.commit(device, &dummy, h, w);
         }
         let matrix_buf = device.upload::<BabyBear>(matrix)?;
         self.commit(device, &matrix_buf, h, w)
