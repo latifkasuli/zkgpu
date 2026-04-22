@@ -96,8 +96,24 @@ pub struct GpuPoseidon2Mmcs {
     /// API.
     cpu_hash: P3Poseidon2Sponge,
     cpu_compress: P3Poseidon2Compression,
-    cap_height: usize,
 }
+
+/// Cap height supported by this adapter.
+///
+/// `commit()` wraps the GPU-computed 8-element root as a single-digest
+/// `MerkleCap`, which only matches Plonky3's `MerkleTreeMmcs` output at
+/// `cap_height = 0`. Any other value would ask for `2^cap_height`
+/// sibling digests one layer below the root — which the GPU commit
+/// pipeline doesn't surface (the orchestrator ping-pongs through
+/// scratch buffers and only the final root is read back). The
+/// constructor rejects non-zero values rather than silently producing
+/// a wrong-shape commitment that would still *look* like a valid cap
+/// to downstream code.
+///
+/// This matches the FRI configuration used by the target-stack bench
+/// (`build_mmcs` sets cap_height=0). A future multi-height / wider-cap
+/// adapter would need a new constructor anyway.
+const SUPPORTED_CAP_HEIGHT: usize = 0;
 
 impl GpuPoseidon2Mmcs {
     /// Construct a GPU MMCS from matched Plonky3 `(Perm16, Perm24)`
@@ -106,9 +122,14 @@ impl GpuPoseidon2Mmcs {
     /// [`crate::poseidon2_bridge::babybear_plonky3_params`] at widths
     /// 24 and 16 respectively.
     ///
-    /// `cap_height = 0` means the commitment is a single digest (the
-    /// root), matching the FRI configuration used by the target-stack
-    /// bench.
+    /// # `cap_height`
+    ///
+    /// Must be `0`. `commit()` returns a single-digest cap shaped
+    /// for the root-only convention, which is only correct at
+    /// `cap_height = 0`. Passing any other value returns `Err` rather
+    /// than silently producing a commitment of the wrong shape.
+    /// See the `SUPPORTED_CAP_HEIGHT` private constant for the full
+    /// rationale.
     pub fn new(
         device: Arc<WgpuDevice>,
         perm24: Perm24,
@@ -117,6 +138,16 @@ impl GpuPoseidon2Mmcs {
         compress_params: Poseidon2Params<ZkgpuBabyBear, 16>,
         cap_height: usize,
     ) -> Result<Self, String> {
+        if cap_height != SUPPORTED_CAP_HEIGHT {
+            return Err(format!(
+                "GpuPoseidon2Mmcs: cap_height={cap_height} not supported; \
+                 this bench-gate adapter only implements cap_height={SUPPORTED_CAP_HEIGHT} \
+                 (root-only commitment). A larger cap would need 2^cap_height \
+                 sibling digests one layer below the root, which the GPU commit \
+                 pipeline doesn't surface."
+            ));
+        }
+
         let gpu_commit = WgpuPoseidon2MerkleCommit::new(
             device.as_ref(),
             leaf_params,
@@ -132,19 +163,18 @@ impl GpuPoseidon2Mmcs {
             gpu_commit: Arc::new(Mutex::new(gpu_commit)),
             cpu_hash,
             cpu_compress,
-            cap_height,
         })
     }
 
     /// Build a CPU `MerkleTreeMmcs` configured to produce byte-
-    /// identical commitments to this adapter. Used for lazy
-    /// `open_batch` / `verify_batch` paths and for differential
-    /// testing.
+    /// identical commitments to this adapter. Used for the
+    /// `verify_batch` helper. Hardcoded at `SUPPORTED_CAP_HEIGHT`
+    /// since the constructor has already enforced it.
     fn cpu_mmcs(&self) -> CpuValMmcs {
         CpuValMmcs::new(
             self.cpu_hash.clone(),
             self.cpu_compress.clone(),
-            self.cap_height,
+            SUPPORTED_CAP_HEIGHT,
         )
     }
 }

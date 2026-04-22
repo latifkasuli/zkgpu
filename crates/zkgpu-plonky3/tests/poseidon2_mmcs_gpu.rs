@@ -193,3 +193,69 @@ fn mmcs_get_matrices_returns_inputs() {
     assert_eq!(mats.len(), 1);
     assert_eq!(mats[0].values.len(), 8 * 8);
 }
+
+/// Regression guard for the P2 review finding on commit `54dc548`:
+/// the previous constructor silently stored any `cap_height` while
+/// `commit()` always produced a single-digest cap, so passing
+/// `cap_height > 0` would have yielded a commitment of the wrong
+/// shape. The constructor now rejects it up front.
+#[test]
+fn mmcs_new_rejects_non_zero_cap_height() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+
+    // Build the same matched constants `build_matched` uses, then
+    // call `new` directly so we can vary cap_height.
+    let mut rng16 = SmallRng::seed_from_u64(0x_CA_BAD_E11_u64 ^ 0xA11_1600_u64);
+    let ext16: ExternalLayerConstants<P3BabyBear, 16> =
+        ExternalLayerConstants::new_from_rng(ROUNDS_F, &mut rng16);
+    let int16: Vec<P3BabyBear> =
+        (&mut rng16).sample_iter(StandardUniform).take(13).collect();
+    let perm16: Perm16 = Perm16::new(ext16.clone(), int16.clone());
+    let zkgpu_params16 = babybear_plonky3_params::<16>(&ext16, &int16);
+
+    let mut rng24 = SmallRng::seed_from_u64(0x_CA_BAD_E11_u64 ^ 0xA11_2400_u64);
+    let ext24: ExternalLayerConstants<P3BabyBear, 24> =
+        ExternalLayerConstants::new_from_rng(ROUNDS_F, &mut rng24);
+    let int24: Vec<P3BabyBear> =
+        (&mut rng24).sample_iter(StandardUniform).take(21).collect();
+    let perm24: Perm24 = Perm24::new(ext24.clone(), int24.clone());
+    let zkgpu_params24 = babybear_plonky3_params::<24>(&ext24, &int24);
+
+    // cap_height = 1 would mean a 2-digest commitment; cap_height = 3
+    // would mean 8 digests. Neither is what `commit()` produces.
+    for bogus in [1usize, 2, 3, 8] {
+        let err = GpuPoseidon2Mmcs::new(
+            device.clone(),
+            perm24.clone(),
+            perm16.clone(),
+            zkgpu_params24.clone(),
+            zkgpu_params16.clone(),
+            bogus,
+        );
+        match err {
+            Err(msg) => {
+                assert!(
+                    msg.contains("cap_height"),
+                    "cap_height={bogus}: expected rejection mentioning cap_height, got: {msg}"
+                );
+            }
+            Ok(_) => panic!(
+                "GpuPoseidon2Mmcs::new must reject cap_height={bogus}, got Ok"
+            ),
+        }
+    }
+
+    // And cap_height = 0 must still succeed (golden path).
+    GpuPoseidon2Mmcs::new(
+        device,
+        perm24,
+        perm16,
+        zkgpu_params24,
+        zkgpu_params16,
+        0,
+    )
+    .expect("cap_height=0 must construct cleanly");
+}
