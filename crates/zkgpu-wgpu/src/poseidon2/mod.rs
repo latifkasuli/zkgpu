@@ -26,10 +26,16 @@
 //!   sponge: runs `PaddingFreeSponge<Perm24, 24, 16, 8>` over each row
 //!   of a matrix in one dispatch. Packed-constants BGL (3 storage + 1
 //!   uniform) to fit the WebGPU baseline 4-storage cap.
+//! - [`WgpuPoseidon2MerkleCompressPlan`],
+//!   [`WgpuPoseidon2MerkleCommit`] — Phase 7 Step 3.b tree-compression
+//!   kernel (width-16 `TruncatedPermutation`) and the commit
+//!   orchestrator that chains leaf-sponge → `log₂(h)` compression
+//!   levels → 8-element root. Single-matrix, power-of-two-h scope
+//!   (Plonky3's `TwoAdicFriPcs::commit` shape).
 //!
 //! Not yet:
-//! - Step 3.b tree-compression kernel + `WgpuPoseidon2MerkleCommit`
-//!   orchestrator (width-16 `TruncatedPermutation` path).
+//! - Multi-matrix / non-power-of-two-h merkle commits (Plonky3's
+//!   `compress_and_inject`; not needed for the Step 3 bench gate).
 //! - Testkit / CLI / web harness wiring for Poseidon2 suites
 //!   (Phase F.3).
 //!
@@ -46,11 +52,15 @@
 //! `max_compute_workgroups_per_dimension`.
 
 mod goldilocks_plan;
+mod merkle_commit;
+mod merkle_compress;
 mod merkle_leaf;
 mod plan;
 mod plonky3_plan;
 
 pub use goldilocks_plan::WgpuGoldilocksPoseidon2Plan;
+pub use merkle_commit::WgpuPoseidon2MerkleCommit;
+pub use merkle_compress::WgpuPoseidon2MerkleCompressPlan;
 pub use merkle_leaf::{WgpuPoseidon2MerkleLeafPlan, DIGEST_LEN as MERKLE_DIGEST_LEN};
 pub use plan::WgpuBabyBearPoseidon2Plan;
 pub use plonky3_plan::{

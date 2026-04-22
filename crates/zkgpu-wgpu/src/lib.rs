@@ -20,6 +20,7 @@ pub use ntt::{NttTimings, PlannerPolicy, StockhamTailOverride, WgpuBatchedNttPla
 pub use poseidon2::{
     MERKLE_DIGEST_LEN, WgpuBabyBearPoseidon2Plan, WgpuBabyBearPoseidon2PlonkyW16Plan,
     WgpuBabyBearPoseidon2PlonkyW24Plan, WgpuGoldilocksPoseidon2Plan,
+    WgpuPoseidon2MerkleCommit, WgpuPoseidon2MerkleCompressPlan,
     WgpuPoseidon2MerkleLeafPlan,
 };
 pub use profiling::{GpuProfiler, GpuTiming, TimestampSpan};
