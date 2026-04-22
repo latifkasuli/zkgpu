@@ -48,6 +48,56 @@ pub struct WgpuPoseidon2MerkleCommit {
     compress: WgpuPoseidon2MerkleCompressPlan,
 }
 
+/// All digest layers retained from a single commit. Index `k` holds the
+/// digests at tree level `k`:
+///
+/// * `layers[0]` — `h` leaf digests produced by the Poseidon2 leaf sponge.
+/// * `layers[k]` for `0 < k < log2(h)` — `h / 2^k` compression outputs.
+/// * `layers[log2(h)]` — the single-element root.
+///
+/// Each `Vec<BabyBear>` is a flat `num_digests_at_level * DIGEST_LEN`
+/// buffer; digest `i` at level `k` is `layers[k][i*DIGEST_LEN .. (i+1)*DIGEST_LEN]`.
+///
+/// This is the Step 3.c opening-friendly prover data: `open_batch(idx)`
+/// walks `layers[0..log2(h)]` extracting `layers[k][(idx >> k) ^ 1]` as
+/// the sibling at level `k`, no CPU tree rebuild. Total host storage is
+/// `(2h - 1) * DIGEST_LEN * 4` bytes (≈ 16·h bytes — 4 MiB at h=2^18).
+#[derive(Debug, Clone)]
+pub struct RetainedLayersHost {
+    pub layers: Vec<Vec<BabyBear>>,
+}
+
+impl RetainedLayersHost {
+    /// The Merkle root (tree's top layer, always 1 digest).
+    pub fn root(&self) -> [BabyBear; DIGEST_LEN] {
+        let top = self.layers.last().expect("retained layers: at least one level");
+        top[..DIGEST_LEN]
+            .try_into()
+            .expect("retained layers: top layer has at least DIGEST_LEN entries")
+    }
+
+    /// Number of leaf digests (`h`).
+    pub fn num_leaves(&self) -> usize {
+        if self.layers.is_empty() {
+            0
+        } else {
+            self.layers[0].len() / DIGEST_LEN
+        }
+    }
+
+    /// Read the digest at level `level`, index `idx` (0-based). Returns
+    /// `None` if either is out of bounds.
+    pub fn digest_at(&self, level: usize, idx: usize) -> Option<[BabyBear; DIGEST_LEN]> {
+        let layer = self.layers.get(level)?;
+        let start = idx.checked_mul(DIGEST_LEN)?;
+        let end = start.checked_add(DIGEST_LEN)?;
+        if end > layer.len() {
+            return None;
+        }
+        Some(layer[start..end].try_into().expect("slice len == DIGEST_LEN"))
+    }
+}
+
 impl WgpuPoseidon2MerkleCommit {
     /// Build a commit orchestrator from matched Plonky3 Poseidon2 params:
     /// * `leaf_params` — width-24 Poseidon2 for the leaf sponge
@@ -238,6 +288,141 @@ impl WgpuPoseidon2MerkleCommit {
         }
         let matrix_buf = device.upload::<BabyBear>(matrix)?;
         self.commit(device, &matrix_buf, h, w)
+    }
+
+    // ----- Step 3.c: retained-layers commit --------------------------------
+    //
+    // Used by the `GpuPoseidon2Mmcs` Plonky3 adapter to serve openings
+    // without rebuilding a CPU tree. The root-only `commit` above stays as
+    // the lightweight production path (bench gate, coset_lde Step 2 future
+    // plumbing); `commit_with_retained_layers` is strictly additive.
+    //
+    // Backend structure:
+    //   * replaces the 2-buffer ping-pong with log2(h)+1 per-level
+    //     allocations (one buffer per tree level). Total VRAM is
+    //     (2h - 1) * DIGEST_LEN * 4 bytes — ≈16h bytes, under 4 MiB at
+    //     h=2^18. Trivial on any discrete GPU.
+    //   * each compression writes into a fresh buffer, so nothing is
+    //     clobbered; the full tree is available afterward.
+    //   * `commit_host_matrix_with_layers` downloads every layer to host
+    //     in one pass so the adapter can index openings without GPU
+    //     round-trips.
+
+    /// GPU-resident commit that retains every digest layer. Same shape
+    /// contract as [`Self::commit`] (h ≥ 1, h power of two, w ≥ 1,
+    /// `matrix.len() == h*w`). Returns the full layer stack as GPU
+    /// buffers, bottom-up: `out[0]` holds the `h` leaf digests,
+    /// `out[log₂(h)]` holds the 1-element root.
+    ///
+    /// Step 3.c uses this path. Downstream code can either keep the
+    /// layers GPU-resident for future openings or download them via
+    /// [`Self::commit_host_matrix_with_layers`].
+    pub fn commit_with_retained_layers(
+        &mut self,
+        device: &WgpuDevice,
+        matrix: &WgpuBuffer<BabyBear>,
+        h: u32,
+        w: u32,
+    ) -> Result<Vec<WgpuBuffer<BabyBear>>, ZkGpuError> {
+        if h == 0 {
+            return Err(ZkGpuError::InvalidNttSize(
+                "Merkle commit_with_retained_layers: h must be ≥ 1".into(),
+            ));
+        }
+        if w == 0 {
+            return Err(ZkGpuError::InvalidNttSize(
+                "Merkle commit_with_retained_layers: w must be ≥ 1".into(),
+            ));
+        }
+        if !h.is_power_of_two() {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "Merkle commit_with_retained_layers: h must be a power of two (got {h})"
+            )));
+        }
+        let expected_input_len = (h as usize) * (w as usize);
+        if matrix.len() != expected_input_len {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "Merkle commit_with_retained_layers input length {} != h*w ({}*{}={})",
+                matrix.len(),
+                h,
+                w,
+                expected_input_len,
+            )));
+        }
+
+        // Allocate all layer buffers up front. `layers[0]` size = h,
+        // then halving per level until `layers[log_h]` size = 1.
+        let log_h = h.trailing_zeros() as usize;
+        let mut layers: Vec<WgpuBuffer<BabyBear>> = Vec::with_capacity(log_h + 1);
+        let mut level_h = h as usize;
+        for _ in 0..=log_h {
+            layers.push(device.alloc_zeros::<BabyBear>(level_h * DIGEST_LEN)?);
+            level_h /= 2;
+        }
+
+        // Leaf sponge: matrix → layers[0].
+        self.leaf.hash_rows(device, matrix, &mut layers[0], h, w)?;
+
+        // Tree compression: layers[k] → layers[k+1].
+        // Splitting a Vec into two mutable references to adjacent
+        // elements requires `split_at_mut`; that keeps the borrow
+        // checker happy across the per-level loop.
+        let mut num_outputs = h / 2;
+        for k in 0..log_h {
+            let (left, right) = layers.split_at_mut(k + 1);
+            let input = &left[k];
+            let output = &mut right[0];
+            self.compress.compress_level(device, input, output, num_outputs)?;
+            num_outputs /= 2;
+        }
+
+        Ok(layers)
+    }
+
+    /// Host-fed version of [`Self::commit_with_retained_layers`]: uploads
+    /// the matrix, runs the retained-layer commit, and downloads every
+    /// layer to a `RetainedLayersHost` ready for opening-path indexing.
+    pub fn commit_host_matrix_with_layers(
+        &mut self,
+        device: &WgpuDevice,
+        matrix: &[BabyBear],
+        h: u32,
+        w: u32,
+    ) -> Result<RetainedLayersHost, ZkGpuError> {
+        let expected_len = (h as usize)
+            .checked_mul(w as usize)
+            .ok_or_else(|| {
+                ZkGpuError::InvalidNttSize(format!(
+                    "Merkle commit host matrix shape overflow: {h} * {w}"
+                ))
+            })?;
+        if matrix.len() != expected_len {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "Merkle commit host matrix length {} != h*w ({}*{}={})",
+                matrix.len(),
+                h,
+                w,
+                expected_len,
+            )));
+        }
+        if expected_len == 0 {
+            // `commit_with_retained_layers` would reject on h==0 / w==0
+            // (and we need a non-empty buffer to hand to upload anyway);
+            // route through the guard with a placeholder so the caller
+            // sees the same error shape.
+            let dummy = device.upload::<BabyBear>(&[BabyBear::new(0)])?;
+            let _ = self.commit_with_retained_layers(device, &dummy, h, w)?;
+            unreachable!(
+                "commit_with_retained_layers rejects h==0/w==0 before returning Ok"
+            );
+        }
+        let matrix_buf = device.upload::<BabyBear>(matrix)?;
+        let gpu_layers = self.commit_with_retained_layers(device, &matrix_buf, h, w)?;
+        let mut layers: Vec<Vec<BabyBear>> = Vec::with_capacity(gpu_layers.len());
+        for buf in &gpu_layers {
+            layers.push(buf.read_to_vec()?);
+        }
+        Ok(RetainedLayersHost { layers })
     }
 }
 

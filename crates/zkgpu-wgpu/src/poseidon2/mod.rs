@@ -59,7 +59,7 @@ mod plan;
 mod plonky3_plan;
 
 pub use goldilocks_plan::WgpuGoldilocksPoseidon2Plan;
-pub use merkle_commit::WgpuPoseidon2MerkleCommit;
+pub use merkle_commit::{RetainedLayersHost, WgpuPoseidon2MerkleCommit};
 pub use merkle_compress::WgpuPoseidon2MerkleCompressPlan;
 pub use merkle_leaf::{WgpuPoseidon2MerkleLeafPlan, DIGEST_LEN as MERKLE_DIGEST_LEN};
 pub use plan::WgpuBabyBearPoseidon2Plan;
