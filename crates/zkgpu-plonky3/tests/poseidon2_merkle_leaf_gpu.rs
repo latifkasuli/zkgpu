@@ -288,3 +288,60 @@ fn leaf_sponge_empty_batch_is_noop() {
     assert!(out.is_empty());
 }
 
+// -- Shape-validation guards (host wrapper) ------------------------------
+
+/// `hash_host_matrix` must reject a non-empty host slice paired with
+/// `num_leaves == 0`, rather than silently short-circuiting to `[]`.
+/// Regression guard for the P2 review finding on Step 3.a.
+#[test]
+fn leaf_sponge_host_wrapper_rejects_bogus_num_leaves_zero() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (_sponge, mut plan) = build_matched(&device, 0x_C0FF_EE_09_u64);
+    // 8 elements but caller claims num_leaves=0 — shape-inconsistent.
+    let bogus = vec![ZkgpuBabyBear(1); 8];
+    let err = plan.hash_host_matrix(&device, &bogus, 0, 8);
+    assert!(
+        err.is_err(),
+        "host wrapper must reject num_leaves=0 with non-empty matrix, got Ok"
+    );
+}
+
+/// `hash_host_matrix` must reject a non-empty host slice paired with
+/// `row_width == 0`, rather than silently returning all-zero digests.
+/// Regression guard for the P2 review finding on Step 3.a.
+#[test]
+fn leaf_sponge_host_wrapper_rejects_bogus_row_width_zero() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (_sponge, mut plan) = build_matched(&device, 0x_C0FF_EE_0A_u64);
+    // 8 elements but caller claims row_width=0 — shape-inconsistent.
+    let bogus = vec![ZkgpuBabyBear(1); 8];
+    let err = plan.hash_host_matrix(&device, &bogus, 4, 0);
+    assert!(
+        err.is_err(),
+        "host wrapper must reject row_width=0 with non-empty matrix, got Ok"
+    );
+}
+
+/// Well-formed row_width==0 (matrix is also empty) still takes the
+/// zero-digest fast path: `num_leaves * 8` zeros, no GPU dispatch.
+#[test]
+fn leaf_sponge_host_wrapper_accepts_well_formed_row_width_zero() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (_sponge, mut plan) = build_matched(&device, 0x_C0FF_EE_0B_u64);
+    let empty: Vec<ZkgpuBabyBear> = Vec::new();
+    let out = plan.hash_host_matrix(&device, &empty, 3, 0).unwrap();
+    assert_eq!(out.len(), 3 * DIGEST_LEN);
+    for v in out {
+        assert_eq!(v.0, 0, "row_width==0 digest slot must be zero");
+    }
+}
+

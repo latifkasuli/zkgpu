@@ -312,6 +312,29 @@ impl WgpuPoseidon2MerkleLeafPlan {
         num_leaves: u32,
         row_width: u32,
     ) -> Result<Vec<BabyBear>, ZkGpuError> {
+        // Validate slice length against the logical (num_leaves, row_width)
+        // shape FIRST, before any shortcut. The GPU-resident path
+        // (`hash_rows`) does this check after upload; do it up front
+        // here so the zero-shape shortcuts below can't silently accept
+        // a non-empty host matrix paired with num_leaves==0 or
+        // row_width==0.
+        let expected_len = (num_leaves as usize)
+            .checked_mul(row_width as usize)
+            .ok_or_else(|| {
+                ZkGpuError::InvalidNttSize(format!(
+                    "Merkle leaf host matrix shape overflow: {num_leaves} * {row_width}",
+                ))
+            })?;
+        if matrix.len() != expected_len {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "Merkle leaf host matrix length {} != num_leaves*row_width ({}*{}={})",
+                matrix.len(),
+                num_leaves,
+                row_width,
+                expected_len,
+            )));
+        }
+
         // Empty-batch shortcut: wgpu rejects zero-size buffer inits,
         // so skip the GPU round-trip entirely. Semantically matches
         // the num_leaves==0 early-return in `hash_rows`.
