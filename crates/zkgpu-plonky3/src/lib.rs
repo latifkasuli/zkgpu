@@ -24,19 +24,30 @@
 //!   empirically correct on discrete NVIDIA.
 //!
 //! Phase 7.5 — Path B (2D-batched NTT plan, [`zkgpu_wgpu::WgpuBatchedNttPlan`]).
-//! Adapter auto-selects the best GPU path per `(log_h, w)`:
+//! Phase C.1 (2026-04-21) extended the batched plan to radix-4 +
+//! pitched storage. Adapter auto-selects the best GPU path per
+//! `(log_h, w)`. On RTX 4090 + Ryzen 9 7950X at `w = 8`:
 //!
-//! * **`log_h ≤ 16, w > 1` → Path B**: halves Path A column-loop time
-//!   at small-to-medium `log_h`. Peak improvement 2.59× over Path A
-//!   at `log_h=12, w=8`. Doesn't yet beat the 32-thread Ryzen CPU at
-//!   these sizes (Path B still ~1.3-3× slower than CPU) but closes
-//!   most of the gap.
-//! * **`log_h ≥ 18, w > 1` → Path A**: single-column plan's R4 +
-//!   workgroup-local fused tail is 2-3× faster per element than the
-//!   batched R2-only kernel; upload amortization alone doesn't
-//!   overcome the radix gap. A follow-up that adds R4 to the batched
-//!   kernel would push the threshold higher and likely flip this
-//!   regime to Path B.
+//! * **`log_h ≤ 14, w > 1` → batched**: per-column launch overhead of
+//!   Path A dominates; one batched dispatch per stage wins. Up to
+//!   2.06× faster than Path A at `log_h=14`.
+//! * **`15 ≤ log_h ≤ 17, w > 1` → Path A column loop**: the single-
+//!   column plan's R4 + workgroup-local fused tail reduces dispatch
+//!   count sharply at these sizes. The batched plan has no local
+//!   fused tail (Path C.2 future work) and exactly fills one SM wave
+//!   at `log_h=16`, leaving no oversubscription to hide memory
+//!   latency. Path A wins despite w-fold launch overhead.
+//! * **`log_h ≥ 18, w > 1` → batched**: per-stage thread count grows
+//!   enough (≥ 4× SM capacity) for batched R4 to saturate the GPU;
+//!   Path A's w-fold launch overhead re-dominates. C.1 narrowed the
+//!   CPU gap at log_h=18 from 1.98× to 1.66× and at log_h=20 from
+//!   1.34× to 1.11×.
+//!
+//! Neither regime yet beats the 7950X's 32-thread AVX2 CPU at w=8;
+//! beating that requires either C.4 (GPU-resident coset_lde_batch
+//! to remove round-trip overhead in the FRI hot path) or a native
+//! CUDA backend. For single-poly (w=1), GPU wins 2.44× at log_h=18
+//! and the pitch stands.
 //!
 //! Run the bench with
 //! `cargo bench -p zkgpu-plonky3 --bench gpu_vs_cpu_dft`.
@@ -580,29 +591,45 @@ impl TwoAdicSubgroupDft<P3BabyBear> for GpuDft<P3BabyBear> {
             }
         };
 
-        // Phase 7.5 Path B — use the batched plan when it's
-        // empirically the better GPU choice.
+        // Phase 7.5 — use the batched plan when it's empirically the
+        // better GPU choice.
         //
-        // Per 7.5 bench on RTX 4090 + Ryzen 9 7950X:
-        //   * log_h <= 16, w > 1 → Path B (batched R2) beats Path A
-        //     column-loop because per-column launch overhead
-        //     dominated Path A here, and upload amortization wins.
-        //   * log_h >= 18, w > 1 → Path A beats Path B because the
-        //     single-column plan uses R4 + workgroup-local fused tail
-        //     (≈2-3× per-element faster than batched's R2-only
-        //     kernel), and arithmetic dominates launch overhead at
-        //     these sizes.
+        // Measured on RTX 4090 + Ryzen 9 7950X after Path C.1 landed
+        // (R4-batched + pitched storage). For w=8, dft_batch in
+        // microseconds:
         //
-        // Threshold `log_h <= 16` is conservative — at log_h=16 on
-        // RTX 4090 Path B was 1.31× faster than Path A, a meaningful
-        // win. Future Phase (7.5 follow-up) adds R4 to the batched
-        // kernel to push this threshold higher; when that lands the
-        // policy simplifies to "always Path B when w > 1".
+        //   log_h   CPU     Path A (col)   Batched C.1   winner
+        //   12      155     1261           456           batched
+        //   14      711     2343           1190          batched
+        //   16      3270    5419           6980          Path A
+        //   18      14440   24002          23980         tied
+        //   20      98770   111460         109900        batched
         //
-        // Width=1 always takes Path A (single-column WgpuNttPlan)
-        // regardless — the batched plan is pure overhead there.
-        const PATH_B_MAX_LOG_H: u32 = 16;
-        if w > 1 && log_h <= PATH_B_MAX_LOG_H {
+        // So the GPU-best path is non-monotonic in `log_h`:
+        //
+        //   * `log_h <= BATCHED_WINS_BELOW = 14` → batched: launch
+        //     overhead of Path A's w-fold column loop dominates; one
+        //     batched dispatch per stage wins.
+        //   * `BATCHED_WINS_BELOW < log_h < BATCHED_WINS_ABOVE` (i.e.
+        //     15, 16, 17) → Path A: the single-column plan's R4 +
+        //     workgroup-local fused tail reduces the dispatch count
+        //     sharply at these sizes. The batched plan has no local
+        //     fused tail (Path C.2 future work) and exactly fills one
+        //     SM wave at log_h=16, leaving no oversubscription to
+        //     hide memory latency. Path A column-loop wins despite
+        //     the w-fold launch overhead.
+        //   * `log_h >= BATCHED_WINS_ABOVE = 18` → batched: per-stage
+        //     thread count grows enough (>= 4× SM capacity) for
+        //     batched R4 to saturate the GPU, and Path A's w-fold
+        //     launch overhead re-dominates.
+        //
+        // Width=1 always takes Path A regardless — the batched plan
+        // has no advantage there.
+        const BATCHED_WINS_BELOW: u32 = 14;
+        const BATCHED_WINS_ABOVE: u32 = 18;
+        let prefer_batched = w > 1
+            && (log_h <= BATCHED_WINS_BELOW || log_h >= BATCHED_WINS_ABOVE);
+        if prefer_batched {
             match ctx.get_or_build_batched_plan(log_h, w as u32, NttDirection::Forward) {
                 Ok(plan) => {
                     match run_batched(&ctx, &plan, &mat) {
@@ -963,6 +990,60 @@ mod tests {
         let gpu_out = gpu.dft_batch(mat).to_row_major_matrix();
 
         assert_matrix_eq(&gpu_out, &cpu_out, "strict_gpu log_h=12 w=4");
+    }
+
+    /// Phase C.1 — pin the go/no-go regime. After C.1, the batched
+    /// plan is the routed path at `log_h ∈ {18, 20}` for `w > 1`
+    /// under `force_gpu` / `strict_gpu`. If a kernel regression at
+    /// exactly those sizes slipped past the `log_h ≤ 16` family of
+    /// tests below, the whole point of Path C.1 would be lost silently.
+    /// This test guards the regime that drives the C.4 go/no-go gate.
+    ///
+    /// Uses `strict_gpu` so any silent fallback to CPU (which would
+    /// make the differential pass trivially) panics.
+    #[test]
+    fn c1_regime_dft_batch_matches_parallel_log18() {
+        // log_h=18 is the smallest size where the bench data shows
+        // C.1 batched beating Path A column-loop on RTX 4090.
+        // Matrix is `2^18 × 8` = 2 MiB — comfortable for CI memory.
+        let mat = random_matrix(18, 8, 0xC1_0018_0008_u64);
+        let cpu_out = Radix2DitParallel::<P3BabyBear>::default()
+            .dft_batch(mat.clone())
+            .to_row_major_matrix();
+
+        let gpu = GpuDft::<P3BabyBear>::strict_gpu();
+        let gpu_out = gpu.dft_batch(mat).to_row_major_matrix();
+
+        assert_matrix_eq(&gpu_out, &cpu_out, "C.1 dft_batch log_h=18 w=8");
+    }
+
+    /// Phase C.1 — same regime, through coset_lde_batch (the FRI
+    /// hot path). The default trait decomposition calls dft_batch
+    /// twice under the hood, so this exercises C.1 across the real
+    /// consumer of the adapter.
+    #[test]
+    fn c1_regime_coset_lde_matches_parallel_log18() {
+        use p3_field::Field;
+        use p3_matrix::bitrev::BitReversibleMatrix;
+
+        let shift = P3BabyBear::GENERATOR;
+        let mat = random_matrix(18, 8, 0xC1_1DE0_0018_u64);
+        let cpu_lde = Radix2DitParallel::<P3BabyBear>::default()
+            .coset_lde_batch(mat.clone(), 1, shift)
+            .bit_reverse_rows()
+            .to_row_major_matrix();
+
+        let gpu = GpuDft::<P3BabyBear>::strict_gpu();
+        let gpu_lde = gpu
+            .coset_lde_batch(mat, 1, shift)
+            .bit_reverse_rows()
+            .to_row_major_matrix();
+
+        assert_matrix_eq(
+            &gpu_lde,
+            &cpu_lde,
+            "C.1 coset_lde_batch log_h=18 w=8 added_bits=1",
+        );
     }
 
     /// Phase 7.5 Path B — differential test at widths that exercise
