@@ -24,6 +24,16 @@ p3-field = "0.5"
 p3-matrix = "0.5"
 p3-util = "0.5"
 
+# Phase 7 Step 3 — GPU Poseidon2 MMCS adapter (gpu_mmcs module)
+# implements p3_commit::Mmcs, builds a lazy CPU tree via
+# p3_merkle_tree, and reuses Plonky3's Poseidon2 sponge +
+# truncated-permutation types from p3_symmetric. These were
+# dev-dependencies through Step 1.5b; the adapter in Step 3 needs
+# them at library-build time.
+p3-commit = "0.5"
+p3-merkle-tree = "0.5"
+p3-symmetric = "0.5"
+
 pollster = { workspace = true }
 tracing = "0.1"
 
@@ -38,13 +48,14 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 
 # Phase 7.2.b — FRI commit parity tests. Same versions as
 # p3-zk-proofs (our correctness-oracle reference config) to minimize
-# resolver surface. Dev-dependency set only — not in release paths.
+# resolver surface. Most dev-only. p3-commit / p3-merkle-tree /
+# p3-symmetric were promoted to regular deps in Step 3 for the
+# `gpu_mmcs` module; we re-enable the `test-utils` feature on
+# `p3-commit` here for the dev-only opening/verification suites.
 p3-commit = { version = "0.5", features = ["test-utils"] }
 p3-challenger = "0.5"
 p3-fri = "0.5"
 p3-keccak = "0.5"
-p3-merkle-tree = "0.5"
-p3-symmetric = "0.5"
 
 # Phase 7.2.c — end-to-end prove/verify with a minimal AIR.
 p3-air = "0.5"

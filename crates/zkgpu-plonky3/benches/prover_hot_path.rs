@@ -33,10 +33,16 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use p3_uni_stark::{StarkConfig, prove, verify};
+use rand::distr::StandardUniform;
 use rand::rngs::{SmallRng, StdRng};
 use rand::{RngExt, SeedableRng};
 
+use std::sync::Arc;
+
 use zkgpu_plonky3::GpuDft;
+use zkgpu_plonky3::gpu_mmcs::{GpuPoseidon2Mmcs, Perm16 as GpuPerm16, Perm24 as GpuPerm24};
+use zkgpu_plonky3::poseidon2_bridge::babybear_plonky3_params;
+use zkgpu_wgpu::WgpuDevice;
 
 type Val = BabyBear;
 type Challenge = BinomialExtensionField<Val, 4>;
@@ -167,10 +173,107 @@ where
     commitment
 }
 
+// --- Step 3 variant: swap InputMmcs for `GpuPoseidon2Mmcs` -------------
+//
+// FriMmcs stays CPU (ExtensionMmcs<…, ValMmcs>) — FRI fold commits are
+// tiny compared to the initial trace commit and GpuPoseidon2Mmcs is a
+// bench-gate, commit-only adapter that can't serve the fold path.
+//
+// The bench reuses the same (device, GPU mmcs) across every iter of
+// Criterion's inner loop to keep setup out of the measured region.
+// Pipeline construction + buffer uploads for Poseidon2 constants are
+// one-shot per-process.
+
+/// Build the GPU MMCS (shared across all bench iterations) plus the
+/// matching CPU `perm24` instance for the challenger.
+fn build_gpu_mmcs(
+    device: Arc<WgpuDevice>,
+) -> (GpuPoseidon2Mmcs, Perm24) {
+    // Mirrors `build_mmcs`'s constant-derivation pattern but with
+    // explicit (ext, int) draws so we can hand the same constants to
+    // both the CPU Perm24 (for the challenger) and the GPU Poseidon2
+    // params (for commit).
+    let mut rng = SmallRng::seed_from_u64(MMCS_SEED);
+    // W16 draws first (matches the order in build_mmcs's
+    // new_from_rng_128 implementation).
+    const ROUNDS_F: usize = 8;
+    let ext16: p3_poseidon2::ExternalLayerConstants<Val, 16> =
+        p3_poseidon2::ExternalLayerConstants::new_from_rng(ROUNDS_F, &mut rng);
+    let int16: Vec<Val> = (&mut rng).sample_iter(StandardUniform).take(13).collect();
+    let ext24: p3_poseidon2::ExternalLayerConstants<Val, 24> =
+        p3_poseidon2::ExternalLayerConstants::new_from_rng(ROUNDS_F, &mut rng);
+    let int24: Vec<Val> = (&mut rng).sample_iter(StandardUniform).take(21).collect();
+
+    let perm16: GpuPerm16 = GpuPerm16::new(ext16.clone(), int16.clone());
+    let perm24: GpuPerm24 = GpuPerm24::new(ext24.clone(), int24.clone());
+    let zkgpu_params16 = babybear_plonky3_params::<16>(&ext16, &int16);
+    let zkgpu_params24 = babybear_plonky3_params::<24>(&ext24, &int24);
+
+    let gpu_mmcs = GpuPoseidon2Mmcs::new(
+        device,
+        perm24.clone(),
+        perm16,
+        zkgpu_params24,
+        zkgpu_params16,
+        0,
+    )
+    .expect("build_gpu_mmcs: failed to construct GPU MMCS");
+
+    (gpu_mmcs, perm24)
+}
+
+/// Step 3 gate: commit a single matrix via `TwoAdicFriPcs<Val, Dft,
+/// GpuPoseidon2Mmcs, ChallengeMmcs>`. InputMmcs is the GPU adapter;
+/// FriMmcs stays CPU so the FRI-level commits (fold) don't route
+/// through `GpuPoseidon2Mmcs::open_batch` (which is unimplemented —
+/// this adapter is commit-only).
+///
+/// `TwoAdicFriPcs::commit` is documented to only call
+/// `mmcs.commit(ldes)` on the InputMmcs during the commit phase, so
+/// this path exercises only the GPU commit kernel; no unimplemented
+/// opening method is hit.
+fn commit_one_gpu_mmcs<Dft>(
+    dft: Dft,
+    gpu_mmcs: GpuPoseidon2Mmcs,
+    trace: RowMajorMatrix<Val>,
+) -> <GpuPoseidon2Mmcs as p3_commit::Mmcs<Val>>::Commitment
+where
+    Dft: TwoAdicSubgroupDft<Val> + Clone,
+{
+    let (cpu_val_mmcs, challenge_mmcs, _) = build_mmcs();
+    let _ = cpu_val_mmcs; // cpu_val_mmcs unused here — challenge_mmcs wraps its own clone
+    let fri_params = build_fri_params(challenge_mmcs, 1);
+    let pcs: TwoAdicFriPcs<Val, Dft, GpuPoseidon2Mmcs, ChallengeMmcs> =
+        TwoAdicFriPcs::new(dft, gpu_mmcs, fri_params);
+    let h = trace.height();
+    let domain = <TwoAdicFriPcs<_, _, _, _> as Pcs<Challenge, DummyChallenger>>::natural_domain_for_degree(
+        &pcs, h,
+    );
+    let (commitment, _prover_data) =
+        <TwoAdicFriPcs<_, _, _, _> as Pcs<Challenge, DummyChallenger>>::commit(
+            &pcs,
+            vec![(domain, trace)],
+        );
+    commitment
+}
+
 fn bench_commit_phase(c: &mut Criterion) {
     let mut group = c.benchmark_group("target_stack/fri_commit");
     group.sample_size(15);
     group.measurement_time(std::time::Duration::from_secs(10));
+
+    // Pre-build the GPU MMCS once — device init, pipeline compilation,
+    // and Poseidon2 constants upload should not fall inside the
+    // measured region. `GpuPoseidon2Mmcs: Clone` (Arc-backed) so we
+    // can hand a fresh Clone per `commit_one_gpu_mmcs` call without
+    // rebuilding.
+    let gpu_mmcs_shared: Option<GpuPoseidon2Mmcs> = WgpuDevice::new()
+        .ok()
+        .map(Arc::new)
+        .map(|dev| build_gpu_mmcs(dev).0);
+    if gpu_mmcs_shared.is_none() {
+        eprintln!("fri_commit: GPU unavailable; GPU-MMCS rows will be skipped");
+    }
 
     for &log_h in LOG_HS {
         for &w in WIDTHS {
@@ -185,8 +288,9 @@ fn bench_commit_phase(c: &mut Criterion) {
             let mat = random_trace(log_h, w, seed);
             let param = format!("log_h={log_h}/w={w}");
 
+            // --- Baseline: CPU DFT + CPU MMCS (Plonky3 stock). ---
             group.bench_with_input(
-                BenchmarkId::new("cpu_dft", &param),
+                BenchmarkId::new("cpu_dft_cpu_mmcs", &param),
                 &mat,
                 |bencher, input| {
                     bencher.iter(|| {
@@ -197,8 +301,10 @@ fn bench_commit_phase(c: &mut Criterion) {
                     });
                 },
             );
+
+            // --- DFT-only GPU (Step 1-2 scope). ---
             group.bench_with_input(
-                BenchmarkId::new("gpu_dft", &param),
+                BenchmarkId::new("gpu_dft_cpu_mmcs", &param),
                 &mat,
                 |bencher, input| {
                     bencher.iter(|| {
@@ -209,6 +315,49 @@ fn bench_commit_phase(c: &mut Criterion) {
                     });
                 },
             );
+
+            // --- Step 3 go/no-go isolators ---------------------------
+            //
+            // MMCS-only GPU (CPU DFT): isolates the hash/tree swap.
+            // Since the Step 1 baseline showed commit time is 93–96%
+            // hash/tree-bound, this row is the most direct test of
+            // the Step 3 thesis. If this row doesn't beat baseline
+            // by ≥1.5× at log_h=18, w=8, the gate is not cleared.
+            //
+            // Both-GPU: composed win. Only meaningful once MMCS-only
+            // clears the gate; otherwise a net win here could be a
+            // DFT win masking an MMCS loss.
+            if let Some(gpu_mmcs) = &gpu_mmcs_shared {
+                let mmcs_clone = gpu_mmcs.clone();
+                group.bench_with_input(
+                    BenchmarkId::new("cpu_dft_gpu_mmcs", &param),
+                    &mat,
+                    |bencher, input| {
+                        bencher.iter(|| {
+                            black_box(commit_one_gpu_mmcs(
+                                Radix2DitParallel::<Val>::default(),
+                                mmcs_clone.clone(),
+                                black_box(input.clone()),
+                            ));
+                        });
+                    },
+                );
+
+                let mmcs_clone = gpu_mmcs.clone();
+                group.bench_with_input(
+                    BenchmarkId::new("gpu_dft_gpu_mmcs", &param),
+                    &mat,
+                    |bencher, input| {
+                        bencher.iter(|| {
+                            black_box(commit_one_gpu_mmcs(
+                                GpuDft::<Val>::strict_gpu(),
+                                mmcs_clone.clone(),
+                                black_box(input.clone()),
+                            ));
+                        });
+                    },
+                );
+            }
         }
     }
     group.finish();
