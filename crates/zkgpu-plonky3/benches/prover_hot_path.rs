@@ -410,18 +410,54 @@ where
     StarkConfig::new(pcs, challenger)
 }
 
+/// Step 3.c: StarkConfig built with `GpuPoseidon2Mmcs` as InputMmcs.
+/// FriMmcs stays CPU (ExtensionMmcs wrapping ValMmcs) — GPU MMCS is
+/// single-field-only; FRI fold commits are at much smaller sizes and
+/// can stay on CPU without losing the win.
+fn build_stark_config_gpu_mmcs<Dft>(
+    dft: Dft,
+    gpu_mmcs: GpuPoseidon2Mmcs,
+    perm24: Perm24,
+) -> StarkConfig<
+    TwoAdicFriPcs<Val, Dft, GpuPoseidon2Mmcs, ChallengeMmcs>,
+    Challenge,
+    Challenger,
+>
+where
+    Dft: Clone + TwoAdicSubgroupDft<Val>,
+{
+    let (_val_mmcs, challenge_mmcs, _) = build_mmcs();
+    let fri_params = build_fri_params(challenge_mmcs, 1);
+    let pcs = TwoAdicFriPcs::new(dft, gpu_mmcs, fri_params);
+    let challenger = Challenger::new(perm24);
+    StarkConfig::new(pcs, challenger)
+}
+
 fn bench_prove(c: &mut Criterion) {
     let mut group = c.benchmark_group("target_stack/prove");
     group.sample_size(10);
     group.measurement_time(std::time::Duration::from_secs(15));
 
+    // Build the GPU MMCS once per process. The prove path drives it
+    // through both the trace commit (single matrix) and the quotient
+    // commit (multi-matrix, same-height chunks) — the two code paths
+    // Step 3.c's adapter supports.
+    let gpu_mmcs_shared: Option<(GpuPoseidon2Mmcs, Perm24)> = WgpuDevice::new()
+        .ok()
+        .map(Arc::new)
+        .map(build_gpu_mmcs);
+    if gpu_mmcs_shared.is_none() {
+        eprintln!("prove: GPU unavailable; GPU-MMCS rows will be skipped");
+    }
+
     // FibAir is width-2 so the real driver of AIR cost is log_h.
-    for &log_h in &[8usize, 10, 12] {
+    // Step 3.c targets larger log_h to expose commit-phase cost.
+    for &log_h in &[10usize, 14, 16] {
         let trace = fib_trace(1 << log_h);
         let param = format!("log_h={log_h}");
 
         group.bench_with_input(
-            BenchmarkId::new("cpu_dft", &param),
+            BenchmarkId::new("cpu_dft_cpu_mmcs", &param),
             &trace,
             |bencher, t| {
                 let config = build_stark_config(Radix2DitParallel::<Val>::default());
@@ -434,7 +470,7 @@ fn bench_prove(c: &mut Criterion) {
             },
         );
         group.bench_with_input(
-            BenchmarkId::new("gpu_dft", &param),
+            BenchmarkId::new("gpu_dft_cpu_mmcs", &param),
             &trace,
             |bencher, t| {
                 let config = build_stark_config(GpuDft::<Val>::strict_gpu());
@@ -446,6 +482,49 @@ fn bench_prove(c: &mut Criterion) {
                 });
             },
         );
+        if let Some((gpu_mmcs, perm24)) = &gpu_mmcs_shared {
+            let mmcs_clone = gpu_mmcs.clone();
+            let perm24_clone = perm24.clone();
+            group.bench_with_input(
+                BenchmarkId::new("cpu_dft_gpu_mmcs", &param),
+                &trace,
+                |bencher, t| {
+                    let config = build_stark_config_gpu_mmcs(
+                        Radix2DitParallel::<Val>::default(),
+                        mmcs_clone.clone(),
+                        perm24_clone.clone(),
+                    );
+                    let air = FibAir;
+                    bencher.iter(|| {
+                        let proof =
+                            prove(&config, &air, black_box(t.clone()), &[]);
+                        verify(&config, &air, &proof, &[]).expect("verify");
+                        black_box(proof);
+                    });
+                },
+            );
+
+            let mmcs_clone = gpu_mmcs.clone();
+            let perm24_clone = perm24.clone();
+            group.bench_with_input(
+                BenchmarkId::new("gpu_dft_gpu_mmcs", &param),
+                &trace,
+                |bencher, t| {
+                    let config = build_stark_config_gpu_mmcs(
+                        GpuDft::<Val>::strict_gpu(),
+                        mmcs_clone.clone(),
+                        perm24_clone.clone(),
+                    );
+                    let air = FibAir;
+                    bencher.iter(|| {
+                        let proof =
+                            prove(&config, &air, black_box(t.clone()), &[]);
+                        verify(&config, &air, &proof, &[]).expect("verify");
+                        black_box(proof);
+                    });
+                },
+            );
+        }
     }
     group.finish();
 }
