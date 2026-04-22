@@ -36,6 +36,10 @@
 
 mod goldilocks_plan;
 mod plan;
+mod plonky3_plan;
 
 pub use goldilocks_plan::WgpuGoldilocksPoseidon2Plan;
 pub use plan::WgpuBabyBearPoseidon2Plan;
+pub use plonky3_plan::{
+    WgpuBabyBearPoseidon2PlonkyW16Plan, WgpuBabyBearPoseidon2PlonkyW24Plan,
+};
