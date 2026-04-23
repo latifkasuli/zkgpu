@@ -452,7 +452,10 @@ fn bench_prove(c: &mut Criterion) {
 
     // FibAir is width-2 so the real driver of AIR cost is log_h.
     // Step 3.c targets larger log_h to expose commit-phase cost.
-    for &log_h in &[10usize, 14, 16] {
+    // log_h=18 is the Step 3 bench-gate shape; the others frame the
+    // scale-up curve so the write-up can show the trend, not a single
+    // spot measurement.
+    for &log_h in &[10usize, 14, 16, 18] {
         let trace = fib_trace(1 << log_h);
         let param = format!("log_h={log_h}");
 
