@@ -1,28 +1,39 @@
 //! GPU-accelerated OpenVM Poseidon2 MMCS adapter.
 //!
-//! Implements `p3_commit::Mmcs<BabyBear>` at Plonky3 version 0.4.1
-//! (OpenVM's pin) with a GPU-accelerated `commit()`. Bit-compatible
-//! with OpenVM's CPU `MerkleTreeMmcs<_, _, PaddingFreeSponge<Perm16,
-//! 16, 8, 8>, TruncatedPermutation<Perm16, 2, 8, 16>, 2, 8>` at
-//! `cap_height = 0`.
+//! Targets OpenVM's canonical `MerkleTreeMmcs<_, _, PaddingFreeSponge<
+//! Perm16, 16, 8, 8>, TruncatedPermutation<Perm16, 2, 8, 16>, 8>` at
+//! Plonky3 version 0.4.1, `cap_height = 0`. Bit-compatible commit
+//! roots; opens and verify roundtrip in Stage 2b.
 //!
-//! # Scope (Stage 2a)
+//! # Surface (Stage 2a)
 //!
-//! * `Mmcs::commit` — mixed-height commits via
+//! The type exposes two **inherent** methods matching the
+//! `p3_commit::Mmcs` trait's `commit` and `get_matrices` shapes:
+//!
+//! * [`OpenVmGpuMmcs::commit`] — mixed-height commits via
 //!   [`zkgpu_wgpu::commit_mixed_height_with_w16_leaf`]. Supports the
 //!   full mixed-height topology OpenVM's `VERIFY_BATCH` spec
 //!   describes (single-matrix, same-height batches, and mixed-height
 //!   injection DAG), all in one entry point.
-//! * `Mmcs::get_matrices` — returns refs to the stored input
-//!   matrices; zero allocation.
-//! * `Mmcs::open_batch` + `Mmcs::verify_batch` — Stage 2b. Currently
-//!   return `todo!("Stage 2b")` panics so the type checks-out as an
-//!   `Mmcs<BabyBear>` impl without shipping unverified opening logic
-//!   yet. The shared backend already provides
-//!   `open_batch_mixed_height` with parity + verifier-roundtrip
-//!   coverage (see `zkgpu-plonky3/tests/
-//!   poseidon2_merkle_open_dag_gpu.rs`), so 2b is plumbing rather
-//!   than new correctness work.
+//! * [`OpenVmGpuMmcs::get_matrices`] — returns refs to the stored
+//!   input matrices; zero allocation.
+//!
+//! # Why no `impl Mmcs<BabyBear>` yet
+//!
+//! Stage 2a deliberately does **not** expose a `Mmcs` trait impl.
+//! The trait requires `open_batch` and `verify_batch`, which would
+//! have to be `todo!()` placeholders in Stage 2a and would let
+//! downstream callers compile against a `Mmcs`-shaped type whose
+//! opening paths panic at runtime. Instead, the inherent methods
+//! above carry Stage 2a's complete, tested surface; Stage 2b adds
+//! the full `Mmcs` trait impl as a **strictly additive** change
+//! (existing callers keep working; new callers additionally get
+//! trait dispatch).
+//!
+//! The shared backend already has parity-pinned implementations of
+//! the opening path (see `zkgpu_wgpu::open_batch_mixed_height` and
+//! the suite in `zkgpu-plonky3/tests/poseidon2_merkle_open_dag_gpu.rs`)
+//! — Stage 2b is plumbing, not new correctness work.
 //!
 //! # Out of scope
 //!
@@ -35,8 +46,7 @@ use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
 
 use p3_baby_bear::BabyBear as P3BabyBear;
-use p3_commit::{BatchOpening, BatchOpeningRef, Mmcs};
-use p3_matrix::{Dimensions, Matrix};
+use p3_matrix::Matrix;
 use p3_symmetric::Hash;
 
 use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
@@ -47,7 +57,7 @@ use zkgpu_wgpu::{
 };
 
 use crate::config::{
-    self, Commitment, Compress, Error, LeafHash, Perm, Proof, SUPPORTED_CAP_HEIGHT, Val,
+    self, Commitment, Compress, LeafHash, Perm, SUPPORTED_CAP_HEIGHT, Val,
     DIGEST_WIDTH, WIDTH,
 };
 
@@ -213,31 +223,47 @@ fn flatten_matrices_for_gpu<M: Matrix<Val>>(
 }
 
 // ---------------------------------------------------------------------------
-// Mmcs impl
+// Inherent methods (Stage 2a surface)
 // ---------------------------------------------------------------------------
+//
+// Stage 2a deliberately does NOT `impl Mmcs<BabyBear> for
+// OpenVmGpuMmcs` yet. Only `commit` and `get_matrices` are
+// implemented here; the full `Mmcs` trait also requires
+// `open_batch` and `verify_batch`, which route through the shared
+// backend's `open_batch_mixed_height` and a CPU delegation,
+// respectively. Those land in Stage 2b.
+//
+// Publishing a half-implemented `Mmcs` with `todo!()` placeholders
+// would let downstream callers compile against a `Mmcs`-shaped
+// type whose opening paths panic at runtime — the P2 review
+// finding. Exposing only inherent `commit`/`get_matrices` methods
+// keeps the Stage 2a surface honest: what's callable works, and
+// what's not callable literally isn't on the type. Stage 2b adds
+// the trait impl as a strictly additive change (existing callers
+// that use the inherent methods continue to work; new callers can
+// additionally route through the trait).
 
-impl Mmcs<P3BabyBear> for OpenVmGpuMmcs {
-    type ProverData<M> = GpuProverData<M>;
-    type Commitment = Commitment;
-    type Proof = Proof;
-    type Error = Error;
-
-    fn commit<M: Matrix<P3BabyBear>>(
+impl OpenVmGpuMmcs {
+    /// Commit a batch of matrices. Shape matches
+    /// `p3_commit::Mmcs::commit`: `Vec<M: Matrix<BabyBear>>` →
+    /// `(Commitment, GpuProverData<M>)`. Trait impl lands in Stage
+    /// 2b; this inherent method is forward-compatible with it.
+    ///
+    /// Supports single, same-height multi, and mixed-height
+    /// batches via the shared-backend mixed-height DAG engine.
+    ///
+    /// Panics if `inputs` is empty (matches Plonky3's
+    /// `MerkleTreeMmcs::commit` behavior).
+    pub fn commit<M: Matrix<P3BabyBear>>(
         &self,
         inputs: Vec<M>,
-    ) -> (Self::Commitment, Self::ProverData<M>) {
+    ) -> (Commitment, GpuProverData<M>) {
         assert!(
             !inputs.is_empty(),
             "OpenVmGpuMmcs::commit: called with 0 matrices"
         );
 
-        // Flatten each matrix to a host-side row-major
-        // `Vec<ZkgpuBabyBear>`. We do this before building the
-        // `MixedHeightMatrixInput` slices so they can borrow into
-        // the owned flats.
         let flats = flatten_matrices_for_gpu(&inputs);
-
-        // Build the adapter-shape input refs.
         let gpu_inputs: Vec<MixedHeightMatrixInput<'_>> = flats
             .iter()
             .map(|(flat, h, w)| MixedHeightMatrixInput {
@@ -247,9 +273,6 @@ impl Mmcs<P3BabyBear> for OpenVmGpuMmcs {
             })
             .collect();
 
-        // Shared backend does the mixed-height commit (leaf sponge
-        // on tallest group → per-level binary compression → inject
-        // at matching-height levels → retained layers).
         let layers = {
             let mut leaf = self.leaf.lock().expect("gpu leaf mutex");
             let mut compress = self.compress.lock().expect("gpu compress mutex");
@@ -262,9 +285,6 @@ impl Mmcs<P3BabyBear> for OpenVmGpuMmcs {
             .expect("OpenVmGpuMmcs::commit: GPU commit failed")
         };
 
-        // Root = top layer of the retained stack, in canonical
-        // `ZkgpuBabyBear` form. Convert to Monty-form `P3BabyBear`
-        // for the Plonky3-facing commitment.
         let top = layers
             .layers
             .last()
@@ -280,9 +300,6 @@ impl Mmcs<P3BabyBear> for OpenVmGpuMmcs {
             .try_into()
             .expect("slice length checked above");
         let root_p3: [Val; DIGEST_WIDTH] = root_zkgpu.map(|x| Val::new(x.0));
-        // Plonky3 0.4.1's `MerkleTreeMmcs::Commitment` is
-        // `Hash<F, W, DIGEST>` — a phantom-typed wrapper over the
-        // digest array. Direct `From<[Val; DIGEST_WIDTH]>`.
         let cap: Commitment = Hash::from(root_p3);
 
         let prover_data = GpuProverData {
@@ -292,38 +309,14 @@ impl Mmcs<P3BabyBear> for OpenVmGpuMmcs {
         (cap, prover_data)
     }
 
-    fn open_batch<M: Matrix<P3BabyBear>>(
+    /// Return references to the matrices that were passed to
+    /// [`Self::commit`]. Shape matches `p3_commit::Mmcs::
+    /// get_matrices`; forward-compatible with the Stage 2b trait
+    /// impl.
+    pub fn get_matrices<'a, M>(
         &self,
-        _index: usize,
-        _prover_data: &Self::ProverData<M>,
-    ) -> BatchOpening<P3BabyBear, Self> {
-        // Stage 2b plumbing. The shared backend's
-        // `open_batch_mixed_height` already has parity + verify
-        // roundtrip coverage (see
-        // `zkgpu-plonky3/tests/poseidon2_merkle_open_dag_gpu.rs`);
-        // Stage 2b wires it through here and maps to
-        // `BatchOpening<P3BabyBear, Self>`.
-        todo!("Stage 2b: open_batch via open_batch_mixed_height")
-    }
-
-    fn get_matrices<'a, M: Matrix<P3BabyBear>>(
-        &self,
-        prover_data: &'a Self::ProverData<M>,
+        prover_data: &'a GpuProverData<M>,
     ) -> Vec<&'a M> {
         prover_data.matrices.iter().collect()
-    }
-
-    fn verify_batch(
-        &self,
-        _commit: &Self::Commitment,
-        _dimensions: &[Dimensions],
-        _index: usize,
-        _batch_opening: BatchOpeningRef<'_, P3BabyBear, Self>,
-    ) -> Result<(), Self::Error> {
-        // Stage 2b: delegate to the CPU `ValMmcs` built on the same
-        // constants. Safe because the commitment types are identical
-        // (`MerkleCap<Val, [Val; DIGEST_WIDTH]>`) and the proof
-        // format is the same concrete `Vec<[Val; DIGEST_WIDTH]>`.
-        todo!("Stage 2b: verify_batch via CPU MerkleTreeMmcs delegation")
     }
 }
