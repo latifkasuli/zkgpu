@@ -50,3 +50,8 @@ p3-merkle-tree = "=0.4.1"
 # which is why the workspace has no shared rand pin — each
 # adapter follows its paired Plonky3's rand.)
 rand = { version = "0.9", features = ["small_rng"] }
+criterion = { workspace = true }
+
+[[bench]]
+name = "openvm_commit"
+harness = false
