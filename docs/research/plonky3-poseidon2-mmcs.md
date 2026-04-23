@@ -2,6 +2,8 @@
 
 This note captures the current narrow claim that `zkgpu` can support and reproduce from the code in this repository.
 
+> **Sibling note:** [GPU Poseidon2 MMCS for OpenVM](openvm-poseidon2-mmcs.md) — the same shared backend, a different consumer (OpenVM's Plonky3 0.4.1 W16-leaf MMCS), portability-first framing.
+
 ## Claim
 
 For a Plonky3 STARK stack using:

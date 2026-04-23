@@ -75,6 +75,11 @@ cargo test -p zkgpu-babybear
 - [ ] BN254 scalar field
 - [ ] Stable browser / WebGPU support (experimental today)
 
+## Research Notes
+
+- [GPU Poseidon2 MMCS for Plonky3](docs/research/plonky3-poseidon2-mmcs.md)
+- [GPU Poseidon2 MMCS for OpenVM](docs/research/openvm-poseidon2-mmcs.md)
+
 ## License
 
 Licensed under either of:
