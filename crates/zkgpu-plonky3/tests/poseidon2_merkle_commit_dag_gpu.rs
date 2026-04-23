@@ -1,7 +1,7 @@
 //! Phase 3.d Stage 1b — mixed-height Merkle DAG engine parity.
 //!
 //! Locks the new
-//! [`zkgpu_wgpu::commit_mixed_height_host_matrices_with_retained_layers`]
+//! [`zkgpu_wgpu::commit_mixed_height_with_w24_leaf`]
 //! backend against Plonky3's CPU `MerkleTreeMmcs::commit` for the
 //! N=2 binary / `cap_height=0` / power-of-two-height case — the
 //! superset of shapes the shared backend needs to support so that
@@ -44,9 +44,8 @@ use rand::{RngExt, SeedableRng};
 use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
 use zkgpu_plonky3::poseidon2_bridge::{babybear_plonky3_params, p3_to_zkgpu};
 use zkgpu_wgpu::{
-    commit_mixed_height_host_matrices_with_retained_layers, root_from_retained,
-    MixedHeightMatrixInput, WgpuDevice, WgpuPoseidon2MerkleCompressPlan,
-    WgpuPoseidon2MerkleLeafPlan,
+    commit_mixed_height_with_w24_leaf, root_from_retained, MixedHeightMatrixInput,
+    WgpuDevice, WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafPlan,
 };
 
 const ROUNDS_F: usize = 8;
@@ -168,7 +167,7 @@ fn run_mixed_shapes(
             width: *w,
         })
         .collect();
-    let retained = commit_mixed_height_host_matrices_with_retained_layers(
+    let retained = commit_mixed_height_with_w24_leaf(
         device, leaf, compress, &gpu_inputs,
     )
     .unwrap();
@@ -310,7 +309,7 @@ fn dag_rejects_empty_input() {
         return;
     };
     let (_cpu, mut leaf, mut compress) = build_matched(device.clone(), 0x_D50_0100_u64);
-    let result = commit_mixed_height_host_matrices_with_retained_layers(
+    let result = commit_mixed_height_with_w24_leaf(
         &device,
         &mut leaf,
         &mut compress,
@@ -332,7 +331,7 @@ fn dag_rejects_non_power_of_two_height() {
         height: 3,
         width: 4,
     };
-    let result = commit_mixed_height_host_matrices_with_retained_layers(
+    let result = commit_mixed_height_with_w24_leaf(
         &device,
         &mut leaf,
         &mut compress,
@@ -354,7 +353,7 @@ fn dag_rejects_zero_width() {
         height: 4,
         width: 0,
     };
-    let result = commit_mixed_height_host_matrices_with_retained_layers(
+    let result = commit_mixed_height_with_w24_leaf(
         &device,
         &mut leaf,
         &mut compress,
@@ -377,7 +376,7 @@ fn dag_rejects_shape_mismatch() {
         height: 4,
         width: 8,
     };
-    let result = commit_mixed_height_host_matrices_with_retained_layers(
+    let result = commit_mixed_height_with_w24_leaf(
         &device,
         &mut leaf,
         &mut compress,

@@ -72,16 +72,23 @@ use super::merkle_compress::WgpuPoseidon2MerkleCompressPlan;
 use super::merkle_leaf::{WgpuPoseidon2MerkleLeafPlan, DIGEST_LEN};
 use super::merkle_leaf_w16::WgpuPoseidon2MerkleLeafW16R8Plan;
 
-/// Shared seam for the mixed-height DAG engine's leaf-hash step.
+/// Crate-private seam for the mixed-height DAG engine's leaf-hash
+/// step. Deliberately not `pub` — the DAG is currently consumed only
+/// by the two in-tree leaf shapes, and external callers use the
+/// named entry points below (`..._with_w24_leaf`, `..._with_w16_leaf`)
+/// rather than implementing the trait themselves. Keeping this
+/// internal preserves the freedom to refactor the mixed-height
+/// backend (e.g. fold a GPU-side injection kernel in) without a
+/// public API break.
 ///
 /// Implemented for both in-tree shapes:
 /// * W24/RATE=16 (Plonky3 canonical)
 /// * W16/RATE=8 (OpenVM)
 ///
-/// Caller-supplied sponges must produce output in the same layout
-/// the compression kernel expects: a flat `num_leaves * DIGEST_LEN`
-/// `u32` buffer, digest `i` at offset `i * DIGEST_LEN`.
-pub trait GpuLeafSponge {
+/// Callers must produce output in the same layout the compression
+/// kernel expects: a flat `num_leaves * DIGEST_LEN` `u32` buffer,
+/// digest `i` at offset `i * DIGEST_LEN`.
+pub(crate) trait GpuLeafSponge {
     fn hash_rows(
         &mut self,
         device: &WgpuDevice,
@@ -130,12 +137,45 @@ pub struct MixedHeightMatrixInput<'a> {
     pub width: u32,
 }
 
-/// Mixed-height Poseidon2 Merkle commit with full retained layers.
+/// Mixed-height Poseidon2 Merkle commit with full retained layers,
+/// driven by the **W24/RATE=16 leaf sponge** (Plonky3 canonical
+/// `PaddingFreeSponge<Perm24, 24, 16, 8>`). Thin wrapper over
+/// [`commit_mixed_height_internal`]; concrete-typed so the generic
+/// over the crate-private [`GpuLeafSponge`] trait stays internal.
+///
+/// See [`commit_mixed_height_internal`] for the full contract;
+/// semantics are identical.
+pub fn commit_mixed_height_with_w24_leaf(
+    device: &WgpuDevice,
+    leaf: &mut WgpuPoseidon2MerkleLeafPlan,
+    compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    matrices: &[MixedHeightMatrixInput<'_>],
+) -> Result<RetainedLayersHost, ZkGpuError> {
+    commit_mixed_height_internal(device, leaf, compress, matrices)
+}
+
+/// Mixed-height Poseidon2 Merkle commit with full retained layers,
+/// driven by the **W16/RATE=8 leaf sponge** (OpenVM
+/// `PaddingFreeSponge<Perm16, 16, 8, 8>`). Thin wrapper over
+/// [`commit_mixed_height_internal`].
+pub fn commit_mixed_height_with_w16_leaf(
+    device: &WgpuDevice,
+    leaf: &mut WgpuPoseidon2MerkleLeafW16R8Plan,
+    compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    matrices: &[MixedHeightMatrixInput<'_>],
+) -> Result<RetainedLayersHost, ZkGpuError> {
+    commit_mixed_height_internal(device, leaf, compress, matrices)
+}
+
+/// Generic mixed-height Poseidon2 Merkle commit implementation.
+/// Crate-internal because the [`GpuLeafSponge`] trait it's generic
+/// over is crate-private. Public access goes through the two
+/// concrete-typed wrappers above.
 ///
 /// Returns `layers[0..=log2(h_max)]` where
 /// * `layers[0]` has `h_max * DIGEST_LEN` elements (leaf digests),
 /// * `layers[k]` has `(h_max >> k) * DIGEST_LEN` elements, and
-/// * `layers.last()` has `DIGEST_LEN` elements (the root).
+/// * `layers.last()` has exactly `DIGEST_LEN` elements (the root).
 ///
 /// At levels where a matrix group of matching height is injected,
 /// the retained layer is the **final** (post-inject) digest — the
@@ -150,17 +190,14 @@ pub struct MixedHeightMatrixInput<'a> {
 /// * every `height` is a power of two
 /// * every `width >= 1`
 /// * `flat.len() == height * width`
-/// * matrices with the same `height` are legal (same-height group);
-///   differing heights must not round up to the same power of two
-///   (which is vacuous when all heights are already powers of two —
-///   so distinct heights are all admissible)
+/// * matrices with the same `height` are legal (same-height group)
 ///
 /// # Scope
 /// Binary tree (`N = 2`), BabyBear, Plonky3-variant Poseidon2
 /// constants, power-of-two heights. Matches the configured shape of
 /// both Plonky3's canonical `Poseidon2MerkleMmcs` and OpenVM's
 /// `baby_bear_poseidon2` (when paired with the matching leaf sponge).
-pub fn commit_mixed_height_host_matrices_with_retained_layers<L: GpuLeafSponge>(
+pub(crate) fn commit_mixed_height_internal<L: GpuLeafSponge>(
     device: &WgpuDevice,
     leaf: &mut L,
     compress: &mut WgpuPoseidon2MerkleCompressPlan,
@@ -276,9 +313,15 @@ pub fn commit_mixed_height_host_matrices_with_retained_layers<L: GpuLeafSponge>(
 }
 
 /// Extract the root (top layer) from a `RetainedLayersHost` as an
-/// 8-element `[BabyBear; DIGEST_LEN]`. Re-exported here for
-/// convenience with the DAG engine; the root is just
-/// `layers.last().try_into().unwrap()` by construction.
+/// 8-element `[BabyBear; DIGEST_LEN]`.
+///
+/// `RetainedLayersHost` is publicly constructible (`layers` is a
+/// `pub Vec<Vec<BabyBear>>`), so callers can in principle feed in
+/// malformed data. This helper requires `top.len() == DIGEST_LEN`
+/// exactly — a "top" of 16 or 24 elements would silently slice the
+/// first 8 under a looser `>= DIGEST_LEN` check and hand back a
+/// plausible-but-wrong root. Exact-length catches corruption and
+/// caller bugs at the boundary instead.
 pub fn root_from_retained(
     retained: &RetainedLayersHost,
 ) -> Result<[BabyBear; DIGEST_LEN], ZkGpuError> {
@@ -286,9 +329,10 @@ pub fn root_from_retained(
         .layers
         .last()
         .ok_or_else(|| ZkGpuError::InvalidNttSize("empty retained layers".into()))?;
-    if top.len() < DIGEST_LEN {
+    if top.len() != DIGEST_LEN {
         return Err(ZkGpuError::InvalidNttSize(format!(
-            "retained layers top has {} < {DIGEST_LEN} entries",
+            "retained layers top has {} entries, expected exactly {DIGEST_LEN} \
+             (a malformed top layer would silently slice to a plausible-but-wrong root)",
             top.len()
         )));
     }
@@ -392,6 +436,52 @@ mod tests {
         for k in 0..8u32 {
             assert_eq!(out[16 + k as usize].0, 8 + k);
             assert_eq!(out[24 + k as usize].0, 108 + k);
+        }
+    }
+
+    #[test]
+    fn root_from_retained_rejects_empty_layers() {
+        let retained = RetainedLayersHost { layers: Vec::new() };
+        let err = root_from_retained(&retained);
+        assert!(err.is_err(), "empty layers must reject");
+    }
+
+    #[test]
+    fn root_from_retained_rejects_undersized_top() {
+        // Top has fewer than DIGEST_LEN elements.
+        let retained = RetainedLayersHost {
+            layers: vec![(0..4u32).map(BabyBear::new).collect()],
+        };
+        let err = root_from_retained(&retained);
+        assert!(err.is_err(), "top layer of len < DIGEST_LEN must reject");
+    }
+
+    #[test]
+    fn root_from_retained_rejects_oversized_top() {
+        // Regression guard for the P3 review finding: a top layer of
+        // 16 or 24 elements would silently slice the first 8 under a
+        // `>=` check and hand back a plausible-but-wrong root. Now
+        // requires exact `== DIGEST_LEN`.
+        for bogus_len in [9u32, 16, 24, 32] {
+            let retained = RetainedLayersHost {
+                layers: vec![(0..bogus_len).map(BabyBear::new).collect()],
+            };
+            let err = root_from_retained(&retained);
+            assert!(
+                err.is_err(),
+                "top layer of len {bogus_len} (> DIGEST_LEN) must reject, not silently slice"
+            );
+        }
+    }
+
+    #[test]
+    fn root_from_retained_accepts_exact_length() {
+        let retained = RetainedLayersHost {
+            layers: vec![(42..50u32).map(BabyBear::new).collect()],
+        };
+        let root = root_from_retained(&retained).expect("valid top must succeed");
+        for i in 0..DIGEST_LEN {
+            assert_eq!(root[i].0, 42 + i as u32);
         }
     }
 }

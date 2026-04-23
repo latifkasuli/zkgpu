@@ -18,11 +18,12 @@ pub use device::WgpuDevice;
 pub use ntt::goldilocks::{WgpuGoldilocksNttPlan, MAX_GOLDILOCKS_LOG_N};
 pub use ntt::{NttTimings, PlannerPolicy, StockhamTailOverride, WgpuBatchedNttPlan, WgpuNttPlan};
 pub use poseidon2::{
-    commit_mixed_height_host_matrices_with_retained_layers, root_from_retained,
-    GpuLeafSponge, MERKLE_DIGEST_LEN, MixedHeightMatrixInput, RetainedLayersHost,
-    WgpuBabyBearPoseidon2Plan, WgpuBabyBearPoseidon2PlonkyW16Plan,
-    WgpuBabyBearPoseidon2PlonkyW24Plan, WgpuGoldilocksPoseidon2Plan,
-    WgpuPoseidon2MerkleCommit, WgpuPoseidon2MerkleCompressPlan,
-    WgpuPoseidon2MerkleLeafPlan, WgpuPoseidon2MerkleLeafW16R8Plan,
+    commit_mixed_height_with_w16_leaf, commit_mixed_height_with_w24_leaf,
+    root_from_retained, MERKLE_DIGEST_LEN, MixedHeightMatrixInput,
+    RetainedLayersHost, WgpuBabyBearPoseidon2Plan,
+    WgpuBabyBearPoseidon2PlonkyW16Plan, WgpuBabyBearPoseidon2PlonkyW24Plan,
+    WgpuGoldilocksPoseidon2Plan, WgpuPoseidon2MerkleCommit,
+    WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafPlan,
+    WgpuPoseidon2MerkleLeafW16R8Plan,
 };
 pub use profiling::{GpuProfiler, GpuTiming, TimestampSpan};
