@@ -9,6 +9,7 @@ members = [
     "crates/zkgpu-ntt",
     "crates/zkgpu-poseidon2",
     "crates/zkgpu-plonky3",
+    "crates/zkgpu-openvm",
     "crates/zkgpu-cli",
     "crates/zkgpu-testkit",
     "crates/zkgpu-report",

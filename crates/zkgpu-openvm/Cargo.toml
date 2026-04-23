@@ -1,0 +1,52 @@
+[package]
+name = "zkgpu-openvm"
+description = "Adapter between zkgpu's GPU Poseidon2 Merkle commit backend and OpenVM's BabyBear Poseidon2 MMCS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# Shared backend crates (version-independent).
+zkgpu-core = { workspace = true }
+zkgpu-babybear = { workspace = true }
+zkgpu-wgpu = { workspace = true }
+zkgpu-poseidon2 = { workspace = true }
+
+# Plonky3 0.4.1 — pinned *exactly*. OpenVM's stark-backend workspace
+# uses `=0.4.1` across all p3 crates (see openvm-org/stark-backend
+# Cargo.toml). We follow the same convention: any version drift
+# away from what OpenVM itself consumes would silently change the
+# Poseidon2 constants / Mmcs trait surface the adapter claims
+# compatibility with.
+#
+# Note: `zkgpu-plonky3` (the sibling Plonky3 0.5.x adapter crate)
+# pins p3-* at "0.5". The workspace has no unified p3 version pin;
+# each adapter crate pins its own Plonky3 lane. Cargo resolves both
+# trees side-by-side. Only cost: two copies of the Plonky3 object
+# code in the final workspace binary — tolerable for an adapter
+# version split.
+p3-baby-bear = "=0.4.1"
+p3-field = "=0.4.1"
+p3-matrix = "=0.4.1"
+p3-poseidon2 = "=0.4.1"
+p3-symmetric = "=0.4.1"
+p3-commit = "=0.4.1"
+p3-merkle-tree = "=0.4.1"
+
+[dev-dependencies]
+# Same version pin for test-only code. We build the CPU reference
+# `MerkleTreeMmcs` from p3 primitives locally in tests rather than
+# depending on `openvm-stark-sdk` / `openvm-stark-backend` —
+# OpenVM's config aliases are ~30 lines and pulling in the full
+# OpenVM tree for parity tests would bring a huge dependency
+# surface that doesn't buy us anything beyond the local
+# reconstruction. See `src/config.rs` for the aliases we rebuild.
+# p3-* 0.4.1 depends on rand 0.9, so we pin to that to avoid
+# tests pulling two incompatible rand versions into the same
+# Cargo unit. (zkgpu-plonky3 on p3-* 0.5.x pairs with rand 0.10,
+# which is why the workspace has no shared rand pin — each
+# adapter follows its paired Plonky3's rand.)
+rand = { version = "0.9", features = ["small_rng"] }
