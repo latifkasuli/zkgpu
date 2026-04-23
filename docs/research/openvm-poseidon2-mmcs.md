@@ -72,10 +72,14 @@ Backed by these tracked components:
 - Correctness tests:
   - [crates/zkgpu-openvm/tests/commit_parity.rs](../../crates/zkgpu-openvm/tests/commit_parity.rs) — root parity vs CPU `MerkleTreeMmcs`
   - [crates/zkgpu-openvm/tests/open_verify_parity.rs](../../crates/zkgpu-openvm/tests/open_verify_parity.rs) — `(opened_values, proof)` parity + cross-verifier roundtrip
+  - [crates/zkgpu-openvm/tests/prove_verify_openvm.rs](../../crates/zkgpu-openvm/tests/prove_verify_openvm.rs) — end-to-end prove/verify on OpenVM's dummy Fibonacci AIR through both OpenVM's own `BabyBearPoseidon2Engine` (control) and a GPU-swapped `ZkgpuOpenVmEngine` (adapter under test)
   - [crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_dag_w16_gpu.rs](../../crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_dag_w16_gpu.rs) — backend mixed-height commit parity (W16 leaf)
   - [crates/zkgpu-plonky3/tests/poseidon2_merkle_leaf_w16_gpu.rs](../../crates/zkgpu-plonky3/tests/poseidon2_merkle_leaf_w16_gpu.rs) — backend W16/R8 leaf sponge parity
-- Benchmark harness:
-  - [crates/zkgpu-openvm/benches/openvm_commit.rs](../../crates/zkgpu-openvm/benches/openvm_commit.rs)
+- Dev-only engine harness:
+  - [crates/zkgpu-openvm/tests/support/engine.rs](../../crates/zkgpu-openvm/tests/support/engine.rs) — local `ZkgpuOpenVmEngine` that plugs `OpenVmGpuMmcs` into OpenVM's own `StarkConfig` + prover loop; shared between `prove_verify_openvm` and `openvm_prove` via `#[path]`
+- Benchmark harnesses:
+  - [crates/zkgpu-openvm/benches/openvm_commit.rs](../../crates/zkgpu-openvm/benches/openvm_commit.rs) — MMCS-layer commit + `commit_open_40q` (headline perf claim)
+  - [crates/zkgpu-openvm/benches/openvm_prove.rs](../../crates/zkgpu-openvm/benches/openvm_prove.rs) — end-to-end prove/verify through OpenVM's dummy Fibonacci AIR (integration claim, not a headline perf claim — see `target_stack/prove/fib_air` below)
 
 ## Benchmark envelope
 
@@ -90,8 +94,9 @@ The in-tree bench harness pins the OpenVM shape as follows:
 
 Benchmark groups:
 
-- `target_stack/commit` — primary metric, commit-only.
+- `target_stack/commit` — primary MMCS-layer metric, commit-only.
 - `target_stack/commit_open_40q` — commit + 40 consecutive `open_batch` queries. Mirrors the FRI-side per-commit workload.
+- `target_stack/prove/fib_air` — **end-to-end OpenVM prove/verify** on OpenVM's dummy Fibonacci AIR (`openvm_stark_sdk::dummy_airs::fib_air::FibonacciAir`). Demonstrates the adapter plugs into OpenVM's full prover loop (keygen → prove → verify), using the same `FriParameters::standard_with_100_bits_security(LOG_BLOWUP = 1)` OpenVM's own examples use. **Integration claim, not a headline perf claim** — Fibonacci has trace width 3, so MMCS is a small fraction of total prove wall time and the GPU swap moves the full-prove number only marginally. The MMCS-layer perf wins live in the two groups above.
 
 `verify_batch` is intentionally not in any timed group — the adapter delegates verification to CPU `MerkleTreeMmcs` by design, so timing it would measure the CPU delegate, not the GPU adapter.
 
@@ -142,6 +147,38 @@ Gate 4a outcome: **cleared.** The portability claim holds on Apple Silicon at th
 | mixed | 16 | 120.18 ms | 7.61 ms | **15.78×** |
 | **mixed** | **18** | **481.50 ms** | **23.99 ms** | **🟢 20.07×** |
 
+### `target_stack/prove/fib_air` — end-to-end OpenVM prove/verify
+
+Closes the former "not yet integrated" limitation: `OpenVmGpuMmcs` is wired into OpenVM's own `StarkConfig` via a dev-only `ZkgpuOpenVmEngine` ([`tests/support/engine.rs`](../../crates/zkgpu-openvm/tests/support/engine.rs)), and both the Stage 3 integration test ([`tests/prove_verify_openvm.rs`](../../crates/zkgpu-openvm/tests/prove_verify_openvm.rs)) and the end-to-end bench run OpenVM's own dummy Fibonacci AIR through the full prover loop on both the CPU control engine (`BabyBearPoseidon2Engine`) and the GPU-swapped engine.
+
+**Methodology note.** Only the steady-state `prove_then_verify` path is timed: the proving key is generated once per `log_h` outside `bencher.iter`. Keygen is MMCS-independent (runs on preprocessed trace + circuit metadata, not the main trace), so including it inside the measured region would dilute the prove-path signal. Each engine has its own `pk` because their `StarkConfig` associated types differ at the Rust level.
+
+#### Three-host results (median `prove_then_verify` wall time)
+
+| Host | log_h | CPU control | GPU engine | Ratio |
+|---|---:|---:|---:|---:|
+| M4 Pro / Metal             | 14 | 2.89 s   | 2.63 s   | 1.10× |
+| M4 Pro / Metal             | 16 | 2.90 s   | 2.98 s   | 0.97× |
+| M4 Pro / Metal             | 18 | 4.06 s   | 4.08 s   | 1.00× |
+| RTX 4090 + Ryzen 9 7950X   | 14 | 839 ms   | 900 ms   | 0.93× |
+| RTX 4090 + Ryzen 9 7950X   | 16 | 898 ms   | 1035 ms  | 0.87× |
+| RTX 4090 + Ryzen 9 7950X   | 18 | 1218 ms  | 1276 ms  | 0.95× |
+| RTX 5090 + Ryzen 9 9950X   | 14 | 707 ms   | 651 ms   | 1.09× |
+| RTX 5090 + Ryzen 9 9950X   | 16 | 747 ms   | 731 ms   | 1.02× |
+| RTX 5090 + Ryzen 9 9950X   | 18 | 1020 ms  | 906 ms   | 1.13× |
+
+All nine rows fall within ±15% of parity. Criterion CIs overlap on every row. **This is not a prove-time perf claim; it's an integration claim.**
+
+Reading the numbers honestly: **at Fibonacci's trace width of 3, MMCS commit is a small fraction of total prove time** (DFT, FRI fold commits over the CPU challenge MMCS, quotient computation, AIR constraint evaluation dominate the remaining ~90%). Swapping in the GPU MMCS therefore moves the full-prove number only a few percent. The 4090 row is slightly below parity — Vulkan-through-wgpu's fixed dispatch overhead isn't fully amortized when MMCS work is this small a fraction and the CPU has strong AVX-512 Poseidon2. Back-of-envelope for the 5090's 1.13× at `log_h=18` with a ~20× MMCS-layer speedup: MMCS is ~12% of total FibAir prove wall time on that host. Consistent across the other rows.
+
+What this bench *does* establish:
+
+1. `OpenVmGpuMmcs` plugs into OpenVM's unmodified prover loop (keygen → multi-trace STARK prover → FRI PCS → verifier) without any code changes on the OpenVM side.
+2. Proofs produced via the GPU engine round-trip through OpenVM's verifier on every host — commitment, opening-proof, and challenger trajectories match bit-for-bit at every phase.
+3. The control row (`BabyBearPoseidon2Engine`) at each size is what OpenVM's own CPU path does. Matching that shape end-to-end is the Stage 3 gate, and the gate clears on all three hosts.
+
+For consumers of OpenVM whose AIRs are MMCS-heavy (wider traces, many quotient chunks, large `log_h`), the MMCS-layer speedup propagates into prove time at the fraction dictated by MMCS's share of the workload. The `target_stack/commit` + `commit_open_40q` tables are the right place to look for those numbers.
+
 ### `target_stack/commit_open_40q` — FRI-workload shape
 
 Numbers nearly identical to `commit` across all three hosts — the 40 host-side opens (retained-layer indexing + Plonky3 Monty conversion) cost is small relative to the GPU commit. Full tables in the raw bench logs.
@@ -187,24 +224,26 @@ The numbers above are only meaningful because the adapter's commit/open/verify s
 ## Current limitations
 
 - `cap_height > 0` rejected at `OpenVmGpuMmcs::new`.
-- Not yet integrated into a full OpenVM prove/verify end-to-end test. The `Mmcs` trait surface is complete at Plonky3 0.4.1; plugging into OpenVM's own `StarkConfig` / `TwoAdicFriPcs` pipelines is straightforward but hasn't been exercised in-tree.
 - `verify_batch` delegates to CPU `MerkleTreeMmcs`. This is correct (the commitment + proof types are identical to the CPU adapter's output) but not GPU-accelerated.
-- Numerical results measured on three GPUs: Apple M4 Pro (Metal), NVIDIA RTX 4090 (Vulkan via wgpu), NVIDIA RTX 5090 (Vulkan via wgpu). The backend is portable to AMD / DX12 / WebGPU; no published benchmark numbers on those targets yet.
+- **End-to-end prove acceleration is AIR-dependent.** At narrow trace widths (Fibonacci's 3 columns), the MMCS commit is a small fraction of total prove time, so the GPU swap doesn't materially move end-to-end prove wall time — see the `target_stack/prove/fib_air` discussion above. Consumers with MMCS-heavy workloads (wider traces, many quotient chunks, large log_h) see the MMCS-layer speedup propagate; the right numbers for those are the `target_stack/commit` + `commit_open_40q` tables.
+- **Extension-field (challenge) MMCS stays on CPU.** FRI-fold commits over `BinomialExtensionField<BabyBear, 4>` use a plain CPU `MerkleTreeMmcs`. Widening the GPU adapter to the extension field is a future item; not in scope for Stage 3.
+- Numerical results measured on three GPUs: Apple M4 Pro (Metal), NVIDIA RTX 4090 (Vulkan via wgpu), NVIDIA RTX 5090 (Vulkan via wgpu) — for both the MMCS-layer benches and the end-to-end prove/verify bench. The backend is portable to AMD / DX12 / WebGPU; no published benchmark numbers on those targets yet.
 
 ## Reproducing
 
 ```bash
 # On any host with a GPU + wgpu-compatible backend:
 cd /workspace/zkgpu
-cargo test -p zkgpu-openvm --tests                                # 20 parity tests
-cargo bench -p zkgpu-openvm --bench openvm_commit                 # ~10-20 min
+cargo test -p zkgpu-openvm --tests                                # 22 tests
+cargo bench -p zkgpu-openvm --bench openvm_commit                 # ~10-20 min, MMCS perf claim
+cargo bench -p zkgpu-openvm --bench openvm_prove                  # ~5-10 min, end-to-end integration
 ```
 
-Parity suites should print `test result: ok. N passed` for each of `commit_parity` (9 tests) and `open_verify_parity` (11 tests). Bench median times should agree with the tables above to within ±5% on the same hardware class.
+Test counts should read `test result: ok. N passed` for each of `commit_parity` (9), `open_verify_parity` (11), and `prove_verify_openvm` (2 — one CPU control + one GPU under test). Bench median times should agree with the tables above to within ±5% on the same hardware class; the `openvm_prove` rows have wider confidence intervals by design (small width + full prover stack → higher relative variance).
 
 ## External summary
 
-> `zkgpu_openvm::OpenVmGpuMmcs` is a portable GPU backend for OpenVM's BabyBear Poseidon2 MMCS, bit-compatible with OpenVM's CPU reference at every public MMCS operation. On Apple Silicon (Metal), it clears the portability gate with a 1.09× commit-time speedup at `log_h_max = 18` on the mixed-height trace+quotient shape — a configuration OpenVM's own CUDA backend cannot run. On discrete NVIDIA (RTX 5090 + Ryzen 9 9950X), the same adapter reaches 20.07× at the same shape via Vulkan through wgpu, informationally alongside what OpenVM's first-party CUDA backend offers on NVIDIA-only.
+> `zkgpu_openvm::OpenVmGpuMmcs` is a portable GPU backend for OpenVM's BabyBear Poseidon2 MMCS, bit-compatible with OpenVM's CPU reference at every public MMCS operation, and end-to-end integrated into OpenVM's own prover loop through a dev-only `ZkgpuOpenVmEngine` that swaps the base-field MMCS while reusing the exact `StarkConfig` shape OpenVM ships (`BabyBearPoseidon2`, `DuplexChallenger`, `TwoAdicFriPcs`, `FriLogUpPhase`, `FriParameters::standard_with_100_bits_security`). On Apple Silicon (Metal), it clears the portability gate with a 1.09× commit-time speedup at `log_h_max = 18` on the mixed-height trace+quotient shape — a configuration OpenVM's own CUDA backend cannot run. On discrete NVIDIA (RTX 5090 + Ryzen 9 9950X), the same adapter reaches 20.07× at the same shape via Vulkan through wgpu, informationally alongside what OpenVM's first-party CUDA backend offers on NVIDIA-only. End-to-end prove speedup is AIR-dependent and only moves materially for MMCS-heavy workloads; the headline MMCS-layer numbers are the right ones to cite for planning.
 
 ## Cross-references
 

@@ -31,20 +31,33 @@
 //! ## Dependency strategy
 //!
 //! The crate pins Plonky3 at `=0.4.1` to match OpenVM's own
-//! workspace pin. Test-only code rebuilds OpenVM's config aliases
-//! locally from Plonky3 0.4.1 primitives (see [`config`]) rather
-//! than pulling `openvm-stark-backend` as a dev-dependency — the
-//! aliases are ~30 lines, and the full OpenVM dependency tree is
-//! heavy for what we'd use it for.
+//! workspace pin. The library itself (`src/*`) rebuilds OpenVM's
+//! config aliases locally from Plonky3 0.4.1 primitives (see
+//! [`config`]) rather than depending on `openvm-stark-backend` —
+//! the aliases are ~30 lines.
 //!
-//! ## Stage status
+//! `openvm-stark-sdk` + `openvm-stark-backend` are pulled in as
+//! **dev-dependencies** only (for the end-to-end prove/verify test
+//! and bench). The library API surface has no OpenVM-crate
+//! dependency, so downstream consumers who only want the MMCS
+//! adapter don't pay the full OpenVM dependency-tree cost.
 //!
-//! This is the **Stage 2a** landing: crate scaffold, config
-//! aliases, `Mmcs::commit`, `Mmcs::get_matrices`, and root-parity
-//! tests against CPU `MerkleTreeMmcs`. `open_batch` and
-//! `verify_batch` are `todo!` placeholders wired up in Stage 2b
-//! (the shared backend already provides the algorithms; 2b is
-//! plumbing and parity testing).
+//! ## What's shipped
+//!
+//! * `commit`, `open_batch`, `verify_batch` — full Plonky3 0.4.1
+//!   `Mmcs` trait impl plus direct inherent methods.
+//! * Mixed-height commits (single / same-height multi / mixed-height
+//!   DAG) through the shared `commit_mixed_height_with_w16_leaf`
+//!   engine.
+//! * Parity tests: 9 commit-root parity cases, 11 open/verify parity
+//!   cases, 2 end-to-end prove/verify cases (CPU control +
+//!   GPU-swapped OpenVM engine).
+//! * Benches: MMCS-layer `target_stack/commit` +
+//!   `target_stack/commit_open_40q`, end-to-end
+//!   `target_stack/prove/fib_air` on OpenVM's dummy Fibonacci AIR.
+//!
+//! See [`docs/research/openvm-poseidon2-mmcs.md`](../../docs/research/openvm-poseidon2-mmcs.md)
+//! for the numerical results and positioning.
 
 pub mod bridge;
 pub mod config;

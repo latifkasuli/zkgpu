@@ -37,21 +37,42 @@ p3-commit = "=0.4.1"
 p3-merkle-tree = "=0.4.1"
 
 [dev-dependencies]
-# Same version pin for test-only code. We build the CPU reference
-# `MerkleTreeMmcs` from p3 primitives locally in tests rather than
-# depending on `openvm-stark-sdk` / `openvm-stark-backend` —
-# OpenVM's config aliases are ~30 lines and pulling in the full
-# OpenVM tree for parity tests would bring a huge dependency
-# surface that doesn't buy us anything beyond the local
-# reconstruction. See `src/config.rs` for the aliases we rebuild.
-# p3-* 0.4.1 depends on rand 0.9, so we pin to that to avoid
-# tests pulling two incompatible rand versions into the same
-# Cargo unit. (zkgpu-plonky3 on p3-* 0.5.x pairs with rand 0.10,
-# which is why the workspace has no shared rand pin — each
-# adapter follows its paired Plonky3's rand.)
+# Parity tests (commit_parity, open_verify_parity) build the CPU
+# reference `MerkleTreeMmcs` from Plonky3 primitives directly — the
+# aliases are ~30 lines (see `src/config.rs`) and this lane doesn't
+# need the full OpenVM dependency tree.
+#
+# Stage 3 (end-to-end prove/verify) is a different story: it needs
+# OpenVM's actual prover loop, `FriParameters`, `RapPhase`, Fibonacci
+# dummy AIR, etc. — everything below that line is pulled in via
+# `openvm-stark-sdk` + `openvm-stark-backend`. These crates aren't on
+# crates.io (only the names are reserved), so we git-pin them to the
+# v1.3.0 release commit. See `tests/support/engine.rs` for the local
+# `ZkgpuOpenVmEngine` that plugs `OpenVmGpuMmcs` in through the same
+# `StarkEngine` surface OpenVM's own `BabyBearPoseidon2Engine` uses.
+#
+# p3-* 0.4.1 depends on rand 0.9, and OpenVM's workspace pins the
+# same version — so no rand version split within the adapter's dev
+# unit. (zkgpu-plonky3 on p3-* 0.5.x pairs with rand 0.10, which is
+# why the workspace has no shared rand pin — each adapter follows
+# its paired Plonky3's rand.)
 rand = { version = "0.9", features = ["small_rng"] }
 criterion = { workspace = true }
 
+# OpenVM stark stack — v1.3.0 release commit.
+openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend", rev = "a3ef723240b92b3b56a8f24ab23434004c148514" }
+openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend", rev = "a3ef723240b92b3b56a8f24ab23434004c148514" }
+
+# Extra Plonky3 0.4.1 bits the Stage 3 StarkConfig assembly needs
+# (the Stage 2a/2b parity tests didn't need these).
+p3-dft = "=0.4.1"
+p3-fri = "=0.4.1"
+p3-challenger = "=0.4.1"
+
 [[bench]]
 name = "openvm_commit"
+harness = false
+
+[[bench]]
+name = "openvm_prove"
 harness = false
