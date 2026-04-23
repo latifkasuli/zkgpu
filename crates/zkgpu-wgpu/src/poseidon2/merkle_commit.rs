@@ -61,7 +61,8 @@ pub struct WgpuPoseidon2MerkleCommit {
 /// This is the Step 3.c opening-friendly prover data: `open_batch(idx)`
 /// walks `layers[0..log2(h)]` extracting `layers[k][(idx >> k) ^ 1]` as
 /// the sibling at level `k`, no CPU tree rebuild. Total host storage is
-/// `(2h - 1) * DIGEST_LEN * 4` bytes (≈ 16·h bytes — 4 MiB at h=2^18).
+/// `(2h - 1) * DIGEST_LEN * 4` bytes. With `DIGEST_LEN = 8` that's
+/// `≈ 64·h` bytes — about **16 MiB at h=2¹⁸**.
 #[derive(Debug, Clone)]
 pub struct RetainedLayersHost {
     pub layers: Vec<Vec<BabyBear>>,
@@ -300,8 +301,11 @@ impl WgpuPoseidon2MerkleCommit {
     // Backend structure:
     //   * replaces the 2-buffer ping-pong with log2(h)+1 per-level
     //     allocations (one buffer per tree level). Total VRAM is
-    //     (2h - 1) * DIGEST_LEN * 4 bytes — ≈16h bytes, under 4 MiB at
-    //     h=2^18. Trivial on any discrete GPU.
+    //     (2h - 1) * DIGEST_LEN * 4 bytes; with DIGEST_LEN = 8 that's
+    //     ≈64·h bytes — about 16 MiB at h=2^18. Still trivial on any
+    //     discrete GPU; the next budget threshold worth thinking about
+    //     is h=2^22 (≈256 MiB), where an ICICLE-style retain-upper /
+    //     recompute-lower cutoff starts making sense.
     //   * each compression writes into a fresh buffer, so nothing is
     //     clobbered; the full tree is available afterward.
     //   * `commit_host_matrix_with_layers` downloads every layer to host

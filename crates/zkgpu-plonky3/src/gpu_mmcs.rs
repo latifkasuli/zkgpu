@@ -45,11 +45,13 @@
 //! reads opened row values directly from the stored input matrices —
 //! no CPU hash is ever computed.
 //!
-//! VRAM cost per commit: `(2h - 1) * DIGEST_LEN * 4` bytes ≈ 16·h
-//! bytes (≈4 MiB at h=2¹⁸). Host cost is the same (we download the
-//! layers). ICICLE-style "retain upper levels, recompute lower layers
-//! on demand" belongs in a follow-up — for the initial multi-query
-//! claim this is fine.
+//! VRAM cost per commit: `(2h - 1) * DIGEST_LEN * 4` bytes. With
+//! `DIGEST_LEN = 8` that's `≈ 64·h` bytes — about **16 MiB at
+//! h = 2¹⁸**. Host cost is the same (we download the layers).
+//! ICICLE-style "retain upper levels, recompute lower layers on
+//! demand" belongs in a follow-up — for the initial multi-query
+//! claim at target-stack sizes this is fine, but larger shapes
+//! (e.g. h = 2²², ≈ 256 MiB retained) would motivate the cutoff.
 
 use std::sync::{Arc, Mutex};
 
@@ -188,7 +190,7 @@ impl GpuPoseidon2Mmcs {
 /// hash.
 ///
 /// Memory: `matrices` cost is caller-defined; retained layers cost
-/// `≈ 16·h` bytes on host (≈4 MiB at h=2¹⁸).
+/// `≈ 64·h` bytes on host (≈16 MiB at h=2¹⁸ with `DIGEST_LEN = 8`).
 pub struct GpuProverData<M> {
     matrices: Vec<M>,
     layers: RetainedLayersHost,
