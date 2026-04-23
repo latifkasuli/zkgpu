@@ -64,7 +64,8 @@ pub use goldilocks_plan::WgpuGoldilocksPoseidon2Plan;
 pub use merkle_commit::{RetainedLayersHost, WgpuPoseidon2MerkleCommit};
 pub use merkle_commit_dag::{
     commit_mixed_height_with_w16_leaf, commit_mixed_height_with_w24_leaf,
-    root_from_retained, MixedHeightMatrixInput,
+    open_batch_mixed_height, root_from_retained, MixedHeightMatrixInput,
+    MixedHeightOpening,
 };
 pub use merkle_compress::WgpuPoseidon2MerkleCompressPlan;
 pub use merkle_leaf::{WgpuPoseidon2MerkleLeafPlan, DIGEST_LEN as MERKLE_DIGEST_LEN};

@@ -312,6 +312,166 @@ pub(crate) fn commit_mixed_height_internal<L: GpuLeafSponge>(
     Ok(RetainedLayersHost { layers })
 }
 
+/// A row-opening produced by [`open_batch_mixed_height`].
+///
+/// Shape matches Plonky3's `BatchOpening` for binary `MerkleTreeMmcs`
+/// at `cap_height = 0`:
+///
+/// * `opened_values[i]` is the row of matrix `i` (same order as the
+///   `matrices` slice passed to the original commit call) at local
+///   index `index >> (log2(h_max) - log2(matrices[i].height))`.
+/// * `opening_proof` is `log2(h_max)` sibling digests, bottom-up
+///   (level 0 first, root level last excluded).
+///
+/// Element order: BabyBear elements are in canonical form (not
+/// Montgomery). Adapter-side (e.g. `zkgpu-openvm`) conversion to p3
+/// BabyBear happens at the API boundary.
+#[derive(Clone, Debug)]
+pub struct MixedHeightOpening {
+    pub opened_values: Vec<Vec<BabyBear>>,
+    pub opening_proof: Vec<[BabyBear; DIGEST_LEN]>,
+}
+
+/// Produce a row-opening from a mixed-height commit's retained layers.
+///
+/// Consumers are the Stage-2 `zkgpu-openvm` adapter (and any future
+/// consumer that needs Plonky3-compatible openings over the shared
+/// backend).
+///
+/// # Arguments
+/// * `matrices` — the **exact slice** passed to the original
+///   [`commit_mixed_height_with_w24_leaf`] /
+///   [`commit_mixed_height_with_w16_leaf`] call. Same length, same
+///   order, same heights/widths. The function validates consistency
+///   against the retained layers' inferred `h_max`.
+/// * `retained` — the [`RetainedLayersHost`] returned by the commit.
+/// * `index` — global row index in `0..h_max` where `h_max` is the
+///   tallest matrix's height (== `retained.num_leaves()`).
+///
+/// # Errors
+/// * empty matrices slice, or inconsistent with retained
+/// * `index >= h_max`
+/// * retained layers structurally invalid (wrong layer lengths,
+///   missing layers)
+///
+/// # Proof shape
+/// Matches Plonky3's `MerkleTreeMmcs::open_batch` bit-for-bit for
+/// the binary N=2 / `cap_height=0` / power-of-two heights case.
+/// `opening_proof.len() == log2(h_max)`; for `h_max == 1` the proof
+/// is empty.
+pub fn open_batch_mixed_height(
+    matrices: &[MixedHeightMatrixInput<'_>],
+    retained: &RetainedLayersHost,
+    index: u32,
+) -> Result<MixedHeightOpening, ZkGpuError> {
+    if matrices.is_empty() {
+        return Err(ZkGpuError::InvalidNttSize(
+            "open_batch_mixed_height: matrices cannot be empty".into(),
+        ));
+    }
+    if retained.layers.is_empty() {
+        return Err(ZkGpuError::InvalidNttSize(
+            "open_batch_mixed_height: retained layers cannot be empty".into(),
+        ));
+    }
+    let h_max_layer = retained.layers[0].len() / DIGEST_LEN;
+    if h_max_layer == 0 || !h_max_layer.is_power_of_two() {
+        return Err(ZkGpuError::InvalidNttSize(format!(
+            "open_batch_mixed_height: retained layer 0 has {} digests, \
+             expected a nonzero power of two",
+            h_max_layer
+        )));
+    }
+    let h_max = h_max_layer as u32;
+    if index >= h_max {
+        return Err(ZkGpuError::InvalidNttSize(format!(
+            "open_batch_mixed_height: index {index} out of bounds (h_max={h_max})"
+        )));
+    }
+    let log_h_max = h_max.trailing_zeros() as usize;
+    if retained.layers.len() != log_h_max + 1 {
+        return Err(ZkGpuError::InvalidNttSize(format!(
+            "open_batch_mixed_height: retained has {} layers, expected {}",
+            retained.layers.len(),
+            log_h_max + 1
+        )));
+    }
+
+    // --- Opened values: one row per matrix, shifted to the matrix's
+    //     local coordinate via `index >> (log_h_max - log_h_i)`. ---
+    let mut opened_values: Vec<Vec<BabyBear>> = Vec::with_capacity(matrices.len());
+    for (i, m) in matrices.iter().enumerate() {
+        if m.height == 0 || !m.height.is_power_of_two() {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "open_batch_mixed_height: matrix {i} has invalid height {}",
+                m.height
+            )));
+        }
+        if m.height > h_max {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "open_batch_mixed_height: matrix {i} height {} > h_max {h_max} \
+                 (commit input/retained mismatch)",
+                m.height
+            )));
+        }
+        let log_h = m.height.trailing_zeros() as usize;
+        let bits_reduced = log_h_max - log_h;
+        let local_idx = (index >> bits_reduced) as usize;
+        let w = m.width as usize;
+        let start = local_idx
+            .checked_mul(w)
+            .ok_or_else(|| {
+                ZkGpuError::InvalidNttSize(format!(
+                    "open_batch_mixed_height: matrix {i} row offset overflow"
+                ))
+            })?;
+        let end = start.checked_add(w).ok_or_else(|| {
+            ZkGpuError::InvalidNttSize(format!(
+                "open_batch_mixed_height: matrix {i} row end overflow"
+            ))
+        })?;
+        if end > m.flat.len() {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "open_batch_mixed_height: matrix {i} row [{start}, {end}) \
+                 out of bounds (flat.len={})",
+                m.flat.len()
+            )));
+        }
+        opened_values.push(m.flat[start..end].to_vec());
+    }
+
+    // --- Proof: bottom-up sibling chain through retained layers.
+    //     At level k, sibling = layers[k][(idx >> k) ^ 1]. ---
+    let mut proof: Vec<[BabyBear; DIGEST_LEN]> = Vec::with_capacity(log_h_max);
+    let mut idx = index as usize;
+    for k in 0..log_h_max {
+        let sibling_pos = idx ^ 1;
+        let layer = &retained.layers[k];
+        let expected_layer_len = (h_max_layer >> k) * DIGEST_LEN;
+        if layer.len() != expected_layer_len {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "open_batch_mixed_height: retained layer {k} has {} entries, \
+                 expected {} ({} digests × {DIGEST_LEN})",
+                layer.len(),
+                expected_layer_len,
+                h_max_layer >> k
+            )));
+        }
+        let start = sibling_pos * DIGEST_LEN;
+        let end = start + DIGEST_LEN;
+        let sibling: [BabyBear; DIGEST_LEN] = layer[start..end]
+            .try_into()
+            .expect("slice length checked against expected_layer_len");
+        proof.push(sibling);
+        idx >>= 1;
+    }
+
+    Ok(MixedHeightOpening {
+        opened_values,
+        opening_proof: proof,
+    })
+}
+
 /// Extract the root (top layer) from a `RetainedLayersHost` as an
 /// 8-element `[BabyBear; DIGEST_LEN]`.
 ///
