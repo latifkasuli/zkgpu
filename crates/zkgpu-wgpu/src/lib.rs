@@ -22,5 +22,6 @@ pub use poseidon2::{
     WgpuBabyBearPoseidon2PlonkyW16Plan, WgpuBabyBearPoseidon2PlonkyW24Plan,
     WgpuGoldilocksPoseidon2Plan, WgpuPoseidon2MerkleCommit,
     WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafPlan,
+    WgpuPoseidon2MerkleLeafW16R8Plan,
 };
 pub use profiling::{GpuProfiler, GpuTiming, TimestampSpan};

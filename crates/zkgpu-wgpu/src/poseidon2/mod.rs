@@ -55,6 +55,7 @@ mod goldilocks_plan;
 mod merkle_commit;
 mod merkle_compress;
 mod merkle_leaf;
+mod merkle_leaf_w16;
 mod plan;
 mod plonky3_plan;
 
@@ -62,6 +63,7 @@ pub use goldilocks_plan::WgpuGoldilocksPoseidon2Plan;
 pub use merkle_commit::{RetainedLayersHost, WgpuPoseidon2MerkleCommit};
 pub use merkle_compress::WgpuPoseidon2MerkleCompressPlan;
 pub use merkle_leaf::{WgpuPoseidon2MerkleLeafPlan, DIGEST_LEN as MERKLE_DIGEST_LEN};
+pub use merkle_leaf_w16::WgpuPoseidon2MerkleLeafW16R8Plan;
 pub use plan::WgpuBabyBearPoseidon2Plan;
 pub use plonky3_plan::{
     WgpuBabyBearPoseidon2PlonkyW16Plan, WgpuBabyBearPoseidon2PlonkyW24Plan,
