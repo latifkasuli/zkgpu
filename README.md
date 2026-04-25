@@ -75,7 +75,11 @@ cargo test -p zkgpu-babybear
 - [ ] BN254 scalar field
 - [ ] Stable browser / WebGPU support (experimental today)
 
-## Research Notes
+## Results
+
+- **[Two consumers on one GPU backend](docs/two-consumers.md)** — the canonical summary: Plonky3 (0.5.x, W24 leaf) and OpenVM (0.4.1, W16 leaf) both run their Merkle commit phase on a single shared mixed-height DAG engine, parity-pinned end-to-end. Headline numbers, architecture diagram, scope.
+
+### Per-consumer detail notes
 
 - [GPU Poseidon2 MMCS for Plonky3](docs/research/plonky3-poseidon2-mmcs.md)
 - [GPU Poseidon2 MMCS for OpenVM](docs/research/openvm-poseidon2-mmcs.md)
