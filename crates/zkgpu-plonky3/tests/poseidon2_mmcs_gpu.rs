@@ -1,4 +1,4 @@
-//! Phase 7 Step 3 — GPU Poseidon2 MMCS adapter parity tests.
+//! GPU Poseidon2 MMCS adapter parity tests.
 //!
 //! Locks [`zkgpu_plonky3::gpu_mmcs::GpuPoseidon2Mmcs`] against
 //! Plonky3's canonical `MerkleTreeMmcs<Packing, Packing,
@@ -6,17 +6,25 @@
 //! `Mmcs::commit` and `Mmcs::open_batch` — the full surface the
 //! target-stack prover exercises in `commit` + `fri::open_input`.
 //!
-//! Scope: same-height batches, cap_height=0. Covers:
+//! Scope: cap_height=0, all shapes Plonky3's `MerkleTreeMmcs::commit`
+//! validly accepts at that cap height. Covers:
 //!
 //! * **Single-matrix trace commit** — `TwoAdicFriPcs::commit`
 //!   feeds exactly one LDE matrix per call.
 //! * **Same-height multi-matrix quotient batch** — `commit_quotient`
 //!   splits the quotient into `k` equal-height matrices.
+//! * **Mixed-height multi-matrix** — `compress_and_inject`-style DAG
+//!   tree with matrices at differing heights (trace + preprocessing
+//!   / fixed / random matrices). Routed through the shared backend's
+//!   `commit_mixed_height_with_w24_leaf` (also used by the sibling
+//!   `zkgpu-openvm` adapter with the W16 leaf variant).
 //! * **Opening parity** — `open_batch(index)` produces byte-identical
 //!   `(opened_values, proof)` to Plonky3's CPU reference at every
 //!   power-of-two index (and a random sample of others).
-//! * **Mixed-height rejection** — the adapter loudly panics rather
-//!   than silently producing a wrong-shape commit.
+//! * **Cross-verifier roundtrip** — GPU openings verify through both
+//!   the adapter's own `verify_batch` (CPU-delegated) and a freshly-
+//!   constructed CPU `MerkleTreeMmcs::verify_batch` over the GPU
+//!   commit.
 
 use std::sync::Arc;
 
@@ -338,22 +346,153 @@ fn mmcs_verify_roundtrip_multi_matrix() {
 }
 
 // ==========================================================================
-// Rejection / guard tests
+// Mixed-height commit + open parity (post-convergence — adapter now
+// routes through the shared `commit_mixed_height_with_w24_leaf` DAG
+// engine, which makes mixed-height batches a fully-supported shape
+// rather than a rejection case).
 // ==========================================================================
 
-#[test]
-#[should_panic(expected = "same-height")]
-fn mmcs_commit_rejects_mixed_height() {
-    let Some(device) = try_device() else {
-        // `should_panic` tests need a panic either way — feed it the
-        // expected message so headless CI doesn't block on absent GPU.
-        panic!("same-height (skipping GPU body)");
-    };
-    let (_, gpu) = build_matched(device, 0x_CC55_0007_u64);
-    let m1 = random_rowmajor(8, 4, 1);
-    let m2 = random_rowmajor(16, 4, 2);
-    let _ = gpu.commit(vec![m1, m2]);
+/// Helper: drive both CPU and GPU through `commit + open_batch +
+/// verify_batch` for a given `(shapes, indices)` and assert
+/// byte-identical commit roots, byte-identical openings at every
+/// supplied index, and that the GPU opening verifies through both
+/// the adapter's `verify_batch` and a freshly-constructed CPU
+/// `MerkleTreeMmcs::verify_batch`. Mirrors the OpenVM adapter's
+/// `run_shapes_open_parity` helper so the two adapters cover the
+/// same test surface.
+fn run_shapes_open_parity(
+    cpu: &CpuValMmcs,
+    gpu: &GpuPoseidon2Mmcs,
+    shapes: &[(usize, usize)],
+    indices: &[usize],
+    seed_base: u64,
+) {
+    let ctx_base = format!("shapes={shapes:?}");
+    let matrices: Vec<RowMajorMatrix<P3BabyBear>> = shapes
+        .iter()
+        .enumerate()
+        .map(|(i, &(h, w))| {
+            random_rowmajor(h, w, seed_base ^ ((i as u64).wrapping_mul(0xBADC0DE)))
+        })
+        .collect();
+    let (cpu_cap, cpu_pd) = cpu.commit(matrices.clone());
+    let (gpu_cap, gpu_pd) = gpu.commit(matrices);
+
+    let dims: Vec<Dimensions> = shapes
+        .iter()
+        .map(|&(h, w)| Dimensions { width: w, height: h })
+        .collect();
+
+    // Sanity: commit roots match.
+    assert_roots_match(&cpu_cap, &gpu_cap, &format!("{ctx_base}: commit"));
+
+    for &idx in indices {
+        let ctx = format!("{ctx_base} idx={idx}");
+
+        let cpu_opening: BatchOpening<P3BabyBear, CpuValMmcs> =
+            cpu.open_batch(idx, &cpu_pd);
+        let gpu_opening: BatchOpening<P3BabyBear, GpuPoseidon2Mmcs> =
+            gpu.open_batch(idx, &gpu_pd);
+
+        // CPU ↔ GPU opening parity.
+        assert_openings_match(&cpu_opening, &gpu_opening, &ctx);
+
+        // Adapter self-verify: GPU opening verifies against GPU
+        // commit through the adapter's own `verify_batch`.
+        let gpu_ref_self: BatchOpeningRef<'_, P3BabyBear, GpuPoseidon2Mmcs> =
+            BatchOpeningRef::new(&gpu_opening.opened_values, &gpu_opening.opening_proof);
+        gpu.verify_batch(&gpu_cap, &dims, idx, gpu_ref_self)
+            .unwrap_or_else(|e| {
+                panic!("{ctx}: adapter self-verify rejected GPU opening: {e:?}")
+            });
+
+        // Cross-verifier: GPU opening passes through a freshly-built
+        // CPU `MerkleTreeMmcs::verify_batch` over the GPU commit.
+        let gpu_ref_cross: BatchOpeningRef<'_, P3BabyBear, CpuValMmcs> =
+            BatchOpeningRef::new(&gpu_opening.opened_values, &gpu_opening.opening_proof);
+        cpu.verify_batch(&gpu_cap, &dims, idx, gpu_ref_cross)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "{ctx}: CPU MerkleTreeMmcs rejected GPU opening (cross-verifier): {e:?}"
+                )
+            });
+    }
 }
+
+/// Two-level mixed-height: a tall trace + a shorter preprocessing /
+/// fixed matrix. The smallest realistic shape that exercises the
+/// `compress_and_inject` injection step.
+#[test]
+fn mmcs_mixed_height_two_levels_parity() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (cpu, gpu) = build_matched(device, 0x_CC55_0007_u64);
+    run_shapes_open_parity(
+        &cpu,
+        &gpu,
+        &[(16, 4), (4, 2)],
+        &[0, 3, 7, 15],
+        0x_2BF_0030_u64,
+    );
+}
+
+/// Three-level mixed-height: tallest matrix + injection at two
+/// different lower levels.
+#[test]
+fn mmcs_mixed_height_three_levels_parity() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (cpu, gpu) = build_matched(device, 0x_CC55_0009_u64);
+    run_shapes_open_parity(
+        &cpu,
+        &gpu,
+        &[(32, 6), (16, 2), (4, 5)],
+        &[0, 1, 5, 12, 20, 31],
+        0x_2BF_0040_u64,
+    );
+}
+
+/// Mixed-height with injection at every tree level (every power of
+/// two from h=16 down to h=1). Stress-tests that the adapter's
+/// retained-layer indexing matches Plonky3's at every level.
+#[test]
+fn mmcs_mixed_height_every_level_parity() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (cpu, gpu) = build_matched(device, 0x_CC55_000A_u64);
+    let shapes: Vec<(usize, usize)> =
+        [16usize, 8, 4, 2, 1].iter().map(|&h| (h, 3usize)).collect();
+    run_shapes_open_parity(&cpu, &gpu, &shapes, &[0, 5, 10, 15], 0x_2BF_0050_u64);
+}
+
+/// Multi-matrix at a same non-max height: a tall trace + two shorter
+/// matrices that share a height. Exercises the same-height-group
+/// flatten inside the mixed-height engine.
+#[test]
+fn mmcs_multi_matrix_same_non_max_height_parity() {
+    let Some(device) = try_device() else {
+        eprintln!("skipping: no GPU adapter available");
+        return;
+    };
+    let (cpu, gpu) = build_matched(device, 0x_CC55_000B_u64);
+    run_shapes_open_parity(
+        &cpu,
+        &gpu,
+        &[(32, 4), (16, 3), (16, 5)],
+        &[0, 7, 15, 23, 31],
+        0x_2BF_0060_u64,
+    );
+}
+
+// ==========================================================================
+// Guard tests (preserved from pre-convergence; cap_height + empty).
+// ==========================================================================
 
 #[test]
 fn mmcs_get_matrices_returns_inputs() {

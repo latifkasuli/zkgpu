@@ -1,8 +1,8 @@
 # GPU Poseidon2 MMCS for Plonky3
 
-This note captures the current narrow claim that `zkgpu` can support and reproduce from the code in this repository.
+This note captures the current claim that `zkgpu` can support and reproduce from the code in this repository.
 
-> **Sibling note:** [GPU Poseidon2 MMCS for OpenVM](openvm-poseidon2-mmcs.md) — the same shared backend, a different consumer (OpenVM's Plonky3 0.4.1 W16-leaf MMCS), portability-first framing.
+> **Sibling note:** [GPU Poseidon2 MMCS for OpenVM](openvm-poseidon2-mmcs.md) — the **same shared backend**, a different consumer (OpenVM's Plonky3 0.4.1 W16-leaf MMCS), portability-first framing.
 
 ## Claim
 
@@ -10,10 +10,12 @@ For a Plonky3 STARK stack using:
 
 - `BabyBear`
 - `TwoAdicFriPcs`
-- Poseidon2 MMCS
+- Poseidon2 MMCS (W24 leaf + W16 binary compression)
 - `cap_height = 0`
 
-the `zkgpu-plonky3::gpu_mmcs::GpuPoseidon2Mmcs` adapter produces bit-identical commitments, openings, and verification behavior to Plonky3's CPU `MerkleTreeMmcs`, and materially reduces prover wall time on discrete NVIDIA hardware.
+the `zkgpu-plonky3::gpu_mmcs::GpuPoseidon2Mmcs` adapter produces bit-identical commitments, openings, and verification behavior to Plonky3's CPU `MerkleTreeMmcs` — across single-matrix, same-height multi-matrix, **and mixed-height multi-matrix** (`compress_and_inject` DAG) shapes. It materially reduces prover wall time on discrete NVIDIA hardware.
+
+The mixed-height path routes through the shared backend's `commit_mixed_height_with_w24_leaf` engine — the same engine the sibling [`zkgpu-openvm`](openvm-poseidon2-mmcs.md) adapter uses with its W16 leaf variant. **Two consumer adapters; one shared mixed-height MMCS backend; parity-pinned end-to-end.**
 
 Measured wall-clock wins on two matched consumer-flagship pairs:
 
@@ -22,11 +24,11 @@ Measured wall-clock wins on two matched consumer-flagship pairs:
 | RTX 4090 + Ryzen 9 7950X (Zen 4) | **9.78x** | **3.95x** |
 | RTX 5090 + Ryzen 9 9950X (Zen 5) | **16.20x** | **4.63x** |
 
-On the Blackwell / Zen 5 pair the CPU baseline is ~1.22x faster than on Ada / Zen 4 (native AVX-512 helping Plonky3's `BabyBear::Packing`), and the GPU side is ~1.41-2.01x faster, so the MMCS ratio grows on newer silicon rather than shrinking. The envelope extends cleanly to log_h=20 (~1M rows).
+On the Blackwell / Zen 5 pair the CPU baseline is ~1.22x faster than on Ada / Zen 4 (native AVX-512 helping Plonky3's `BabyBear::Packing`), and the GPU side is ~1.41-2.01x faster, so the MMCS ratio grows on newer silicon rather than shrinking. The envelope extends cleanly to log_h=20 (~1M rows). These numbers are commit-only; the mixed-height path is parity-validated but not yet bench-headlined separately because Plonky3's primary trace commit is single-matrix at `cap_height=0`. The OpenVM note's mixed-height numbers carry over directly — same backend.
 
 ## Scope
 
-This is a narrow engineering result, not a universal GPU-prover claim.
+This is a focused engineering result, not a universal GPU-prover claim.
 
 It covers:
 
@@ -35,12 +37,12 @@ It covers:
 - `TwoAdicFriPcs`
 - single-matrix trace commit
 - same-height multi-matrix quotient chunks
+- **mixed-height multi-matrix** via the `compress_and_inject` DAG engine
 - full `prove + verify` on the in-tree `FibAir` benchmark
 
 It does not claim:
 
 - "GPU always wins"
-- a drop-in `Mmcs` for arbitrary mixed-height `compress_and_inject`
 - support for `cap_height > 0`
 - a result for Keccak-MMCS stacks
 - a result for non-Plonky3 proving systems
@@ -51,15 +53,17 @@ It does not claim:
 The result is backed by these tracked components:
 
 - `zkgpu-plonky3` GPU MMCS adapter:
-  - [`crates/zkgpu-plonky3/src/gpu_mmcs.rs`](../../crates/zkgpu-plonky3/src/gpu_mmcs.rs)
-- GPU Poseidon2 Merkle commit backend:
-  - [`crates/zkgpu-wgpu/src/poseidon2/merkle_commit.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_commit.rs)
-  - [`crates/zkgpu-wgpu/src/poseidon2/merkle_leaf.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_leaf.rs)
-  - [`crates/zkgpu-wgpu/src/poseidon2/plonky3_plan.rs`](../../crates/zkgpu-wgpu/src/poseidon2/plonky3_plan.rs)
+  - [`crates/zkgpu-plonky3/src/gpu_mmcs.rs`](../../crates/zkgpu-plonky3/src/gpu_mmcs.rs) — `GpuPoseidon2Mmcs`, routing through the shared mixed-height DAG engine
+- Shared mixed-height DAG backend (zkgpu-wgpu):
+  - [`crates/zkgpu-wgpu/src/poseidon2/merkle_commit_dag.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_commit_dag.rs) — `commit_mixed_height_with_w24_leaf`, `open_batch_mixed_height` — the same engine the OpenVM adapter uses (with `_w16_leaf`)
+  - [`crates/zkgpu-wgpu/src/poseidon2/merkle_leaf.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_leaf.rs) — W24/RATE=16 leaf sponge plan
+  - [`crates/zkgpu-wgpu/src/poseidon2/merkle_compress.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_compress.rs) — W16 binary compression plan
+  - [`crates/zkgpu-wgpu/src/poseidon2/plonky3_plan.rs`](../../crates/zkgpu-wgpu/src/poseidon2/plonky3_plan.rs) — Plonky3 Poseidon2 permutation plan
 - Correctness tests:
-  - [`crates/zkgpu-plonky3/tests/poseidon2_mmcs_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_mmcs_gpu.rs)
+  - [`crates/zkgpu-plonky3/tests/poseidon2_mmcs_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_mmcs_gpu.rs) — 12 tests: single, same-height multi, mixed-height (2-level / 3-level / every-level / multi-at-non-max-height), open + verify_batch parity, cross-verifier roundtrip, cap_height guard
   - [`crates/zkgpu-plonky3/tests/poseidon2_bridge_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_bridge_gpu.rs)
-  - [`crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_gpu.rs)
+  - [`crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_dag_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_dag_gpu.rs) — backend mixed-height commit parity (W24 leaf)
+  - [`crates/zkgpu-plonky3/tests/poseidon2_merkle_open_dag_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_merkle_open_dag_gpu.rs) — backend mixed-height open parity (both W24 and W16 leaf)
 - Benchmark harness:
   - [`crates/zkgpu-plonky3/benches/prover_hot_path.rs`](../../crates/zkgpu-plonky3/benches/prover_hot_path.rs)
 
@@ -207,7 +211,9 @@ In particular, the GPU MMCS test surface locks:
 
 - single-matrix trace commit
 - same-height multi-matrix quotient opens
+- mixed-height multi-matrix DAG (`compress_and_inject`-style trees, every shape Plonky3's `MerkleTreeMmcs` validly accepts at `cap_height=0`)
 - `Mmcs::verify_batch` parity against the CPU reference path
+- cross-verifier roundtrip: GPU openings verified by both the adapter's own `verify_batch` and a freshly-built CPU `MerkleTreeMmcs::verify_batch` over the GPU commit
 
 ## Why This Matters
 
@@ -223,7 +229,6 @@ That observation changes the roadmap. For this target stack, GPU MMCS was the pi
 ## Current Limitations
 
 - `cap_height > 0` is rejected
-- arbitrary mixed-height multi-matrix `compress_and_inject` is not implemented
 - the adapter targets the Poseidon2-MMCS stack, not Keccak-MMCS
 - numerical results are measured on discrete NVIDIA hardware (RTX 4090 and RTX 5090). The backend is portable via wgpu (Metal, Vulkan, DX12, WebGPU); other targets have functional tests but no published benchmark numbers yet
 - the full claim is benchmark-backed for the in-tree `FibAir` proving workload, not every AIR or every proof system

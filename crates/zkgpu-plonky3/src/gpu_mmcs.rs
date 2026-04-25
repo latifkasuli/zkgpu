@@ -1,71 +1,77 @@
-//! Phase 7 Step 3 — GPU Poseidon2 MMCS adapter.
+//! GPU Poseidon2 MMCS adapter — mixed-height capable.
 //!
 //! Implements [`p3_commit::Mmcs<BabyBear>`] with a GPU-accelerated
-//! `commit()` and opening path that matches Plonky3's
+//! `commit()` / `open_batch()` path that matches Plonky3's
 //! `MerkleTreeMmcs<Packing, Packing, Poseidon2Sponge, Poseidon2Compression, 2, 8>`
 //! bit-for-bit at `cap_height = 0`.
 //!
-//! # Scope (Step 3.c)
+//! # Scope
 //!
-//! **Binary N=2 tree, same-height inputs, power-of-two height, cap_height=0.**
-//! Supports the two matrix-count shapes that show up in the target
-//! stack's full prove path:
+//! **Binary N=2 tree, power-of-two heights, cap_height=0.** Supports
+//! every shape Plonky3's `MerkleTreeMmcs::commit` validly accepts at
+//! that cap height:
 //!
 //! * **Single matrix** — the trace commit
 //!   (`uni-stark::prover::prove` → `pcs.commit(vec![(domain, trace)])`).
 //! * **N same-height matrices** — the quotient-chunk batch
 //!   (`uni-stark::prover::commit_quotient` splits the quotient into
 //!   `k` equal-height matrices and commits them all together).
+//! * **Mixed-height multi-matrix** — `compress_and_inject`-style DAG
+//!   tree where matrices at different heights are injected at the
+//!   tree levels matching their power-of-two height. Required for
+//!   any Plonky3 consumer that commits trace + preprocessing /
+//!   fixed / random matrices alongside it at differing heights.
 //!
-//! Plonky3's `first_digest_layer` hashes row *i* of each tallest
-//! matrix into one leaf digest via `flat_map` (see
-//! `p3_merkle_tree::merkle_tree.rs` line 300). The adapter mirrors
-//! that by flattening row-*i* of every input matrix into a single
-//! wide row and running the existing single-matrix GPU leaf sponge —
-//! no new kernel required.
+//! Mixed-height routing goes through the shared backend's
+//! [`zkgpu_wgpu::commit_mixed_height_with_w24_leaf`] — the same
+//! engine the sibling `zkgpu-openvm` adapter uses (with the W16
+//! leaf variant). This is the post-convergence shape: the two
+//! consumer adapters share one backend, parity-pinned across both
+//! leaf shapes.
 //!
 //! # Out of scope
 //!
-//! * Multi-matrix with **differing** heights → needs
-//!   `compress_and_inject` (DAG-shaped tree with injection at
-//!   height-specific levels). Not needed for the target stack; a
-//!   future adapter can layer it on top.
-//! * `cap_height > 0` → this adapter returns a single-digest cap
+//! * `cap_height > 0` → the adapter returns a single-digest cap
 //!   shaped for the root-only convention; see `SUPPORTED_CAP_HEIGHT`.
+//!   Wider caps would change the commit shape and require a backend
+//!   change to retain `2^cap_height` digests at the appropriate
+//!   level.
 //!
 //! # Opening path — GPU-retained layers, no CPU tree rebuild
 //!
-//! The reviewer's Step 3.c direction (option 3): keep the digest
-//! layers the GPU commit already produced and serve openings by
-//! indexing into them, instead of materialising a CPU
-//! `MerkleTreeMmcs` prover tree on demand. Every `commit()` now calls
-//! `WgpuPoseidon2MerkleCommit::commit_host_matrix_with_layers`, which
-//! writes per-level buffers on the GPU and downloads them once.
-//! `open_batch` then walks those layers (log₂(h) sibling lookups) and
-//! reads opened row values directly from the stored input matrices —
-//! no CPU hash is ever computed.
+//! Every `commit()` calls `commit_mixed_height_with_w24_leaf`, which
+//! writes per-level digest buffers on the GPU and downloads them
+//! once. `open_batch` then routes through
+//! [`zkgpu_wgpu::open_batch_mixed_height`], which walks the variable-
+//! arity DAG bottom-up and produces the sibling chain Plonky3's
+//! verifier expects. No CPU hash is ever computed during the open
+//! path.
 //!
-//! VRAM cost per commit: `(2h - 1) * DIGEST_LEN * 4` bytes. With
-//! `DIGEST_LEN = 8` that's `≈ 64·h` bytes — about **16 MiB at
-//! h = 2¹⁸**. Host cost is the same (we download the layers).
-//! ICICLE-style "retain upper levels, recompute lower layers on
-//! demand" belongs in a follow-up — for the initial multi-query
-//! claim at target-stack sizes this is fine, but larger shapes
-//! (e.g. h = 2²², ≈ 256 MiB retained) would motivate the cutoff.
+//! VRAM cost per commit: `(2·h_max − 1) · DIGEST_LEN · 4` bytes for
+//! the all-same-height shape, slightly less for mixed-height (some
+//! levels collapse). With `DIGEST_LEN = 8` that's ≈64·h_max bytes —
+//! about **16 MiB at h_max = 2¹⁸**. Host cost is the same; we
+//! download the retained layers once at commit time and serve
+//! openings from them. ICICLE-style "retain upper levels, recompute
+//! lower on demand" belongs in a follow-up — relevant around
+//! h_max = 2²² (≈256 MiB retained).
 
 use std::sync::{Arc, Mutex};
 
 use p3_baby_bear::BabyBear as P3BabyBear;
 use p3_commit::{BatchOpening, BatchOpeningRef, Mmcs};
+use p3_field::PrimeField32;
 use p3_matrix::{Dimensions, Matrix};
 use p3_merkle_tree::{MerkleTreeError, MerkleTreeMmcs};
 use p3_symmetric::{MerkleCap, PaddingFreeSponge, TruncatedPermutation};
 
 use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
 use zkgpu_poseidon2::Poseidon2Params;
-use zkgpu_wgpu::{RetainedLayersHost, WgpuDevice, WgpuPoseidon2MerkleCommit};
-
-use crate::poseidon2_bridge::p3_to_zkgpu;
+use zkgpu_wgpu::{
+    commit_mixed_height_with_w24_leaf, open_batch_mixed_height, MixedHeightMatrixInput,
+    RetainedLayersHost, WgpuDevice, WgpuPoseidon2MerkleCompressPlan,
+    WgpuPoseidon2MerkleLeafPlan,
+};
 
 /// Digest length for BabyBear Poseidon2 MMCS (matches Plonky3's
 /// `Poseidon2MerkleMmcs` config).
@@ -119,8 +125,15 @@ const SUPPORTED_CAP_HEIGHT: usize = 0;
 #[derive(Clone)]
 pub struct GpuPoseidon2Mmcs {
     device: Arc<WgpuDevice>,
-    gpu_commit: Arc<Mutex<WgpuPoseidon2MerkleCommit>>,
+    /// W24/RATE=16 leaf sponge plan — Plonky3 canonical.
+    leaf: Arc<Mutex<WgpuPoseidon2MerkleLeafPlan>>,
+    /// W16 binary compression plan — shared with OpenVM's adapter.
+    compress: Arc<Mutex<WgpuPoseidon2MerkleCompressPlan>>,
+    /// CPU leaf hasher, same constants as `leaf`. Used by
+    /// `verify_batch` and any consumer that needs a host-side
+    /// reference hash.
     cpu_hash: P3Poseidon2Sponge,
+    /// CPU compression function, same constants as `compress`.
     cpu_compress: P3Poseidon2Compression,
 }
 
@@ -143,19 +156,25 @@ impl GpuPoseidon2Mmcs {
             ));
         }
 
-        let gpu_commit = WgpuPoseidon2MerkleCommit::new(
-            device.as_ref(),
-            leaf_params,
-            compress_params,
-        )
-        .map_err(|e| format!("GpuPoseidon2Mmcs: GPU plan construction failed: {e}"))?;
+        let leaf = WgpuPoseidon2MerkleLeafPlan::new(device.as_ref(), leaf_params)
+            .map_err(|e| {
+                format!("GpuPoseidon2Mmcs: GPU leaf plan construction failed: {e}")
+            })?;
+        let compress =
+            WgpuPoseidon2MerkleCompressPlan::new(device.as_ref(), compress_params)
+                .map_err(|e| {
+                    format!(
+                        "GpuPoseidon2Mmcs: GPU compress plan construction failed: {e}"
+                    )
+                })?;
 
         let cpu_hash = P3Poseidon2Sponge::new(perm24);
         let cpu_compress = P3Poseidon2Compression::new(perm16);
 
         Ok(Self {
             device,
-            gpu_commit: Arc::new(Mutex::new(gpu_commit)),
+            leaf: Arc::new(Mutex::new(leaf)),
+            compress: Arc::new(Mutex::new(compress)),
             cpu_hash,
             cpu_compress,
         })
@@ -183,17 +202,51 @@ impl GpuPoseidon2Mmcs {
 // GpuProverData<M>
 // ---------------------------------------------------------------------------
 
-/// Prover data produced by [`GpuPoseidon2Mmcs::commit`]. Holds the
-/// input matrices (for row-level opened-values lookups) and the
-/// per-level digest stack the GPU retained during commit, so
-/// [`Mmcs::open_batch`] can answer openings without touching a CPU
-/// hash.
+/// Prover data produced by [`GpuPoseidon2Mmcs::commit`].
+///
+/// Holds the input matrices (for `get_matrices` and row-level
+/// opened-values lookups), the GPU-retained per-level digest stack
+/// (so [`Mmcs::open_batch`] never touches a CPU hash), and a cache of
+/// the row-major flattened matrices in zkgpu canonical form (so
+/// `open_batch` doesn't re-flatten on every query — saves
+/// `num_queries` flattens per FRI commit).
 ///
 /// Memory: `matrices` cost is caller-defined; retained layers cost
-/// `≈ 64·h` bytes on host (≈16 MiB at h=2¹⁸ with `DIGEST_LEN = 8`).
+/// ≈ `64·h_max` bytes (≈16 MiB at `h_max = 2¹⁸` with
+/// `DIGEST_LEN = 8`); `flats` is one extra copy of each input matrix
+/// in zkgpu canonical form (same order as the original).
 pub struct GpuProverData<M> {
     matrices: Vec<M>,
+    /// Retained layer stack from `commit_mixed_height_with_w24_leaf`.
+    /// Consumed by `open_batch` through `open_batch_mixed_height` to
+    /// extract the sibling chain for a given row index.
     layers: RetainedLayersHost,
+    /// Per-matrix row-major flats in zkgpu canonical form, cached
+    /// from the commit path so `open_batch` doesn't re-flatten on
+    /// every call.
+    flats: Vec<(Vec<ZkgpuBabyBear>, u32, u32)>,
+}
+
+// Internal helper: convert Plonky3 matrices → row-major flats in
+// zkgpu canonical form. Mirrors the same pattern in
+// `zkgpu-openvm/src/gpu_mmcs.rs`.
+fn flatten_matrices_for_gpu<M: Matrix<P3BabyBear>>(
+    inputs: &[M],
+) -> Vec<(Vec<ZkgpuBabyBear>, u32, u32)> {
+    inputs
+        .iter()
+        .map(|m| {
+            let h = m.height();
+            let w = m.width();
+            let mut flat: Vec<ZkgpuBabyBear> = Vec::with_capacity(h * w);
+            for r in 0..h {
+                for v in m.row(r).expect("Matrix::row at valid index") {
+                    flat.push(ZkgpuBabyBear(v.as_canonical_u32()));
+                }
+            }
+            (flat, h as u32, w as u32)
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -215,61 +268,37 @@ impl Mmcs<P3BabyBear> for GpuPoseidon2Mmcs {
             "GpuPoseidon2Mmcs::commit: called with 0 matrices"
         );
 
-        // All inputs must be same height + same power-of-two height,
-        // and each must have width ≥ 1. Mixed-height batches need
-        // Plonky3's `compress_and_inject` injection DAG, which this
-        // adapter doesn't implement.
-        let h = inputs[0].height();
-        let mut total_width: usize = 0;
-        for (i, mat) in inputs.iter().enumerate() {
-            let mh = mat.height();
-            let mw = mat.width();
-            assert_eq!(
-                mh, h,
-                "GpuPoseidon2Mmcs::commit: matrix {i} has height {mh}, expected {h} \
-                 (this adapter only supports same-height batches; mixed-height \
-                 injection is not implemented)"
-            );
-            assert!(
-                mw > 0,
-                "GpuPoseidon2Mmcs::commit: matrix {i} has width 0"
-            );
-            total_width = total_width
-                .checked_add(mw)
-                .expect("total width overflow");
-        }
-        assert!(h > 0, "GpuPoseidon2Mmcs::commit: h must be ≥ 1");
-        assert!(
-            h.is_power_of_two(),
-            "GpuPoseidon2Mmcs::commit: h must be a power of two (got {h})"
-        );
-
-        // Flatten: one logical row of the "joint" matrix is the
-        // concatenation of the same row across every input, in input
-        // order — exactly what Plonky3's `first_digest_layer` feeds
-        // the leaf hasher for same-height tallest matrices.
-        let mut flat: Vec<ZkgpuBabyBear> = Vec::with_capacity(h * total_width);
-        for r in 0..h {
-            for mat in &inputs {
-                for v in mat.row(r).expect("matrix row access").into_iter() {
-                    flat.push(p3_to_zkgpu(v));
-                }
-            }
-        }
+        // Mixed-height is fully supported via the shared backend's
+        // `compress_and_inject`-style DAG engine. Single-matrix and
+        // same-height multi-matrix shapes still flow through the
+        // same path — they're degenerate cases of the mixed-height
+        // engine where every matrix lands at the same level.
+        let flats = flatten_matrices_for_gpu(&inputs);
+        let gpu_inputs: Vec<MixedHeightMatrixInput<'_>> = flats
+            .iter()
+            .map(|(flat, h, w)| MixedHeightMatrixInput {
+                flat: flat.as_slice(),
+                height: *h,
+                width: *w,
+            })
+            .collect();
 
         let layers: RetainedLayersHost = {
-            let mut plan = self.gpu_commit.lock().expect("gpu commit mutex");
-            plan.commit_host_matrix_with_layers(
+            let mut leaf = self.leaf.lock().expect("gpu leaf mutex");
+            let mut compress = self.compress.lock().expect("gpu compress mutex");
+            commit_mixed_height_with_w24_leaf(
                 self.device.as_ref(),
-                &flat,
-                h as u32,
-                total_width as u32,
+                &mut *leaf,
+                &mut *compress,
+                &gpu_inputs,
             )
             .expect("GpuPoseidon2Mmcs::commit: GPU commit failed")
         };
 
-        // Convert the root from zkgpu BabyBear (canonical u32) to p3
-        // BabyBear (Monty) and wrap as a 1-element MerkleCap.
+        // Convert the root from zkgpu BabyBear (canonical u32) to
+        // Plonky3 BabyBear (Monty form) and wrap as a 1-element
+        // MerkleCap (matches Plonky3's MerkleTreeMmcs output at
+        // cap_height = 0).
         let gpu_root = layers.root();
         let root_p3: [P3BabyBear; DIGEST_LEN] =
             gpu_root.map(|x| P3BabyBear::new(x.0));
@@ -278,6 +307,7 @@ impl Mmcs<P3BabyBear> for GpuPoseidon2Mmcs {
         let prover_data = GpuProverData {
             matrices: inputs,
             layers,
+            flats,
         };
         (cap, prover_data)
     }
@@ -287,45 +317,46 @@ impl Mmcs<P3BabyBear> for GpuPoseidon2Mmcs {
         index: usize,
         prover_data: &<Self as Mmcs<P3BabyBear>>::ProverData<M>,
     ) -> BatchOpening<P3BabyBear, Self> {
-        // All matrices are same-height by construction (enforced in
-        // commit), so `max_height == matrix.height()` and the
-        // Plonky3 `bits_reduced = log_max_height - log_height` is 0
-        // for every matrix. `opened_values[i] = matrices[i].row(index)`.
-        let h = prover_data.layers.num_leaves();
-        assert!(
-            index < h,
-            "GpuPoseidon2Mmcs::open_batch: index {index} out of bounds (h={h})"
-        );
-
-        let opened_values: Vec<Vec<P3BabyBear>> = prover_data
-            .matrices
+        // Routes through the shared backend's
+        // `open_batch_mixed_height`, which is parity-pinned against
+        // Plonky3's `MerkleTreeMmcs::open_batch` for both same-height
+        // and mixed-height shapes (see
+        // `tests/poseidon2_merkle_open_dag_gpu.rs`). The retained
+        // layers + cached flats live in `prover_data` from commit
+        // time — no GPU work happens here, just a host-side DAG
+        // walk + boundary type conversion.
+        let gpu_inputs: Vec<MixedHeightMatrixInput<'_>> = prover_data
+            .flats
             .iter()
-            .map(|m| {
-                m.row(index)
-                    .expect("row access at valid index")
-                    .into_iter()
-                    .collect()
+            .map(|(flat, h, w)| MixedHeightMatrixInput {
+                flat: flat.as_slice(),
+                height: *h,
+                width: *w,
             })
             .collect();
+        let idx_u32 = u32::try_from(index)
+            .expect("GpuPoseidon2Mmcs::open_batch: index exceeds u32");
+        let opening = open_batch_mixed_height(
+            &gpu_inputs,
+            &prover_data.layers,
+            idx_u32,
+        )
+        .expect("GpuPoseidon2Mmcs::open_batch: backend open failed");
 
-        // Sibling path: for each tree level `k` in `0..log₂(h)`,
-        // push the sibling of the node at `index >> k`, i.e. index
-        // `(index >> k) ^ 1` of `layers[k]`. Bottom-up order matches
-        // Plonky3's `MerkleTreeMmcs::open_batch`.
-        let log_h = h.trailing_zeros() as usize;
-        let mut proof: Vec<[P3BabyBear; DIGEST_LEN]> = Vec::with_capacity(log_h);
-        let mut idx = index;
-        for layer_idx in 0..log_h {
-            let sibling_idx = idx ^ 1;
-            let sib_zkgpu = prover_data
-                .layers
-                .digest_at(layer_idx, sibling_idx)
-                .expect("sibling digest in retained layers");
-            let sib_p3: [P3BabyBear; DIGEST_LEN] =
-                sib_zkgpu.map(|x| P3BabyBear::new(x.0));
-            proof.push(sib_p3);
-            idx >>= 1;
-        }
+        // Convert zkgpu canonical → Plonky3 Monty-form at the
+        // boundary. Shape preserved: one row Vec per matrix (in
+        // input order, not height-sorted), and one 8-element
+        // sibling digest per tree level bottom-up.
+        let opened_values: Vec<Vec<P3BabyBear>> = opening
+            .opened_values
+            .into_iter()
+            .map(|row| row.into_iter().map(|v| P3BabyBear::new(v.0)).collect())
+            .collect();
+        let proof: Vec<[P3BabyBear; DIGEST_LEN]> = opening
+            .opening_proof
+            .into_iter()
+            .map(|d| d.map(|v| P3BabyBear::new(v.0)))
+            .collect();
 
         BatchOpening::new(opened_values, proof)
     }

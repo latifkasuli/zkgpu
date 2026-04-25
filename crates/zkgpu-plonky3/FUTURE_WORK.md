@@ -1,95 +1,17 @@
 # zkgpu-plonky3 — future work
 
-Two pieces of work that are deliberately out of scope for the current
-adapter but are known next steps, listed in the order we'd most
-likely tackle them. Neither blocks the narrow claim recorded in
-[`docs/research/plonky3-poseidon2-mmcs.md`](../../docs/research/plonky3-poseidon2-mmcs.md).
+One remaining item — the mixed-height piece **shipped** in the
+adapter convergence that landed alongside the
+`docs/research/plonky3-poseidon2-mmcs.md` mixed-height upgrade. See
+the convergence commit for details. The single remaining future item
+is GPU-resident LDE pipeline cleanup, kept as `§1` below so its
+historical priority and rationale stay readable.
 
 ---
 
-## 1. Mixed-height multi-matrix MMCS adapter
+## 1. GPU-resident `coset_lde_batch` (Step 2)
 
-**Priority: second.** Do this if the goal is adoption and a stronger
-Plonky3 integration story — it broadens the valid use envelope.
-
-### What's in scope today
-
-`GpuPoseidon2Mmcs::commit` handles:
-
-- single-matrix commits (trace commit in `uni-stark::prove`),
-- same-height multi-matrix commits (the quotient-chunk batch produced
-  by `uni-stark::commit_quotient`).
-
-It rejects anything else loudly (`panic!("same-height ..."`) rather
-than silently falling back to CPU.
-
-### What this doesn't cover
-
-Anything Plonky3's `MerkleTreeMmcs::commit` can validly accept where
-the heights differ. Concretely:
-
-- preprocessing / fixed / random matrices committed alongside the
-  trace at different heights,
-- mixed-height batches in any future Plonky3 consumer that doesn't
-  happen to line up with same-height chunks.
-
-### Why it's non-trivial
-
-Plonky3 handles mixed heights via a DAG-shaped Merkle tree rather
-than a straight binary compression (see
-`p3_merkle_tree::merkle_tree::MerkleTree::new` and
-`compress_and_inject`, lines ~316-419). Matrices are sorted by
-height, the tallest ones are hashed first into `digest_layers[0]`,
-and then at each compression level any matrices whose height rounds
-up to the next layer size are *injected* into the compression inputs
-alongside the previous layer's compressed digests. The result is a
-binary compression at most tree levels but an N-ary step at levels
-where injection happens.
-
-Our current kernel stack is binary-only (width-16 Poseidon2 as
-`TruncatedPermutation<Perm16, 2, 8, 16>`). Supporting injection means
-one of:
-
-1. A new GPU compression kernel that accepts `N > 2` inputs at levels
-   with injection. Keeps the fast single-dispatch per level model but
-   needs a second compile-time variant of the compress plan.
-2. A host-side DAG walker that composes the existing width-16 binary
-   compression with an injected-hash step at injection levels,
-   paying an extra dispatch per injection level. Simpler, smaller
-   blast radius, probably enough at target-stack depths.
-
-Opening semantics also change: the proof walks the DAG, so the
-arity per layer becomes variable and the retained-layer indexing in
-`GpuProverData::open_batch` needs an `arity_schedule` like the one
-Plonky3 tracks.
-
-### Suggested incremental path
-
-1. Extend `WgpuPoseidon2MerkleCommit` with an injection-aware variant
-   (option 2 above) that takes a pre-sorted `Vec<(height, flattened-
-   matrix)>` and walks levels one at a time, composing binary
-   compression with injection-hash steps as Plonky3 does.
-2. Update `GpuPoseidon2Mmcs::commit` to accept `inputs` of differing
-   heights and drive the new backend path.
-3. Update `GpuProverData<M>` to store the `arity_schedule` and teach
-   `open_batch` to walk it.
-4. Extend the parity test suite in
-   `tests/poseidon2_mmcs_gpu.rs` with mixed-height shapes, pinned
-   byte-for-byte against Plonky3's `MerkleTreeMmcs::{commit,
-   open_batch, verify_batch}`.
-
-### Success criterion
-
-The rejection test `mmcs_commit_rejects_mixed_height` flips to a
-parity test, and the adapter becomes a drop-in replacement for
-Plonky3's `Poseidon2MerkleMmcs` at full-API level — not just the
-target-stack subset.
-
----
-
-## 2. GPU-resident `coset_lde_batch` (Step 2)
-
-**Priority: last.** Do this only if you specifically want pipeline
+**Priority: low.** Do this only if you specifically want pipeline
 cleanliness or to set up a future fully-GPU-resident end-to-end
 commit path. Worthwhile, but not strategically urgent given the
 current bench data.
