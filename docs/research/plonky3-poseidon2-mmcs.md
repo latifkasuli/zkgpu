@@ -17,14 +17,27 @@ the `zkgpu-plonky3::gpu_mmcs::GpuPoseidon2Mmcs` adapter produces bit-identical c
 
 The mixed-height path routes through the shared backend's `commit_mixed_height_with_w24_leaf` engine — the same engine the sibling [`zkgpu-openvm`](openvm-poseidon2-mmcs.md) adapter uses with its W16 leaf variant. **Two consumer adapters; one shared mixed-height MMCS backend; parity-pinned end-to-end.**
 
-Measured wall-clock wins on two matched consumer-flagship pairs:
+Measured wall-clock wins on two matched consumer-flagship pairs (post-convergence; see _Convergence trade-off_ below):
 
 | Host | `fri_commit @ log_h=18, w=8` | `prove+verify @ FibAir, log_h=18` |
 |---|---:|---:|
-| RTX 4090 + Ryzen 9 7950X (Zen 4) | **9.78x** | **3.95x** |
-| RTX 5090 + Ryzen 9 9950X (Zen 5) | **16.20x** | **4.63x** |
+| RTX 4090 + Ryzen 9 7950X (Zen 4) | **8.09x** | **3.71x** |
+| RTX 5090 + Ryzen 9 9950X (Zen 5) | **11.41x** | **4.57x** |
 
-On the Blackwell / Zen 5 pair the CPU baseline is ~1.22x faster than on Ada / Zen 4 (native AVX-512 helping Plonky3's `BabyBear::Packing`), and the GPU side is ~1.41-2.01x faster, so the MMCS ratio grows on newer silicon rather than shrinking. The envelope extends cleanly to log_h=20 (~1M rows). These numbers are commit-only; the mixed-height path is parity-validated but not yet bench-headlined separately because Plonky3's primary trace commit is single-matrix at `cap_height=0`. The OpenVM note's mixed-height numbers carry over directly — same backend.
+On the Blackwell / Zen 5 pair the CPU baseline is ~1.21x faster than on Ada / Zen 4 (native AVX-512 helping Plonky3's `BabyBear::Packing`), and the GPU side is faster too, so the MMCS ratio still grows on newer silicon. The envelope extends cleanly to log_h=20 (~1M rows): on the 5090 at log_h=20/w=8 the ratio is 9.30× (cpu_dft_cpu_mmcs 3624.5 ms vs cpu_dft_gpu_mmcs 389.5 ms). These numbers are commit-only on the same-height shape; the mixed-height path is parity-validated but not bench-headlined separately because Plonky3's primary trace commit is single-matrix at `cap_height=0`. The OpenVM note's mixed-height numbers carry over directly — same backend.
+
+### Convergence trade-off (2026-04-25)
+
+When `GpuPoseidon2Mmcs` was migrated onto the shared mixed-height DAG engine (so both consumer adapters share one backend), the same-height commit-only ratio regressed slightly on NVIDIA:
+
+| Host | `fri_commit @ log_h=18, w=8` pre / post | `prove+verify @ FibAir, log_h=18` pre / post |
+|---|---:|---:|
+| RTX 4090 + 7950X | 9.78× → 8.09× (-17%) | 3.95× → 3.71× (within noise) |
+| RTX 5090 + 9950X | 16.20× → 11.41× (-30%) | 4.63× → 4.57× (within noise) |
+
+Cause: the shared DAG engine adds per-commit host-side overhead (flatten + cache for opens, height-sort + grouping, two-mutex lock granularity) that the previous direct same-height path didn't pay. The 5090's faster GPU makes the fixed CPU overhead a larger fraction of total commit time, hence the bigger ratio drop; the 4090 absorbs more of it. The prove ratio is preserved on both hosts because FRI-fold overhead dominates the per-commit cost.
+
+In exchange, the adapter gained: mixed-height multi-matrix support (4 new parity tests at differing-height shapes), shared backend with the OpenVM adapter (one engine, two leaf shapes), and a cleaner "two consumers, one backend" headline. A future optimization could add a same-height fast path in the shared backend that skips the height-sort + grouping when all input heights match — would recover most of the regression without re-forking the consumer adapters. Not in scope today; flagged in [`crates/zkgpu-plonky3/FUTURE_WORK.md`](../../crates/zkgpu-plonky3/FUTURE_WORK.md).
 
 ## Scope
 
