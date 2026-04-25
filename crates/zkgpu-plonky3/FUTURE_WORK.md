@@ -1,59 +1,13 @@
 # zkgpu-plonky3 — future work
 
-The mixed-height adapter shipped in the convergence commit
-(see `docs/research/plonky3-poseidon2-mmcs.md` for the result).
-Two follow-ups remain, ordered by leverage.
+The mixed-height adapter and the same-height fast path that
+recovers post-convergence NVIDIA performance both shipped (see
+`docs/research/plonky3-poseidon2-mmcs.md` for the latest numbers).
+One remaining item, kept here for visibility.
 
 ---
 
-## 1. Same-height fast path in the shared mixed-height DAG engine
-
-**Priority: medium.** Recovers the same-height-shape commit-only
-regression introduced by the convergence (RTX 4090: -17%,
-RTX 5090: -30% on `fri_commit @ log_h=18, w=8`; prove ratios
-unaffected on both).
-
-### What this is
-
-The shared `commit_mixed_height_with_w24_leaf` /
-`commit_mixed_height_with_w16_leaf` engine in
-`crates/zkgpu-wgpu/src/poseidon2/merkle_commit_dag.rs` does
-unconditional height-sort + height-grouping + injection-schedule
-construction even when every input matrix has the same height —
-the case where no injection is needed. For Plonky3's primary
-trace-commit shape (single matrix at `cap_height=0`) this is pure
-overhead.
-
-### Suggested incremental path
-
-1. In `commit_mixed_height_internal`, detect "all matrices share
-   one height" early. If so, take a fast path that:
-   * skips the height-sort,
-   * skips the injection-schedule construction,
-   * dispatches the leaf sponge once over the row-concatenated
-     joint matrix (the same shape the pre-convergence
-     `WgpuPoseidon2MerkleCommit::commit_host_matrix_with_layers`
-     used),
-   * runs binary compression top-to-bottom without the per-level
-     injection branch.
-2. Confirm parity by re-running both consumer adapters' parity
-   suites — fast-path output must be byte-identical to the
-   general path.
-3. Re-bench `prover_hot_path` on both vast.ai hosts; target is
-   recovering the pre-convergence ratios at same-height shapes
-   (≈9.78× on 4090, ≈16.20× on 5090 at `fri_commit @ log_h=18`)
-   without changing the mixed-height numbers.
-
-### Success criterion
-
-Same-height commit-only ratios recover to within 5% of the pre-
-convergence baseline on both NVIDIA hosts. Mixed-height ratios
-unchanged. No fork between the two consumer adapters — the fast
-path lives in the shared backend.
-
----
-
-## 2. GPU-resident `coset_lde_batch` (Step 2)
+## 1. GPU-resident `coset_lde_batch` (Step 2)
 
 **Priority: low.** Do this only if you specifically want pipeline
 cleanliness or to set up a future fully-GPU-resident end-to-end

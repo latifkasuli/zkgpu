@@ -250,6 +250,37 @@ pub(crate) fn commit_mixed_height_internal<L: GpuLeafSponge>(
     for m in matrices {
         by_height.entry(m.height).or_default().push(m);
     }
+
+    // --- Same-height fast path ---
+    //
+    // When every matrix shares one height, `compress_and_inject` has
+    // no injection levels to handle — the DAG degenerates into the
+    // "leaf sponge once, then binary compress all the way to the
+    // root" shape. The general path below correctly produces the
+    // same output for this case, but pays a per-level host
+    // round-trip (download `temp_gpu`, re-upload as `prev_gpu` next
+    // iteration) so it can interleave injection digests host-side at
+    // injection levels. With no injections that round-trip is pure
+    // overhead — `log2(h_max)` PCIe pings of latency on a discrete
+    // GPU, which is exactly where we measured a 17–30% commit-only
+    // ratio regression on RTX 4090 / 5090 after Plonky3 adapter
+    // convergence.
+    //
+    // The fast path mirrors the pre-convergence
+    // `WgpuPoseidon2MerkleCommit::commit_with_retained_layers` shape:
+    // pre-allocate every level's GPU buffer up front, run the leaf
+    // sponge into level 0, run compression `level k → level k+1`
+    // entirely GPU-resident, then download all layers in one batch
+    // at the end. Output (`RetainedLayersHost`) shape is identical
+    // to the general path, so opening / verify / parity tests don't
+    // care which path produced it.
+    if by_height.len() == 1 {
+        let height = matrices[0].height;
+        return commit_same_height_fast_path(
+            device, leaf, compress, matrices, height,
+        );
+    }
+
     let heights_desc: Vec<u32> = by_height.keys().rev().copied().collect();
     let max_height = heights_desc[0];
     // Max-height tree depth. `log2(max_height) + 1` retained layers.
@@ -308,6 +339,126 @@ pub(crate) fn commit_mixed_height_internal<L: GpuLeafSponge>(
         layers.last().map(|l| l.len()).unwrap_or(0),
         DIGEST_LEN,
         "root layer must be exactly DIGEST_LEN elements"
+    );
+    Ok(RetainedLayersHost { layers })
+}
+
+/// Same-height fast path: pre-allocates every retained-layer GPU
+/// buffer up front, runs the leaf sponge once into layer 0, runs the
+/// binary compression chain entirely GPU-resident with no host
+/// round-trip between levels, then downloads every layer in a single
+/// batch at the end.
+///
+/// Output is byte-identical to the general
+/// [`commit_mixed_height_internal`] path for inputs where every
+/// matrix shares one height. Parity-pinned by the existing same-
+/// height shape entries in
+/// `tests/poseidon2_merkle_commit_dag_w24_gpu.rs` and
+/// `tests/poseidon2_merkle_commit_dag_w16_gpu.rs`, plus the
+/// adapter-level commit-parity suites in `zkgpu-plonky3` and
+/// `zkgpu-openvm`.
+///
+/// Why it lives in the DAG engine rather than as a separate public
+/// API: keeping the fast path **inside** `commit_mixed_height_*` lets
+/// both consumer adapters benefit from the optimization without
+/// either of them needing to special-case "is this a same-height
+/// commit" — they always call the same `commit_mixed_height_with_*`
+/// entry, the engine picks the right path internally.
+fn commit_same_height_fast_path<L: GpuLeafSponge>(
+    device: &WgpuDevice,
+    leaf: &mut L,
+    compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    matrices: &[MixedHeightMatrixInput<'_>],
+    height: u32,
+) -> Result<RetainedLayersHost, ZkGpuError> {
+    // Validation already done by the caller; debug-assert the contract.
+    debug_assert!(
+        matrices.iter().all(|m| m.height == height),
+        "fast path called with mixed heights"
+    );
+
+    // Row-major concat: row i of the joint matrix is row i of m0 then
+    // m1 then ... — Plonky3's `first_digest_layer` semantics. For a
+    // single-matrix input this still copies once, but that copy was
+    // already required by the upload step in the general path.
+    let total_width: u32 = matrices
+        .iter()
+        .map(|m| m.width)
+        .try_fold(0u32, u32::checked_add)
+        .ok_or_else(|| {
+            ZkGpuError::InvalidNttSize(
+                "same-height fast path: total width overflow".into(),
+            )
+        })?;
+
+    let h = height as usize;
+    let tw = total_width as usize;
+
+    // Single upload — no further host round-trips until the final
+    // batch download. Two cases:
+    //
+    // * **Single matrix:** the joint matrix IS the input, no concat
+    //   needed. Upload `matrices[0].flat` directly. This matches the
+    //   pre-convergence path's single bulk upload — skipping the
+    //   concat saves an 8 MiB host-memcpy at h=2¹⁸ / w=8 and is the
+    //   biggest contributor to closing the post-convergence
+    //   commit-only ratio gap on faster GPUs (5090 measured).
+    //
+    // * **Multi-matrix same-height:** Plonky3's row-major joint-row
+    //   semantics require a row-by-row interleave (row i = m0_row_i
+    //   then m1_row_i then ...), which can't be done by a single
+    //   bulk copy. Falls back to the per-row loop.
+    let matrix_buf = if matrices.len() == 1 {
+        device.upload::<BabyBear>(matrices[0].flat)?
+    } else {
+        let mut concat: Vec<BabyBear> = Vec::with_capacity(h * tw);
+        for row in 0..h {
+            for m in matrices {
+                let w = m.width as usize;
+                let start = row * w;
+                concat.extend_from_slice(&m.flat[start..start + w]);
+            }
+        }
+        device.upload::<BabyBear>(&concat)?
+    };
+
+    // Pre-allocate every layer's GPU buffer (level 0 = h * DIGEST_LEN
+    // down to root = 1 * DIGEST_LEN).
+    let log_h = height.trailing_zeros() as usize;
+    let mut gpu_layers: Vec<WgpuBuffer<BabyBear>> = Vec::with_capacity(log_h + 1);
+    let mut level_size = h;
+    for _ in 0..=log_h {
+        gpu_layers.push(device.alloc_zeros::<BabyBear>(level_size * DIGEST_LEN)?);
+        level_size /= 2;
+    }
+
+    // Leaf sponge: matrix_buf → gpu_layers[0]
+    leaf.hash_rows(device, &matrix_buf, &mut gpu_layers[0], height, total_width)?;
+
+    // Compression chain, GPU-resident: gpu_layers[k] → gpu_layers[k+1]
+    let mut num_outputs = height / 2;
+    for k in 0..log_h {
+        let (left, right) = gpu_layers.split_at_mut(k + 1);
+        let input = &left[k];
+        let output = &mut right[0];
+        compress.compress_level(device, input, output, num_outputs)?;
+        num_outputs /= 2;
+    }
+
+    // Single batch download at the end. This is the only host
+    // transfer beyond the initial `concat` upload — vs the general
+    // path's per-level download/upload pair, the fast path saves
+    // `log_h` host round-trips.
+    let mut layers: Vec<Vec<BabyBear>> = Vec::with_capacity(gpu_layers.len());
+    for buf in &gpu_layers {
+        layers.push(buf.read_to_vec()?);
+    }
+
+    debug_assert_eq!(layers.len(), log_h + 1);
+    debug_assert_eq!(
+        layers.last().map(|l| l.len()).unwrap_or(0),
+        DIGEST_LEN,
+        "fast path: root layer must be exactly DIGEST_LEN elements"
     );
     Ok(RetainedLayersHost { layers })
 }

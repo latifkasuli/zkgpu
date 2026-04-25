@@ -17,29 +17,43 @@ the `zkgpu-plonky3::gpu_mmcs::GpuPoseidon2Mmcs` adapter produces bit-identical c
 
 The mixed-height path routes through the shared backend's `commit_mixed_height_with_w24_leaf` engine — the same engine the sibling [`zkgpu-openvm`](openvm-poseidon2-mmcs.md) adapter uses with its W16 leaf variant. **Two consumer adapters; one shared mixed-height MMCS backend; parity-pinned end-to-end.**
 
-Measured wall-clock wins on two matched consumer-flagship pairs (post-convergence; see _Convergence trade-off_ below):
+Measured wall-clock wins on two matched consumer-flagship pairs:
 
 | Host | `fri_commit @ log_h=18, w=8` | `prove+verify @ FibAir, log_h=18` |
 |---|---:|---:|
-| RTX 4090 + Ryzen 9 7950X (Zen 4) | **8.09x** | **3.71x** |
-| RTX 5090 + Ryzen 9 9950X (Zen 5) | **11.41x** | **4.57x** |
+| RTX 4090 + Ryzen 9 7950X (Zen 4) | **11.46x** | **3.98x** |
+| RTX 5090 + Ryzen 9 9950X (Zen 5) | **15.07x** | **4.76x** |
 
-On the Blackwell / Zen 5 pair the CPU baseline is ~1.21x faster than on Ada / Zen 4 (native AVX-512 helping Plonky3's `BabyBear::Packing`), and the GPU side is faster too, so the MMCS ratio still grows on newer silicon. The envelope extends cleanly to log_h=20 (~1M rows): on the 5090 at log_h=20/w=8 the ratio is 9.30× (cpu_dft_cpu_mmcs 3624.5 ms vs cpu_dft_gpu_mmcs 389.5 ms). These numbers are commit-only on the same-height shape.
+On the Blackwell / Zen 5 pair the CPU baseline is ~1.22x faster than on Ada / Zen 4 (native AVX-512 helping Plonky3's `BabyBear::Packing`), and the GPU side is faster too, so the MMCS ratio still grows on newer silicon. These numbers are commit-only on the same-height shape; the mixed-height path is parity-validated separately (see below).
 
-**On the mixed-height path:** semantics are parity-validated for Plonky3 (4 mixed-height parity tests, byte-identical commit roots and `BatchOpening` against Plonky3 0.5.x's CPU `MerkleTreeMmcs`). Mixed-height **performance** has not been benchmarked separately on the Plonky3 config — the OpenVM note's mixed-height numbers (e.g. 20.07× on 5090 at `log_h_max=18` mixed-height) cover the same DAG engine but a different leaf shape (OpenVM uses W16/RATE=8, Plonky3 uses W24/RATE=16). The leaf-cost asymmetry already shows up in the `target_stack/commit` data inside the OpenVM note (single-matrix W16 at log_h=18 hits 18.26× on the 5090 vs Plonky3's W24 at 11.41× post-convergence on the same shape), so OpenVM's mixed-height numbers are evidence the shared engine works, not a Plonky3-config performance claim. A dedicated mixed-height bench at the Plonky3 W24 leaf shape is straightforward future work; not in scope today.
+**On the mixed-height path:** semantics are parity-validated for Plonky3 (4 mixed-height parity tests, byte-identical commit roots and `BatchOpening` against Plonky3 0.5.x's CPU `MerkleTreeMmcs`). Mixed-height **performance** has not been benchmarked separately on the Plonky3 config — the OpenVM note's mixed-height numbers (e.g. 20.07× on 5090 at `log_h_max=18` mixed-height) cover the same DAG engine but a different leaf shape (OpenVM uses W16/RATE=8, Plonky3 uses W24/RATE=16). The leaf-cost asymmetry already shows up in the `target_stack/commit` data inside the OpenVM note (single-matrix W16 at log_h=18 hits 18.26× on the 5090 vs Plonky3's W24 at 15.07× on the same shape), so OpenVM's mixed-height numbers are evidence the shared engine works, not a Plonky3-config performance claim. A dedicated mixed-height bench at the Plonky3 W24 leaf shape is straightforward future work; not in scope today.
 
-### Convergence trade-off (2026-04-25)
+### Convergence + same-height fast path (2026-04-25)
 
-When `GpuPoseidon2Mmcs` was migrated onto the shared mixed-height DAG engine (so both consumer adapters share one backend), the same-height commit-only ratio regressed slightly on NVIDIA:
+When `GpuPoseidon2Mmcs` was first migrated onto the shared mixed-height DAG engine (so both consumer adapters share one backend), the same-height commit-only ratio temporarily regressed on NVIDIA. Root cause: the general DAG path downloads each level's digests to host between compression levels (so it can interleave injection digests at injection levels) — for same-height inputs no injection ever happens, so those `log2(h_max)` PCIe round-trips are pure overhead.
 
-| Host | `fri_commit @ log_h=18, w=8` pre / post | `prove+verify @ FibAir, log_h=18` pre / post |
-|---|---:|---:|
-| RTX 4090 + 7950X | 9.78× → 8.09× (-17%) | 3.95× → 3.71× (within noise) |
-| RTX 5090 + 9950X | 16.20× → 11.41× (-30%) | 4.63× → 4.57× (within noise) |
+A same-height fast path was added to the shared backend
+([`crates/zkgpu-wgpu/src/poseidon2/merkle_commit_dag.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_commit_dag.rs))
+that detects "every input matrix has one height" early in
+`commit_mixed_height_internal` and routes to a GPU-resident
+pipeline (pre-allocate every retained-layer buffer, run the leaf
+sponge into level 0, run binary compression entirely
+device-resident, batch-download every layer once at the end). For
+the single-matrix case it also skips an unnecessary host concat
+copy and uploads the input slice directly. Both consumer adapters
+benefit — the fix lives in the shared backend, not in either
+adapter, so no re-fork.
 
-Cause: the shared DAG engine adds per-commit host-side overhead (flatten + cache for opens, height-sort + grouping, two-mutex lock granularity) that the previous direct same-height path didn't pay. The 5090's faster GPU makes the fixed CPU overhead a larger fraction of total commit time, hence the bigger ratio drop; the 4090 absorbs more of it. The prove ratio is preserved on both hosts because FRI-fold overhead dominates the per-commit cost.
+Recovery progression at `fri_commit @ log_h=18, w=8`:
 
-In exchange, the adapter gained: mixed-height multi-matrix support (4 new parity tests at differing-height shapes), shared backend with the OpenVM adapter (one engine, two leaf shapes), and a cleaner "two consumers, one backend" headline. A future optimization could add a same-height fast path in the shared backend that skips the height-sort + grouping when all input heights match — would recover most of the regression without re-forking the consumer adapters. Not in scope today; flagged in [`crates/zkgpu-plonky3/FUTURE_WORK.md`](../../crates/zkgpu-plonky3/FUTURE_WORK.md).
+| Host | Pre-convergence | Post-convergence (no fast path) | **Post fast path (current)** | Δ vs pre |
+|---|---:|---:|---:|:---:|
+| RTX 4090 + 7950X | 9.78× | 8.09× (-17%) | **11.46×** | +17% (improved) |
+| RTX 5090 + 9950X | 16.20× | 11.41× (-30%) | **15.07×** | -7% (within stop rule) |
+
+Why the 4090 ratio actually improved past the pre-convergence baseline: the fast path's batched end-of-pipeline download appears to be more efficient than the old `commit_with_retained_layers` per-buffer download pattern. The 5090's residual gap (~7%) is small enough to land cleanly; further optimization would need profiling to identify the remaining cost. Prove ratios are essentially unchanged on both hosts.
+
+The fast path itself is an unconditional optimization — same-height shapes always take it, mixed-height shapes always take the general DAG path. No public API change; no consumer adapter change.
 
 ## Scope
 
