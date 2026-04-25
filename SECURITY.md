@@ -6,7 +6,7 @@ If you discover a security vulnerability in zkgpu, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, email: **security@latifkasuli.dev**
+Instead, email **dev@vaultum.app** (preferred — team mailbox), or **latif@vaultum.app** as a direct fallback.
 
 You should receive a response within 48 hours. We will work with you to understand the issue and coordinate a fix before any public disclosure.
 
