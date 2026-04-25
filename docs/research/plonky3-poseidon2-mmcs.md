@@ -51,17 +51,17 @@ It does not claim:
 The result is backed by these tracked components:
 
 - `zkgpu-plonky3` GPU MMCS adapter:
-  - `/Users/latifkasuli/web3/zkgpu/crates/zkgpu-plonky3/src/gpu_mmcs.rs`
+  - [`crates/zkgpu-plonky3/src/gpu_mmcs.rs`](../../crates/zkgpu-plonky3/src/gpu_mmcs.rs)
 - GPU Poseidon2 Merkle commit backend:
-  - `/Users/latifkasuli/web3/zkgpu/crates/zkgpu-wgpu/src/poseidon2/merkle_commit.rs`
-  - `/Users/latifkasuli/web3/zkgpu/crates/zkgpu-wgpu/src/poseidon2/merkle_leaf.rs`
-  - `/Users/latifkasuli/web3/zkgpu/crates/zkgpu-wgpu/src/poseidon2/plonky3_plan.rs`
+  - [`crates/zkgpu-wgpu/src/poseidon2/merkle_commit.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_commit.rs)
+  - [`crates/zkgpu-wgpu/src/poseidon2/merkle_leaf.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_leaf.rs)
+  - [`crates/zkgpu-wgpu/src/poseidon2/plonky3_plan.rs`](../../crates/zkgpu-wgpu/src/poseidon2/plonky3_plan.rs)
 - Correctness tests:
-  - `/Users/latifkasuli/web3/zkgpu/crates/zkgpu-plonky3/tests/poseidon2_mmcs_gpu.rs`
-  - `/Users/latifkasuli/web3/zkgpu/crates/zkgpu-plonky3/tests/poseidon2_bridge_gpu.rs`
-  - `/Users/latifkasuli/web3/zkgpu/crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_gpu.rs`
+  - [`crates/zkgpu-plonky3/tests/poseidon2_mmcs_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_mmcs_gpu.rs)
+  - [`crates/zkgpu-plonky3/tests/poseidon2_bridge_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_bridge_gpu.rs)
+  - [`crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_gpu.rs`](../../crates/zkgpu-plonky3/tests/poseidon2_merkle_commit_gpu.rs)
 - Benchmark harness:
-  - `/Users/latifkasuli/web3/zkgpu/crates/zkgpu-plonky3/benches/prover_hot_path.rs`
+  - [`crates/zkgpu-plonky3/benches/prover_hot_path.rs`](../../crates/zkgpu-plonky3/benches/prover_hot_path.rs)
 
 ## Benchmark Envelope
 

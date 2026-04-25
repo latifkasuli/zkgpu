@@ -8,4 +8,4 @@ app/src/main/jniLibs/
 └── x86_64/libzkgpu_ffi.so
 ```
 
-Use the commands in [`rust/README.md`](/Users/latifkasuli/web3/zkgpu/apps/android-harness/rust/README.md) to produce these files.
+Use the commands in [`rust/README.md`](../../../../rust/README.md) to produce these files.

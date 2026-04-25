@@ -1,6 +1,6 @@
 # Rust Build Notes For `apps/android-harness`
 
-This app expects the Rust FFI library from [`crates/zkgpu-ffi`](/Users/latifkasuli/web3/zkgpu/crates/zkgpu-ffi) to be packaged as `libzkgpu_ffi.so` under `app/src/main/jniLibs/<abi>/`.
+This app expects the Rust FFI library from [`crates/zkgpu-ffi`](../../../crates/zkgpu-ffi) to be packaged as `libzkgpu_ffi.so` under `app/src/main/jniLibs/<abi>/`.
 
 ## Targets
 
@@ -20,7 +20,7 @@ cargo install cargo-ndk
 
 ## Build From Repo Root
 
-From [`/Users/latifkasuli/web3/zkgpu`](/Users/latifkasuli/web3/zkgpu):
+From the repository root:
 
 ```bash
 cargo ndk -t arm64-v8a -t x86_64 -p 29 -o apps/android-harness/app/src/main/jniLibs build -p zkgpu-ffi --release

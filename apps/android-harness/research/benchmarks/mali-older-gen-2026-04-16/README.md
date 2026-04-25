@@ -93,7 +93,7 @@ Same narrow scope as G.1.1. Two parallel background submissions,
 separate results dirs per device:
 
 ```bash
-cd /Users/latifkasuli/web3/zkgpu/apps/android-harness
+cd "$REPO_ROOT/apps/android-harness"
 APP=app/build/outputs/apk/debug/app-debug.apk
 TESTAPK=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 TARGETS="class org.zkgpu.harness.ZkgpuInstrumentedTest#crossoverStockhamLocalTail,class org.zkgpu.harness.ZkgpuInstrumentedTest#crossoverStockhamGlobalTail"

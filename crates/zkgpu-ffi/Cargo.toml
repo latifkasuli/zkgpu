@@ -1,10 +1,12 @@
 [package]
 name = "zkgpu-ffi"
+description = "C ABI shim exposing zkgpu's validation + benchmark surface to non-Rust harnesses (Android JNI, iOS Objective-C bridge)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+publish = false
 
 [lib]
 crate-type = ["cdylib", "staticlib"]
