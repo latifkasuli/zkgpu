@@ -167,11 +167,42 @@ struct PipelineKey {
 /// the speed-opportunities doc are the first callers that will need
 /// non-default values. They will add a `_with_spec` variant of the
 /// pipeline-creation methods at that time.
+// ---------------------------------------------------------------------------
+// Design note for item #3 (`Features::IMMEDIATES`) — drift-prevention rule
+// ---------------------------------------------------------------------------
+//
+// When item #3 lands, both `PipelineSpec::immediate_size` (used in the cache
+// key below) and `wgpu::PipelineLayoutDescriptor::immediate_size` (used to
+// build the actual GPU resource) must be derived from a **single source
+// value**, not set independently from two places. Otherwise we get the
+// same drift class the foundation commit's reviewer warned about for
+// `compilation_options`: the cache could serve a pipeline whose layout was
+// compiled with a different `immediate_size` than the spec's key claims.
+//
+// Recommended shape when item #3 is implemented:
+//
+//     // Owned by the plan-build code, single source of truth.
+//     struct LayoutSpec {
+//         immediate_size: u32,
+//         param_mode: ParamMode,  // Uniform | Immediate
+//     }
+//
+//     // Construct PipelineLayoutDescriptor.immediate_size and
+//     // PipelineSpec.immediate_size both from the same `LayoutSpec` —
+//     // never inline a literal `0` or `16` at the call site.
+//
+// The cache key field below intentionally stays in `PipelineSpec` because
+// the registry needs to distinguish keyed pipelines, but the construction
+// must thread through one helper. See the speed-opportunities doc item
+// #3 implementation surface.
+// ---------------------------------------------------------------------------
+
 #[derive(Clone, Debug)]
 pub(crate) struct PipelineSpec {
     pub(crate) zero_initialize_workgroup_memory: bool,
     /// Reserved for item #3 (immediates). Read by the cache key today;
-    /// no caller sets a non-default value yet.
+    /// no caller sets a non-default value yet. **When item #3 lands,
+    /// see the drift-prevention design note above this struct.**
     #[allow(dead_code)]
     pub(crate) immediate_size: u32,
     /// Reserved for item #7 (trusted modules). Read by the cache key today;
