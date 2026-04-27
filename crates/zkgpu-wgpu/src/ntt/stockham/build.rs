@@ -93,12 +93,22 @@ impl StockhamPlan {
         );
 
         // --- Local pipeline (portable radix-4 DIF) ---
+        //
+        // Speed-opportunities item #2: opt out of the workgroup-memory
+        // zero-init that wgpu adds by default. The kernel's gather
+        // phase writes `padded_idx(0..1024)` across all 256 threads
+        // before any read; subsequent stages each fully write their
+        // destination buffer (`shmem_a` / `shmem_b`) before the next
+        // stage reads it. The 32 padding physical slots
+        // (`tile[r*33 + 32]`-style) are never read. See
+        // `crates/zkgpu-wgpu/src/kernels/portable/babybear_stockham_local_r4.wgsl`
+        // for the exact write/read pattern audit.
         let local_module = reg.get_or_create_module(
             &device.device,
             STOCKHAM_LOCAL_R4_SOURCE,
             "Stockham local R4 shader",
         );
-        let local_pipeline = reg.get_or_create_pipeline(
+        let local_pipeline = reg.get_or_create_pipeline_with_spec(
             &device.device,
             STOCKHAM_LOCAL_R4_SOURCE,
             "stockham_local_r4",
@@ -106,6 +116,10 @@ impl StockhamPlan {
             &ntt_pipeline_layout,
             &local_module,
             device.pipeline_cache.as_ref(),
+            &crate::pipeline_registry::PipelineSpec {
+                zero_initialize_workgroup_memory: false,
+                ..crate::pipeline_registry::PipelineSpec::default()
+            },
         );
 
         // --- Scale pipeline (in-place element-wise multiply) ---

@@ -167,12 +167,20 @@ struct PipelineKey {
 /// the speed-opportunities doc are the first callers that will need
 /// non-default values. They will add a `_with_spec` variant of the
 /// pipeline-creation methods at that time.
-#[allow(dead_code)] // populated by upcoming items in the perf phase
 #[derive(Clone, Debug)]
 pub(crate) struct PipelineSpec {
     pub(crate) zero_initialize_workgroup_memory: bool,
+    /// Reserved for item #3 (immediates). Read by the cache key today;
+    /// no caller sets a non-default value yet.
+    #[allow(dead_code)]
     pub(crate) immediate_size: u32,
+    /// Reserved for item #7 (trusted modules). Read by the cache key today;
+    /// no caller sets a non-default value yet.
+    #[allow(dead_code)]
     pub(crate) runtime_check_mode: RuntimeCheckMode,
+    /// Reserved for item #3 (`Features::IMMEDIATES` capability bit). Read
+    /// by the cache key today; no caller sets a non-default value yet.
+    #[allow(dead_code)]
     pub(crate) capability_bits: u64,
 }
 
@@ -263,17 +271,17 @@ impl PipelineRegistry {
             .clone()
     }
 
-    /// Get or create a compute pipeline.
+    /// Get or create a compute pipeline (default spec).
     ///
-    /// When a `cache` is provided (Vulkan only), the driver can skip shader
-    /// compilation on subsequent runs by reusing serialised microcode.
+    /// Convenience wrapper around [`Self::get_or_create_pipeline_with_spec`]
+    /// with [`PipelineSpec::default()`]. Behavior unchanged for all 14+
+    /// existing callers — the resulting cache key and compilation
+    /// options are both derived from the defaulted spec, matching
+    /// pre-foundation-commit identity.
     ///
-    /// This is the existing convenience method — uses
-    /// [`PipelineSpec::default()`] internally, so the resulting cache
-    /// key is functionally identical to the pre-foundation-commit
-    /// shape (zero-init = true, no immediates, safe module, no
-    /// capability bits). Behavior unchanged for all 14+ existing
-    /// callers.
+    /// When a `cache` is provided (Vulkan only), the driver can skip
+    /// shader compilation on subsequent runs by reusing serialised
+    /// microcode.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn get_or_create_pipeline(
         &self,
@@ -285,12 +293,58 @@ impl PipelineRegistry {
         module: &wgpu::ShaderModule,
         cache: Option<&wgpu::PipelineCache>,
     ) -> Arc<wgpu::ComputePipeline> {
-        let key = build_pipeline_key(
+        self.get_or_create_pipeline_with_spec(
+            device,
             source,
             entry_point,
             bgl_label,
+            layout,
+            module,
+            cache,
             &PipelineSpec::default(),
-        );
+        )
+    }
+
+    /// Get or create a compute pipeline with an explicit specialization.
+    ///
+    /// Both the cache key AND the `wgpu::ComputePipelineDescriptor`'s
+    /// `compilation_options` are derived from the same `spec`, so the
+    /// two cannot drift apart. Two callers passing differently-valued
+    /// specs land in distinct cache slots and produce distinctly-
+    /// compiled pipelines; two callers passing the same spec collapse
+    /// to one slot.
+    ///
+    /// Used by the speed-opportunities phase (see
+    /// `docs/research/zkgpu-wgpu-speed-opportunities.md`):
+    ///
+    /// * **Item #2** (zero-init opt-in on local Stockham + transpose
+    ///   tile kernels) — passes `zero_initialize_workgroup_memory =
+    ///   false` for kernels that fully initialize their workgroup
+    ///   memory before any read.
+    /// * Future items #3, #7 will populate `immediate_size` and
+    ///   `runtime_check_mode` respectively.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn get_or_create_pipeline_with_spec(
+        &self,
+        device: &wgpu::Device,
+        source: &'static str,
+        entry_point: &'static str,
+        bgl_label: &'static str,
+        layout: &wgpu::PipelineLayout,
+        module: &wgpu::ShaderModule,
+        cache: Option<&wgpu::PipelineCache>,
+        spec: &PipelineSpec,
+    ) -> Arc<wgpu::ComputePipeline> {
+        let key = build_pipeline_key(source, entry_point, bgl_label, spec);
+        // Derive compilation_options from the same spec the cache key
+        // sees. This is the drift-proof property: a pipeline served
+        // from the cache for `key` was compiled with options that
+        // match `spec`, because the only path to a pipeline at this
+        // key is this method.
+        let compilation_options = wgpu::PipelineCompilationOptions {
+            zero_initialize_workgroup_memory: spec.zero_initialize_workgroup_memory,
+            ..Default::default()
+        };
         let mut pipelines = self.pipelines.lock().expect("pipeline registry lock");
         pipelines
             .entry(key)
@@ -301,7 +355,7 @@ impl PipelineRegistry {
                         layout: Some(layout),
                         module,
                         entry_point: Some(entry_point),
-                        compilation_options: Default::default(),
+                        compilation_options,
                         cache,
                     }),
                 )

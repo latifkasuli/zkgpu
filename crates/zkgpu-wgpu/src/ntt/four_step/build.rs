@@ -197,7 +197,18 @@ impl FourStepPlan {
         };
         let transpose_module =
             reg.get_or_create_module(&device.device, transpose_source, transpose_label);
-        let transpose_pipeline = reg.get_or_create_pipeline(
+        // Speed-opportunities item #2: opt out of workgroup-memory
+        // zero-init. Both the 16x16 (`babybear_fourstep_transpose.wgsl`)
+        // and 32x32 (`babybear_fourstep_transpose_tiled32.wgsl`)
+        // tile variants satisfy the soundness condition:
+        // for any thread that reads `tile[r * PADDED_STRIDE + c]`,
+        // the corresponding writing thread is gated by an identical
+        // `if src_row < rows && src_col < cols` predicate (after the
+        // index transposition). Edge tiles have unwritten-but-unread
+        // slots; full tiles have every read position written.
+        // Padding columns (`tile[r * PADDED_STRIDE + (PADDED_STRIDE-1)]`)
+        // are never read.
+        let transpose_pipeline = reg.get_or_create_pipeline_with_spec(
             &device.device,
             transpose_source,
             "transpose_tiles",
@@ -205,6 +216,10 @@ impl FourStepPlan {
             &transpose_pipeline_layout,
             &transpose_module,
             device.pipeline_cache.as_ref(),
+            &crate::pipeline_registry::PipelineSpec {
+                zero_initialize_workgroup_memory: false,
+                ..crate::pipeline_registry::PipelineSpec::default()
+            },
         );
 
         // --- Scale pipeline ---
