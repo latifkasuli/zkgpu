@@ -84,6 +84,10 @@ cargo test -p zkgpu-babybear
 - [GPU Poseidon2 MMCS for Plonky3](docs/research/plonky3-poseidon2-mmcs.md)
 - [GPU Poseidon2 MMCS for OpenVM](docs/research/openvm-poseidon2-mmcs.md)
 
+### Backend engineering notes
+
+- [zkgpu-wgpu speed opportunities](docs/research/zkgpu-wgpu-speed-opportunities.md)
+
 ## License
 
 Licensed under either of:
