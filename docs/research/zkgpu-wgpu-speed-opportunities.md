@@ -41,14 +41,19 @@ That means the remaining wins are not "turn on the obvious thing" work. They are
 
 This document lists more candidates than should be worked on in one go. The intended cadence is:
 
-- **Do now (this phase):** items in the *Do now* section below — currently two items, scoped to ~1-2 weeks total. Land them, then publish a `v0.2` perf update note alongside the existing `docs/two-consumers.md` headline.
+- **Do now (this phase):** items in the *Do now* section below — currently five items, scoped to ~2-3 weeks total. Items #1-2 are independently publishable; items #3-5 cluster on the same encoder-side hot paths and should land as one batch. After items #1-2 are measured and merged, a `v0.2` perf update note can ship alongside the existing `docs/two-consumers.md` headline; items #3-5 can land in the same window or as a `v0.3` follow-on.
 - **Conditional / future:** the items in *Conditional / future* are real but should not be picked up speculatively. Each lists the concrete trigger that should justify scheduling it. Without that trigger, scheduling them ahead of demand is a higher cost than letting the published artifact compound external signal.
 
-Reading this document as a 7-item queue would commit the project to ~2-3 weeks of internal optimization before any external feedback on the recently published two-consumers note. That is the wrong cadence for this phase. Pick the *Do now* items, ship, see what bites, then revisit the *Conditional / future* tier with fresh information.
+Reading this document as a fixed queue and grinding through every item would commit the project to a long internal optimization phase before any external feedback on the recently published two-consumers note. That is still the wrong cadence. Pick the *Do now* items, ship, see what bites, then revisit the *Conditional / future* tier with fresh information.
 
 ## Pipeline cache-key correctness — blocking precondition
 
-Before any work that touches `PipelineCompilationOptions`, the `PipelineKey` in [`crates/zkgpu-wgpu/src/pipeline_registry.rs`](../../crates/zkgpu-wgpu/src/pipeline_registry.rs) must be expanded to include compilation options. Today the key is only `{source_ptr, entry_point, layout_key}`. Two specializations of the same shader (e.g. `zero_initialize_workgroup_memory = true` vs `false`, or different override constants) would collide in the cache and one would be served silently for both call sites — a correctness bug, not a performance bug. This is treated as a precondition for *Do now* item #2 below, not a parallel cleanup.
+Before any work that touches `PipelineCompilationOptions` **or** changes pipeline layouts (push-constant ranges, BGL contents), the `PipelineKey` in [`crates/zkgpu-wgpu/src/pipeline_registry.rs`](../../crates/zkgpu-wgpu/src/pipeline_registry.rs) must be expanded. Today the key is only `{source_ptr, entry_point, layout_key}` and `layout_key` is just a BGL label. Two failure modes:
+
+- Two specializations of the same shader via `compilation_options` (e.g. `zero_initialize_workgroup_memory = true` vs `false`, or different override constants) collide in the cache and one is served silently for both call sites.
+- Two pipelines with the same BGL but different push-constant ranges also collide, since `layout_key` does not capture push-constant ranges.
+
+Either case is a correctness bug, not a performance bug. This is treated as a precondition for *Do now* items #2 (`PipelineCompilationOptions`), #3 (push constants), and #4 (multi-dispatch fold — incidentally changes BGL contents in some encode sites) below — not a parallel cleanup. **Land the cache-key expansion as the first commit of this phase**, before any of those items.
 
 ## Do now
 
@@ -101,23 +106,79 @@ This stays inside the existing architecture, ships a measurable native-backend s
 
 Estimated effort: 2-3 days for the cache-key expansion plus one-kernel zero-init opt-in plus parity / regression validation.
 
+> **Cluster note for items #3-5.** The next three items all attack the same category — **encoder-side per-call CPU overhead** — and all touch the same source files (`crates/zkgpu-wgpu/src/ntt/stockham/encode.rs`, `crates/zkgpu-wgpu/src/ntt/four_step/encode.rs`, the Poseidon2 leaf/compress encode paths). They should be planned as one batch, even if each item is described separately below. The combined refactor lets each piece pay off without incremental rework.
+>
+> Why this category matters even though current headline numbers (15.07× single-matrix `fri_commit @ log_h=18` on 5090) live in kernel time: the encoder cost dominates **small `log_n` on mobile / browser**, **long prover loops with many small dispatches** (FRI fold rounds with `num_queries=40` are exactly this shape), and **integrated GPUs / browsers** where every Rust↔driver call has marshaling cost. zkgpu's existing benches don't cover small-`log_n` mobile shapes prominently, so this category is currently under-measured rather than known-unimportant.
+
+### 3. Push constants for small per-dispatch params
+
+Today every NTT and Poseidon2 stage allocates a small `param_buffer` (e.g. `(stage_idx, log_stride, n)` for R4 stages) and binds it as a uniform/storage buffer at binding 3 in the bind group. See `crates/zkgpu-wgpu/src/ntt/stockham/encode.rs` lines 41-47 (R4), 101-104 (R2), 156-159 (local), and equivalent sites in the Poseidon2 plans.
+
+`wgpu::Features::PUSH_CONSTANTS` is a native-only feature flag (Vulkan / Metal / DX12 / GL — not browser). It exposes a register-sized parameter block (typical limit 128 bytes) that flows through the command stream as direct register writes rather than via a buffer-bound binding.
+
+Concrete benefits per dispatch:
+
+- One fewer `wgpu::Buffer` allocated at plan-build time.
+- One fewer bind-group entry (the param binding goes away), reducing BGL fingerprint size.
+- No per-stage uniform-buffer-update cost.
+
+Browser builds keep the current uniform-buffer path; native builds switch to push constants. The capability gate matches the existing pattern used for `MAPPABLE_PRIMARY_BUFFERS` in `crates/zkgpu-wgpu/src/caps/profile.rs`.
+
+Implementation surface:
+
+- Detect / request `Features::PUSH_CONSTANTS` in `caps/profile.rs`.
+- Add a parallel WGSL stage variant (or `#[cfg]`-gated WGSL string) that declares the params via `var<push_constant>` instead of `@binding(3) var<uniform>`.
+- Update the encode sites to call `pass.set_push_constants(...)` instead of binding the param buffer.
+- Two pipeline variants per kernel (push-constant native + uniform-buffer browser), both routed through the `PipelineRegistry` with the expanded cache key.
+
+Estimated effort: 2 days, including one bench rerun on a native host to confirm the encoder-time win.
+
+Source: [wgpu Features (PUSH_CONSTANTS)](https://wgpu.rs/doc/wgpu/struct.Features.html), [wgpu-py backends documentation](https://wgpu-py.readthedocs.io/en/latest/backends.html), [Vulkan push constants tutorial](https://kylemayes.github.io/vulkanalia/dynamic/push_constants.html)
+
+### 4. Multi-dispatch per compute pass
+
+Today each NTT call begins **4-5+ separate compute passes** — one per R4 stage, one per R2 stage, one for the local-fused kernel, one for the scale dispatch. See the four `encoder.begin_compute_pass(...)` blocks in `crates/zkgpu-wgpu/src/ntt/stockham/encode.rs` (lines 58, 115, 170, 219). Same pattern in `four_step/encode.rs` and the Poseidon2 plans.
+
+The standard wgpu pattern is **one compute pass with multiple `dispatch_workgroups` calls inside it**, swapping bind groups via `set_bind_group` between dispatches. Per [Toji's bind-group best practices](https://toji.dev/webgpu-best-practices/bind-groups.html):
+
+> "If you need to apply multiple compute passes to the same data, chain them together in a single command encoder submission rather than reading back and re-uploading between passes."
+
+What this saves: per-pass driver overhead (each `begin_compute_pass`/`end_compute_pass` boundary is non-trivial on Vulkan and Metal). What it does **not** save: memory barriers between dispatches that read+write the same buffer (the GPU correctness invariants still need them). See [wgpu issue #5766](https://github.com/gfx-rs/wgpu/issues/5766) for confirmation that the barriers stay even when passes fold.
+
+So the gain is purely encoder/driver-side overhead reduction, not GPU-time reduction. For long prover loops with many small commits, that overhead amortizes badly today.
+
+Implementation surface:
+
+- In each `encode.rs` site, replace the multiple `{ let mut pass = encoder.begin_compute_pass(...); ... }` blocks with one outer `let mut pass = encoder.begin_compute_pass(...)`, then issue the R4 / R2 / local / scale dispatches inside it with `set_bind_group` swaps.
+- Timestamp queries currently attach to per-pass `timestamp_writes`; when folding into one pass, switch to per-dispatch `write_timestamp` calls inside the pass (requires `TIMESTAMP_QUERY_INSIDE_PASSES`, which we already detect in `caps/profile.rs:105`).
+- Stockham first, since it's the hot path; then four-step; then Poseidon2 plans.
+
+Estimated effort: 1-2 days. Pure encoder refactor, no shader changes.
+
+### 5. Bind-group reuse — pre-built at plan time
+
+Today the encode functions call `device.create_bind_group(...)` **inside the dispatch loop**, on every NTT / Poseidon2 call. See `stockham/encode.rs:28`, `:85`, `:140`, `:203` and the equivalent sites in `four_step/encode.rs` and the Poseidon2 plans. The bind-group entries are mostly stable across calls — `twiddle_buffer`, `param_buffer`, `twiddle_prime_buffer` are owned by the plan and never change between calls; only `src_buf` and `dst_buf` ping-pong, and even that is between two known buffers.
+
+The standard wgpu pattern (per [Toji's bind-group best practices](https://toji.dev/webgpu-best-practices/bind-groups.html) and the [WebGPU optimization guide](https://webgpufundamentals.org/webgpu/lessons/webgpu-optimization.html)):
+
+> "If the buffer bindings do not change between dispatches, reuse the bind group object rather than recreating it every iteration."
+> "Recreating pipelines inside a tight loop is one of the most common performance mistakes seen in early wgpu compute code. This extends naturally to bind groups."
+
+Implementation surface:
+
+- For each NTT stage, pre-build **two** bind groups at plan-build time — one for the `buf → scratch` ping-pong direction, one for the `scratch → buf` direction. Pick the right one per dispatch based on the parity of `dispatch_idx % 2`, exactly the same parity check `encode.rs` already uses.
+- Same pattern for the Poseidon2 leaf and compress plans (one bind group per fixed buffer pair, picked at encode time).
+- Pre-built bind groups own an `Arc<wgpu::BindGroup>` clone; encode-time call collapses to `pass.set_bind_group(0, &self.bind_groups[parity], &[])`.
+
+Estimated effort: 1 day. Mechanical refactor.
+
+This was previously listed as Conditional / future #3 with a "needs a microbench" gate. The external research is unambiguous enough that the gate is not worth the wait — the change is cheap, the pattern is canonical, and the cost on every NTT call is real and unmeasured-because-not-instrumented. Promote and land.
+
 ## Conditional / future
 
-These are real candidates, not a polite "no". Each one needs a concrete trigger before it should be scheduled — listed inline.
+These are real candidates, not a polite "no". Each one needs a concrete trigger before it should be scheduled — listed inline. Note: bind-group reuse (formerly conditional #3) was promoted to *Do now* item #5 once external research confirmed the pattern is canonical and the cost is real on every call.
 
-### 3. Bind group reuse / execution objects
-
-The code already caches pipelines, shader modules, and bind-group layouts, but hot encode paths still create bind groups per call:
-
-- [`crates/zkgpu-wgpu/src/ntt/stockham/encode.rs`](../../crates/zkgpu-wgpu/src/ntt/stockham/encode.rs)
-- [`crates/zkgpu-wgpu/src/ntt/four_step/encode.rs`](../../crates/zkgpu-wgpu/src/ntt/four_step/encode.rs)
-- Poseidon2 leaf / compress plans in `crates/zkgpu-wgpu/src/poseidon2/*`
-
-The shape would be an "execution object" or "prepared invocation" API for repeated prover loops with stable buffer identities.
-
-**Trigger:** a microbench (or a real prover-loop profile) showing bind-group creation is a meaningful fraction of small-NTT or per-Poseidon2-call wall time on at least one platform. Expected to matter more on browser / mobile / integrated than on large desktop kernels — but currently no measurement quantifies the share. Without that share, ranking it is guesswork.
-
-### 4. Planner-selected workgroup size via shader overrides
+### 6. Planner-selected workgroup size via shader overrides
 
 Bigger refactor than it first appears.
 
@@ -127,13 +188,13 @@ Expected upside: 5-15% class improvement, not a structural 2x.
 
 **Trigger:** a measured per-platform cliff that 128-thread or 64-thread workgroups would unblock — e.g. an Adreno or Mali bench showing occupancy / register-pressure data that argues for a smaller workgroup. Without that measurement, the planner refactor cost is too high relative to the speculative gain.
 
-### 5. BN254 / MSM portable WGSL baseline
+### 7. BN254 / MSM portable WGSL baseline
 
 Strategically important, but this is a new workload family — not a `zkgpu-wgpu` cleanup. The right pattern is the one already used for Goldilocks: portable WGSL first, optional native fast paths later if the measurements justify them.
 
 **Trigger:** demand for an MSM-using consumer adapter (e.g. a Halo2 or Groth16 acceleration ask), or a strategic decision to expand into pairing-based stacks. Should not be scheduled as "next zkgpu-wgpu speed work."
 
-### 6. Subgroup variants for specific kernels
+### 8. Subgroup variants for specific kernels
 
 `CapabilityProfile` already detects subgroup support and requests `SUBGROUP` when available. `wgpu` also exposes `SUBGROUP_BARRIER` and native-only `SHADER_INT64`.
 
@@ -143,11 +204,11 @@ The measured BabyBear NTT work already closed most of the practical CUDA gap wit
 
 **Trigger:** a specific hot kernel where profiling shows warp/subgroup-shuffle would unblock progress — likely candidates are MSM bucket reductions or BN254 limb arithmetic, neither of which exist yet. Not a candidate for blanket rewrite of existing NTT kernels.
 
-### 7. SPIR-V / Metal passthrough
+### 9. SPIR-V / Metal passthrough
 
 Last.
 
-**Trigger:** items 1-2 above are landed and measured, items 3-4 have been triggered and landed, and there is still meaningful performance on the table that the WGSL-via-`wgpu` path cannot reach. Native shader ingestion is the highest-complexity option in this list and should not be the first response to any speed gap.
+**Trigger:** items 1-5 (the *Do now* tier) are landed and measured, items 6-8 (the remaining Conditional / future tier) have been triggered and landed, and there is still meaningful performance on the table that the WGSL-via-`wgpu` path cannot reach. Native shader ingestion is the highest-complexity option in this list and should not be the first response to any speed gap.
 
 ## Constraints to keep
 
@@ -161,16 +222,29 @@ These should remain design constraints, not just current preferences:
 
 ## Practical stop/go rule
 
-For **this phase** (the *Do now* tier):
+For **this phase** (the *Do now* tier, ~2-3 weeks total):
 
-- Time-box to ~1-2 weeks total across both items.
-- Land item 1 (mixed-height GPU injection) first because the cost model is concrete and the result is independently publishable as a `v0.2` perf row.
-- Land item 2 (`PipelineCompilationOptions` with cache-key expansion + one-kernel zero-init opt-in) second. Stop after the one-kernel opt-in unless a measured signal from item 1's bench rerun says more is justified.
-- Publish a small `v0.2` perf update note alongside the published two-consumers headline. Do not bundle a multi-week internal optimization phase with no external touchpoint.
+Land in the following order:
+
+1. **Cache-key expansion first** (~half-day). The blocking precondition. Reflect compilation options + push-constant ranges in the `PipelineKey`. No behavior change yet, but unblocks items #2-4 safely.
+2. **GPU-resident mixed-height injection** (~3-5 days). Algorithm-level, biggest standalone gain, independently publishable. Run targeted benches on at least one NVIDIA host post-fix.
+3. **`PipelineCompilationOptions` zero-init opt-in on one kernel** (~1-2 days). Foundation now safe to opt into; narrow scope.
+
+→ **First publish gate:** a small `v0.2` perf update note here, alongside the existing `docs/two-consumers.md` headline. Items #1 and #2 above are both bench-publishable; the encoder cluster (next) is bench-publishable as a follow-on.
+
+4. **Encoder-side cluster** (~3-5 days, items #3 push constants + #4 multi-dispatch fold + #5 bind-group reuse). All three touch the same encode.rs sites; plan as one batch refactor. Run a small encoder-time microbench at small `log_n` (e.g. log_n ∈ {12, 14, 16}) to capture the per-call CPU overhead reduction — this is where the wins live, not at the existing log_h=18 headline.
+
+→ **Second publish gate:** `v0.3` perf update note, focused on small-`log_n` and prover-loop scenarios where the cluster shows up.
 
 For **future phases** (the *Conditional / future* tier):
 
 - Schedule each item only when its listed trigger has fired.
 - Reorder if a trigger fires for a lower-listed item before a higher-listed one — this list is by current likelihood of being triggered, not a fixed queue.
 
-Constraint that overrides everything: preserve the strongest current property of `zkgpu-wgpu` — one portable WGSL codebase that gets faster by making better planning decisions, not by fragmenting into per-backend products.
+**Stop rules within this phase:**
+
+- After the cache-key expansion (step 1), if any landed parity test regresses, stop and investigate before proceeding. The cache key is correctness-critical.
+- After mixed-height injection (step 2), if NVIDIA `commit_open_40q` doesn't show a clear ratio improvement on the mixed-height shape, stop and check the cost model — something else is dominating.
+- After the encoder cluster (step 4), if small-`log_n` microbench numbers don't show measurable encoder-time reduction, the cluster's impact may have been overestimated. Don't keep grinding. Publish what's true and move on.
+
+Constraint that overrides everything: preserve the strongest current property of `zkgpu-wgpu` — one portable WGSL codebase that gets faster by making better planning decisions, not by fragmenting into per-backend products. Native-only items (#3 push constants, plus the existing #2 zero-init opt-in) must be capability-gated, not unconditional.
