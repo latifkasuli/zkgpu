@@ -478,13 +478,24 @@ mod tests {
 
     #[test]
     fn spec_default_values_match_wgpu_defaults() {
-        // Sanity check: the defaulted spec should produce values that
-        // match wgpu's `PipelineCompilationOptions::default()` and the
-        // shape of "no immediates, safe module, no capability bits".
-        // If wgpu's defaults shift in a future version, this test
-        // alerts us to update the default.
+        // The defaulted PipelineSpec must agree with the corresponding
+        // fields of `wgpu::PipelineCompilationOptions::default()`. If
+        // wgpu's defaults shift in a future version, this test alerts
+        // us to update the spec default — without an actual wgpu
+        // comparison, the test would just be re-asserting our literal
+        // values, which is useless for drift detection (P3 review of
+        // the foundation commit).
         let spec = PipelineSpec::default();
-        assert!(spec.zero_initialize_workgroup_memory);
+        let wgpu_default = wgpu::PipelineCompilationOptions::default();
+        assert_eq!(
+            spec.zero_initialize_workgroup_memory,
+            wgpu_default.zero_initialize_workgroup_memory,
+            "PipelineSpec::default().zero_initialize_workgroup_memory \
+             must match wgpu::PipelineCompilationOptions::default()"
+        );
+
+        // Remaining fields are zkgpu-side conventions, not wgpu-side
+        // defaults — keep them as literal checks.
         assert_eq!(spec.immediate_size, 0);
         assert_eq!(spec.runtime_check_mode, RuntimeCheckMode::Safe);
         assert_eq!(spec.capability_bits, 0);
