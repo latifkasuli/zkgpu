@@ -204,6 +204,16 @@ This was previously listed as Conditional / future #3 with a "needs a microbench
 
 ### 6. Poseidon2 constants migration: storage → uniform / generated module constants
 
+> **Status (2026-04-28, pilot landed + benched).** The safer **Uniform** path is implemented as a pilot on the standalone `WgpuBabyBearPoseidon2Plan` only, opt-in via `Poseidon2ConstantsSource::Uniform` (default stays `Storage`). A/B benched on three hosts:
+>
+> | Host | Δ at batch=64 | Δ at 4096 | Δ at 65536 |
+> |---|---:|---:|---:|
+> | M4 Pro / Metal | +3.9% | +2.6% | +2.2% |
+> | RTX 4090 / Vulkan | +0.5% | −0.9% | +0.4% |
+> | RTX 5090 / Vulkan | **−4.1%** | **−5.0%** | −2.1% |
+>
+> Metal regresses by 2-4%, the 4090 is null, only the 5090 shows a clean win. **The Metal-regression gate criterion fails, so the production kernels (`merkle_leaf`, `merkle_leaf_w16`, `merkle_compress`, `plonky3_w16`, `plonky3_w24`) keep the Storage path.** The Uniform pilot stays accessible behind the explicit constructor for callers who want to opt in on 5090-class hardware. The faster generated-module-constants variant remains unimplemented; if it's pursued later, it's a different mechanism (WGSL `const` array inlined at plan-build) and gets its own A/B against this baseline. Full verdict + reproducer: `research/benchmarks/poseidon2-uniform-pilot-2026-04-28/verdict.md` (gitignored).
+
 Today the Poseidon2 round constants are uploaded as **storage buffers** and read via `var<storage, read>` at shader binding 2. See:
 
 ```text
