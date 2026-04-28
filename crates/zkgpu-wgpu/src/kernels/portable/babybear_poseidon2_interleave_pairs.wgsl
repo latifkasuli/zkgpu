@@ -15,10 +15,24 @@
 //
 // Workgroup size is 64 — small enough that very small N (e.g. N = 1,
 // 2, 4 at the deepest injection levels) doesn't waste invocations,
-// large enough that big N (e.g. N = 2^16+ on the tallest matrices)
+// large enough that big N (e.g. N = 2^20+ on the tallest matrices)
 // dispatches efficiently on every backend we target.
+//
+// Dispatch shape uses the standard 2D-fold pattern from the rest of
+// the backend (see `plan_linear_dispatch` in `dispatch.rs`): when N
+// requires more workgroups than fit in a single x-dimension dispatch
+// (typical limit 65,535), they wrap into the y dimension. The kernel
+// reconstructs the flat index as
+//   i = gid.x + gid.y * groups_per_row * WORKGROUP_SIZE
+// matching the convention used by the Stockham R2/R4, four-step leaf,
+// and tile-transpose kernels. Without 2D folding, the largest mixed-
+// height shape this engine can handle is bounded by
+// (max_compute_workgroups_per_dimension * WORKGROUP_SIZE) digests
+// per injection level; with folding, the only remaining bound is the
+// `max_compute_workgroups_per_dimension^2` total-grid limit.
 
 const DIGEST_LEN: u32 = 8u;
+const WORKGROUP_SIZE: u32 = 64u;
 
 @group(0) @binding(0) var<storage, read>       left: array<u32>;
 @group(0) @binding(1) var<storage, read>       right: array<u32>;
@@ -28,9 +42,11 @@ struct InterleaveParams {
     /// Number of digests per input buffer. The output buffer holds 2*n
     /// digests = 2*n*DIGEST_LEN u32s.
     n: u32,
+    /// Number of workgroups laid out across the x dimension before
+    /// wrapping into y. Mirrors `LinearDispatch::groups_per_row`.
+    groups_per_row: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 }
 
 @group(0) @binding(3) var<uniform> params: InterleaveParams;
@@ -39,7 +55,9 @@ struct InterleaveParams {
 fn interleave_pairs(
     @builtin(global_invocation_id) gid: vec3<u32>,
 ) {
-    let i = gid.x;
+    // 2D-folded thread index reconstruction. For dispatches that fit
+    // in one x-row (`gid.y == 0`), this collapses to `i = gid.x`.
+    let i = gid.x + gid.y * params.groups_per_row * WORKGROUP_SIZE;
     if i >= params.n {
         return;
     }

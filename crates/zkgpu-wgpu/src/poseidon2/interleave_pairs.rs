@@ -21,6 +21,7 @@ use zkgpu_core::{GpuBuffer, ZkGpuError};
 
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
+use crate::dispatch::{plan_linear_dispatch, LinearDispatch};
 
 const INTERLEAVE_WGSL: &str =
     include_str!("../kernels/portable/babybear_poseidon2_interleave_pairs.wgsl");
@@ -35,9 +36,12 @@ const DIGEST_LEN: usize = 8;
 struct ParamsUniform {
     /// Number of digests per input buffer (`left.len() / DIGEST_LEN`).
     n: u32,
+    /// 2D dispatch fold: number of workgroups across the x dimension
+    /// before wrapping into y. Sourced from
+    /// [`crate::dispatch::LinearDispatch::groups_per_row`].
+    groups_per_row: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 }
 
 /// GPU plan that interleaves two N-digest buffers into a 2N-digest
@@ -184,25 +188,27 @@ impl WgpuPoseidon2InterleavePairsPlan {
             )));
         }
 
-        // Sanity-check we don't exceed the per-dimension dispatch limit.
-        // The deepest practical injection level has at most h_max / 2
-        // pairs; for h_max = 2^27 (max BabyBear log_n) and
-        // WORKGROUP_SIZE = 64 that's 2^21 / 64 = 32768 workgroups, well
-        // under any backend's per-dimension limit. The check below
-        // catches future shape changes that would push above it.
+        // 2D-folded dispatch via the shared `plan_linear_dispatch`
+        // helper. The previous flat 1D dispatch worked at small `n`
+        // but became a hard ceiling at large mixed-height shapes:
+        // with the typical 65,535 per-dimension limit and
+        // WORKGROUP_SIZE = 64, an injection level with `n = 2^22`
+        // digests already needs 65,536 workgroups, so a tallest
+        // matrix at `h_max = 2^23` with an injected group at
+        // `h_max/2` would have failed before dispatch. With 2D
+        // folding the only remaining bound is
+        // `max_compute_workgroups_per_dimension^2` (≈ 2^32 total
+        // workgroups on most backends), well above any reachable
+        // BabyBear shape.
         let max_wg = device.caps.max_compute_workgroups_per_dimension;
-        let groups = (n + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE;
-        if groups > max_wg {
-            return Err(ZkGpuError::InvalidNttSize(format!(
-                "interleave dispatch groups {groups} exceeds per-dimension limit {max_wg}",
-            )));
-        }
+        let dispatch: LinearDispatch =
+            plan_linear_dispatch(n, WORKGROUP_SIZE, max_wg)?;
 
         let uniform = ParamsUniform {
             n,
+            groups_per_row: dispatch.groups_per_row,
             _pad0: 0,
             _pad1: 0,
-            _pad2: 0,
         };
         device.raw_queue().write_buffer(
             &self.params_uniform,
@@ -249,7 +255,7 @@ impl WgpuPoseidon2InterleavePairsPlan {
             );
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(groups, 1, 1);
+            pass.dispatch_workgroups(dispatch.x, dispatch.y, 1);
         }
         device.raw_queue().submit(Some(encoder.finish()));
 
