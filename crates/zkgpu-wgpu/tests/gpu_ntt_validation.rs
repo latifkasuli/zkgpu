@@ -611,6 +611,65 @@ fn profiled_forward_has_no_scale_span() {
     }
 }
 
+// Regression lock for Gate 2 item #4 (P2): the v0.3 fold collapsed every
+// global-stage timestamp span into a single outer-pass span, so the
+// per-stage labels in `gpu_stage_ns` reported stale durations. The fix
+// (PerPass mode for profiled execution) restores 1:1 dispatch-to-pass
+// mapping. The earlier profiled tests at `log_n = 10` don't exercise the
+// multi-global-R4 case that triggered the bug — at small log_n the plan
+// often has zero or one global stage. log_n = 14 forces multiple R4
+// global stages, locking the regression.
+#[test]
+fn profiled_forward_log14_has_multiple_r4_spans() {
+    let device = init_device();
+    let n = 1 << 14;
+    let data: Vec<BabyBear> = (0..n as u32).map(BabyBear::new).collect();
+
+    let mut plan =
+        WgpuNttPlan::new(&device, 14, NttDirection::Forward).expect("forward plan failed");
+    let mut buf = device.upload(&data).expect("upload failed");
+
+    let timings = plan
+        .execute_kernels_profiled(&device, &mut buf)
+        .expect("profiled execution failed");
+
+    // Skip silently if the device doesn't support GPU timestamps —
+    // the profiler is None on those backends.
+    let Some(t) = timings else {
+        return;
+    };
+
+    let expected_dispatches = plan.num_dispatches() as usize;
+    assert_eq!(
+        t.gpu_stage_ns.len(),
+        expected_dispatches,
+        "profiled span count should match num_dispatches() — fold regression \
+         would collapse to fewer spans"
+    );
+
+    let r4_span_count = t
+        .gpu_stage_ns
+        .iter()
+        .filter(|s| s.label.starts_with("r4 stages"))
+        .count();
+    assert!(
+        r4_span_count >= 2,
+        "log_n=14 forward should produce at least 2 R4-global-stage spans, \
+         got {r4_span_count}; spans={:?}",
+        t.gpu_stage_ns.iter().map(|s| &s.label).collect::<Vec<_>>(),
+    );
+
+    // Every span should have a non-zero label and a sensible duration
+    // (or zero if the device skipped that span; we just check labels
+    // are populated, not durations, since GPU clocks vary).
+    for span in &t.gpu_stage_ns {
+        assert!(
+            !span.label.is_empty(),
+            "every profiled span should have a non-empty label"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Local kernel variant: portable R4 DIF (forced regardless of device caps)
 // ---------------------------------------------------------------------------
