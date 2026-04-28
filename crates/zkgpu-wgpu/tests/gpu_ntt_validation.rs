@@ -617,33 +617,28 @@ fn profiled_forward_has_no_scale_span() {
 // (PerPass mode for profiled execution) restores 1:1 dispatch-to-pass
 // mapping. The earlier profiled tests at `log_n = 10` don't exercise
 // the multi-global-R4 case that triggered the bug — at small log_n the
-// plan often has zero or one global stage. log_n = 14 forces multiple
+// plan often has zero or one global stage. log_n = 18 forces multiple
 // R4 global stages, locking the regression.
 //
 // Two-tier assertion shape (post second-reviewer feedback on the v1 of
-// this test):
+// this test, which only checked span count + labels and so didn't
+// actually catch the bug):
 //
 // 1. **Span count + labels** — the cheap structural check. Both the
 //    healthy and the buggy paths produce labelled spans of the right
-//    cardinality, so this alone doesn't catch the bug, but it catches
-//    a *different* class of regression (label-formatting drift,
-//    num_dispatches mismatch).
+//    cardinality, so this alone doesn't catch the regression, but it
+//    catches a *different* class (label-formatting drift,
+//    num_dispatches mismatch). Runs on every backend.
 //
-// 2. **Non-zero R4 durations across attempts** — the actual fold-
-//    regression lock. Under the buggy fold, only one timestamp pair
-//    fires (the outer pass's), so at most one R4 span reports a
-//    non-zero duration; the others read undefined-resolved-as-zero.
-//    Under the healthy PerPass path each R4 dispatch fires its own
-//    pair, so ≥ 2 R4 spans should be non-zero.
-//
-//    Apple Silicon's Metal backend has documented flakiness on
-//    `ComputePassTimestampWrites` — under load some passes silently
-//    fail to write their timestamps, producing the same all-zero
-//    pattern as the regression. To distinguish: retry up to
-//    `MAX_ATTEMPTS` times. The healthy path will produce ≥ 2 non-zero
-//    R4 spans on at least one attempt (Metal's flake rate is well
-//    under 50% in practice). The bug path is deterministic — every
-//    attempt produces ≤ 1 non-zero R4 span.
+// 2. **Non-zero R4 durations** — the actual fold-regression lock.
+//    Under the buggy fold, only the outer pass's timestamp pair
+//    fires, so at most one R4 span reports a non-zero duration; the
+//    others read undefined-resolved-as-zero. Under the healthy
+//    PerPass path each R4 dispatch fires its own pair, so ≥ 2 R4
+//    spans should be non-zero. The bug is deterministic; we retry
+//    up to `MAX_ATTEMPTS` times only to absorb transient noise on
+//    timestamp-flaky backends, and skip the duration check entirely
+//    on Metal (see carve-out below).
 #[test]
 fn profiled_forward_log18_has_multiple_r4_spans() {
     // log_n=18: each R4 dispatch processes ~256k field elements, well
