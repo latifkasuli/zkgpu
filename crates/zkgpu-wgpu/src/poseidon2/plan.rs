@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use zkgpu_babybear::BabyBear;
-use zkgpu_core::{GpuBuffer, GpuDevice, ZkGpuError};
+use zkgpu_core::{GpuBuffer, GpuDevice, GpuField, ZkGpuError};
 use zkgpu_poseidon2::{Poseidon2Params, WIDTH};
 
 use crate::async_util;
@@ -13,10 +13,44 @@ use crate::dispatch::{plan_linear_dispatch, LinearDispatch};
 
 const POSEIDON2_WGSL: &str =
     include_str!("../kernels/portable/babybear_poseidon2.wgsl");
+const POSEIDON2_UNIFORM_WGSL: &str =
+    include_str!("../kernels/portable/babybear_poseidon2_uniform.wgsl");
 
 const POSEIDON2_BGL_LABEL: &str = "BabyBear Poseidon2 BGL";
+const POSEIDON2_UNIFORM_BGL_LABEL: &str = "BabyBear Poseidon2 Uniform BGL";
 const POSEIDON2_ENTRY: &str = "poseidon2_permute";
 const WORKGROUP_SIZE: u32 = 64;
+
+/// How Poseidon2 round constants reach the kernel.
+///
+/// Item #6 of `docs/research/zkgpu-wgpu-speed-opportunities.md` (Gate 2,
+/// safer portable path). The two variants execute the same Poseidon2
+/// algorithm and must produce bit-identical output — the only
+/// difference is the binding type used for the round constants and
+/// internal diagonal.
+///
+/// On Apple Silicon (Metal `constant` address space) and discrete GPUs
+/// (Vulkan/SPIR-V `Uniform` storage class → cmem on NVIDIA) the
+/// `Uniform` variant routes constants through dedicated constant-cache
+/// hardware, which serves the broadcast access pattern (every thread
+/// in a warp reads the same constant index at the same time) more
+/// efficiently than general storage-buffer reads. Whether that
+/// translates to a measurable wall-time win depends on the device
+/// and the size of the rest of the working set; see the pilot bench
+/// in `benches/poseidon2_constants_source.rs`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Poseidon2ConstantsSource {
+    /// Three `var<storage, read>` arrays — `external_constants`,
+    /// `internal_constants`, `internal_diagonal`. The shipping default;
+    /// every existing caller uses this implicitly.
+    #[default]
+    Storage,
+    /// One `var<uniform>` struct holding all three vectors packed as
+    /// `array<vec4<u32>, _>` (the canonical WGSL way to avoid 4×
+    /// padding waste in std140-like uniform layout). Pilot scope as
+    /// of this commit: standalone `WgpuBabyBearPoseidon2Plan` only.
+    Uniform,
+}
 
 /// Uniform layout mirrors the `Poseidon2Params` WGSL struct (4 × u32).
 #[repr(C)]
@@ -26,6 +60,85 @@ struct ParamsUniform {
     rounds_f_half: u32,
     rounds_p: u32,
     row_stride: u32,
+}
+
+/// Packed-uniform layout for `Poseidon2ConstantsSource::Uniform`.
+/// Mirrors the `Poseidon2W16ConstantsUniform` struct in
+/// `babybear_poseidon2_uniform.wgsl` exactly:
+///
+/// * `external` — 32 × vec4<u32> = 128 u32 = 8 rounds × 16 width
+/// * `internal` —  8 × vec4<u32> ≥ 32 partial rounds (BabyBear
+///                 standard uses 13; trailing slots are zero-padded
+///                 and never read)
+/// * `diagonal` —  4 × vec4<u32> = 16 diagonal slots
+///
+/// Total: 44 × 16 B = 704 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ConstantsUniformW16 {
+    external: [[u32; 4]; 32],
+    internal: [[u32; 4]; 8],
+    diagonal: [[u32; 4]; 4],
+}
+
+impl ConstantsUniformW16 {
+    fn pack(
+        external_flat: &[BabyBear],
+        internal: &[BabyBear],
+        diagonal: &[BabyBear],
+    ) -> Result<Self, ZkGpuError> {
+        if external_flat.len() > 32 * 4 {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "Poseidon2 external_constants exceeds uniform layout: \
+                 {} > 128 (8 rounds × 16 width)",
+                external_flat.len(),
+            )));
+        }
+        if internal.len() > 8 * 4 {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "Poseidon2 internal_constants exceeds uniform layout: \
+                 {} > 32 partial rounds",
+                internal.len(),
+            )));
+        }
+        if diagonal.len() > 4 * 4 {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "Poseidon2 internal_diagonal exceeds uniform layout: \
+                 {} > 16 (W16 width)",
+                diagonal.len(),
+            )));
+        }
+        let mut u = Self {
+            external: [[0u32; 4]; 32],
+            internal: [[0u32; 4]; 8],
+            diagonal: [[0u32; 4]; 4],
+        };
+        for (i, v) in external_flat.iter().enumerate() {
+            u.external[i / 4][i % 4] = v.to_repr();
+        }
+        for (i, v) in internal.iter().enumerate() {
+            u.internal[i / 4][i % 4] = v.to_repr();
+        }
+        for (i, v) in diagonal.iter().enumerate() {
+            u.diagonal[i / 4][i % 4] = v.to_repr();
+        }
+        Ok(u)
+    }
+}
+
+/// Internal binding state. Storage variant holds the three storage
+/// buffers separately (today's path); Uniform variant holds a single
+/// packed uniform buffer. The variant is fixed at plan construction
+/// and drives both BGL choice and bind-group population in `encode`.
+enum ConstantsBindings {
+    Storage {
+        external: WgpuBuffer<BabyBear>,
+        internal: WgpuBuffer<BabyBear>,
+        diagonal: WgpuBuffer<BabyBear>,
+    },
+    Uniform {
+        packed: wgpu::Buffer,
+    },
 }
 
 /// GPU Poseidon2 permutation plan for BabyBear at width-16.
@@ -48,18 +161,9 @@ pub struct WgpuBabyBearPoseidon2Plan {
     rounds_f_half: u32,
     rounds_p: u32,
 
-    /// Flattened external-round constants:
-    /// `external_constants[round * WIDTH + slot]`. Length
-    /// `2 * rounds_f_half * WIDTH`.
-    external_constants_buf: WgpuBuffer<BabyBear>,
-
-    /// Internal-round constants, one per internal round. Length
-    /// `rounds_p`.
-    internal_constants_buf: WgpuBuffer<BabyBear>,
-
-    /// Internal-layer diagonal `D = diag(d_0..d_{WIDTH-1})`. Length
-    /// [`WIDTH`].
-    internal_diagonal_buf: WgpuBuffer<BabyBear>,
+    /// Round constants binding state — either three storage buffers
+    /// (today's default) or one packed uniform buffer (item #6 pilot).
+    constants: ConstantsBindings,
 
     /// Uniform holding `(num_permutations, rounds_f_half, rounds_p,
     /// row_stride)`. Rewritten per `execute` call since
@@ -95,6 +199,26 @@ impl WgpuBabyBearPoseidon2Plan {
     pub fn new(
         device: &WgpuDevice,
         params: Poseidon2Params<BabyBear, WIDTH>,
+    ) -> Result<Self, ZkGpuError> {
+        Self::new_with_constants_source(
+            device,
+            params,
+            Poseidon2ConstantsSource::default(),
+        )
+    }
+
+    /// Build a plan with an explicit choice of round-constant binding
+    /// strategy. See [`Poseidon2ConstantsSource`] for the rationale and
+    /// the pilot scope. Default behavior matches [`Self::new`].
+    ///
+    /// The constructed plan is functionally interchangeable with one
+    /// built via [`Self::new`] — same input/output contract, same
+    /// bit-identical output for a given input. Only the GPU-side
+    /// memory access path for the round constants differs.
+    pub fn new_with_constants_source(
+        device: &WgpuDevice,
+        params: Poseidon2Params<BabyBear, WIDTH>,
+        constants_source: Poseidon2ConstantsSource,
     ) -> Result<Self, ZkGpuError> {
         // Phase F.1 post-review: reject unsupported alpha up front.
         // The shader's `sbox7` fn is four multiplies hardcoded to
@@ -136,20 +260,37 @@ impl WgpuBabyBearPoseidon2Plan {
             )));
         }
 
-        // --- Flatten + upload constants ---------------------------------
+        // --- Flatten constants (shape-validated above) ------------------
         let mut external_flat =
             Vec::with_capacity(expected_external_rows * WIDTH);
         for row in &params.external_constants {
             external_flat.extend_from_slice(row);
         }
-        let external_constants_buf =
-            device.upload::<BabyBear>(&external_flat)?;
-        let internal_constants_buf =
-            device.upload::<BabyBear>(&params.internal_constants)?;
-        let internal_diagonal_buf =
-            device.upload::<BabyBear>(&params.internal_diagonal)?;
 
-        // --- Uniform (zeroed at construction; filled per-execute) -------
+        // --- Build constants binding (variant-specific) -----------------
+        let constants = match constants_source {
+            Poseidon2ConstantsSource::Storage => ConstantsBindings::Storage {
+                external: device.upload::<BabyBear>(&external_flat)?,
+                internal: device.upload::<BabyBear>(&params.internal_constants)?,
+                diagonal: device.upload::<BabyBear>(&params.internal_diagonal)?,
+            },
+            Poseidon2ConstantsSource::Uniform => {
+                let packed = ConstantsUniformW16::pack(
+                    &external_flat,
+                    &params.internal_constants,
+                    &params.internal_diagonal,
+                )?;
+                ConstantsBindings::Uniform {
+                    packed: create_uniform(
+                        device.raw_device(),
+                        &packed,
+                        "babybear poseidon2 constants uniform",
+                    ),
+                }
+            }
+        };
+
+        // --- Params uniform (zeroed at construction; filled per-execute) -
         let params_uniform = create_uniform(
             device.raw_device(),
             &ParamsUniform {
@@ -161,28 +302,69 @@ impl WgpuBabyBearPoseidon2Plan {
             "babybear poseidon2 params uniform",
         );
 
-        // --- Pipeline + BGL ---------------------------------------------
+        // --- Pipeline + BGL (variant-specific) --------------------------
+        //
+        // Pipeline cache identity: the two variants use different WGSL
+        // sources (different `&'static str` pointer → different
+        // `SourceId::Static`) and different BGL labels, so they end up
+        // as separate cache entries naturally — no manual cache-key
+        // discrimination needed beyond what the foundation commit
+        // already wired up.
         let registry = device.pipeline_registry();
+        let (wgsl_src, bgl_label, module_label, bgl_entries) =
+            match constants_source {
+                Poseidon2ConstantsSource::Storage => (
+                    POSEIDON2_WGSL,
+                    POSEIDON2_BGL_LABEL,
+                    "babybear_poseidon2",
+                    vec![
+                        // 0: state (read_write)
+                        bgl_storage_entry(0, false),
+                        // 1: external_constants (read)
+                        bgl_storage_entry(1, true),
+                        // 2: internal_constants (read)
+                        bgl_storage_entry(2, true),
+                        // 3: internal_diagonal (read)
+                        bgl_storage_entry(3, true),
+                        // 4: params (uniform)
+                        bgl_uniform_entry(4),
+                    ],
+                ),
+                Poseidon2ConstantsSource::Uniform => (
+                    POSEIDON2_UNIFORM_WGSL,
+                    POSEIDON2_UNIFORM_BGL_LABEL,
+                    "babybear_poseidon2_uniform",
+                    vec![
+                        // 0: state (read_write)
+                        bgl_storage_entry(0, false),
+                        // 1: packed constants (uniform)
+                        bgl_uniform_entry(1),
+                        // 2: params (uniform)
+                        bgl_uniform_entry(2),
+                    ],
+                ),
+            };
+
+        // Wrap pipeline construction in a validation scope so any
+        // shader-compile / BGL / pipeline-layout error surfaces as a
+        // structured `ZkGpuError::GpuValidation` rather than a silent
+        // no-op pipeline. This caught a real failure class during
+        // item #6 development: the Uniform-variant WGSL initially
+        // named struct fields `external` and `internal`, both
+        // reserved keywords in WGSL — Naga rejected the module, wgpu
+        // returned a tombstone pipeline, and the only symptom was
+        // GPU output being all zeros. Keep the scope.
+        let scope = device.push_validation_scope();
+
         let module = registry.get_or_create_module(
             device.raw_device(),
-            POSEIDON2_WGSL,
-            "babybear_poseidon2",
+            wgsl_src,
+            module_label,
         );
         let bgl = registry.get_or_create_bgl(
             device.raw_device(),
-            POSEIDON2_BGL_LABEL,
-            &[
-                // 0: state (read_write)
-                bgl_storage_entry(0, false),
-                // 1: external_constants (read)
-                bgl_storage_entry(1, true),
-                // 2: internal_constants (read)
-                bgl_storage_entry(2, true),
-                // 3: internal_diagonal (read)
-                bgl_storage_entry(3, true),
-                // 4: params (uniform)
-                bgl_uniform_entry(4),
-            ],
+            bgl_label,
+            &bgl_entries,
         );
         let layout =
             device
@@ -194,20 +376,20 @@ impl WgpuBabyBearPoseidon2Plan {
                 });
         let pipeline = registry.get_or_create_pipeline(
             device.raw_device(),
-            POSEIDON2_WGSL,
+            wgsl_src,
             POSEIDON2_ENTRY,
-            POSEIDON2_BGL_LABEL,
+            bgl_label,
             &layout,
             &module,
             None,
         );
 
+        device.pop_validation_scope(scope, "Poseidon2 plan build")?;
+
         Ok(Self {
             rounds_f_half: params.rounds_f_half as u32,
             rounds_p: params.rounds_p as u32,
-            external_constants_buf,
-            internal_constants_buf,
-            internal_diagonal_buf,
+            constants,
             params_uniform,
             bgl,
             pipeline,
@@ -320,42 +502,54 @@ impl WgpuBabyBearPoseidon2Plan {
             bytemuck::bytes_of(&params),
         );
 
-        // --- Bind group -----------------------------------------------
+        // --- Bind group (variant-specific layout) ---------------------
+        let entries: Vec<wgpu::BindGroupEntry> = match &self.constants {
+            ConstantsBindings::Storage {
+                external,
+                internal,
+                diagonal,
+            } => vec![
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buf.inner.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: external.inner.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: internal.inner.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: diagonal.inner.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.params_uniform.as_entire_binding(),
+                },
+            ],
+            ConstantsBindings::Uniform { packed } => vec![
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buf.inner.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: packed.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.params_uniform.as_entire_binding(),
+                },
+            ],
+        };
         let bind_group = device.raw_device().create_bind_group(
             &wgpu::BindGroupDescriptor {
                 label: Some("babybear poseidon2 bg"),
                 layout: &self.bgl,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: buf.inner.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: self
-                            .external_constants_buf
-                            .inner
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: self
-                            .internal_constants_buf
-                            .inner
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: self
-                            .internal_diagonal_buf
-                            .inner
-                            .as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: self.params_uniform.as_entire_binding(),
-                    },
-                ],
+                entries: &entries,
             },
         );
 
@@ -709,5 +903,135 @@ mod tests {
         let out2 = buf2.read_to_vec_blocking().unwrap();
 
         assert_eq!(out1, out2, "Poseidon2 must be deterministic across runs");
+    }
+
+    // -----------------------------------------------------------------------
+    // Item #6 pilot: Poseidon2ConstantsSource::Uniform parity tests.
+    //
+    // These mirror the Storage-path tests above but exercise the new
+    // uniform-bound kernel. The acceptance criterion is bit-identical
+    // output to the Storage path on the pinned regression vector and on
+    // a multi-input batch — anything else means the WGSL or pack/upload
+    // logic drifted.
+    // -----------------------------------------------------------------------
+
+    /// Uniform path: regression-vector bit-parity. Locks the kernel
+    /// against any drift in the WGSL `vec4`-lane unpack vs the Rust
+    /// `pack` helper.
+    #[test]
+    fn poseidon2_uniform_gpu_matches_cpu_regression_state_0001() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let params = Poseidon2Params::<BabyBear, WIDTH>::babybear_default();
+        let cpu = Poseidon2::new(params.clone());
+
+        let mut cpu_state = [BabyBear::new(0); WIDTH];
+        cpu_state[0] = BabyBear::new(1);
+        cpu.permute(&mut cpu_state);
+
+        let mut gpu_state = vec![BabyBear::new(0); WIDTH];
+        gpu_state[0] = BabyBear::new(1);
+        let mut buf = device.upload::<BabyBear>(&gpu_state).unwrap();
+        let mut plan = WgpuBabyBearPoseidon2Plan::new_with_constants_source(
+            &device,
+            params,
+            Poseidon2ConstantsSource::Uniform,
+        )
+        .unwrap();
+        plan.execute(&device, &mut buf).unwrap();
+        let gpu_out = buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(
+            gpu_out.as_slice(),
+            cpu_state.as_slice(),
+            "uniform-path Poseidon2 must match CPU reference",
+        );
+
+        // Same pinned-output array as the Storage-path test — locks
+        // both variants against the same byte-exact reference, so any
+        // drift between them is caught immediately.
+        let expected: [u32; WIDTH] = [
+            1646996371, 1788689999, 602438123, 1506086531,
+            748277907, 1860416619, 1005521241, 522487477,
+            1853726457, 740563310, 1495084457, 816004387,
+            268492728, 1545584133, 820438449, 558558427,
+        ];
+        let got: [u32; WIDTH] = std::array::from_fn(|i| gpu_out[i].to_repr());
+        assert_eq!(
+            got, expected,
+            "uniform-path regression_state_0001 drift",
+        );
+    }
+
+    /// Uniform path: cross-variant bit-parity over a 17-permutation
+    /// batch. Storage and Uniform paths must agree element-for-element
+    /// — they execute the same algorithm, only the constant binding
+    /// type differs.
+    #[test]
+    fn poseidon2_uniform_matches_storage_batch() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let params = Poseidon2Params::<BabyBear, WIDTH>::babybear_default();
+
+        // Build a 17-permutation batch (prime; catches off-by-one
+        // in 2D-fold dispatch + lane unpack).
+        let num = 17usize;
+        let mut input: Vec<BabyBear> = Vec::with_capacity(num * WIDTH);
+        for p in 0..num {
+            for i in 0..WIDTH {
+                input.push(BabyBear::new(
+                    ((p as u32) * 31 + i as u32 + 1) & 0x7FFF_FFFF,
+                ));
+            }
+        }
+
+        let mut storage_plan =
+            WgpuBabyBearPoseidon2Plan::new(&device, params.clone()).unwrap();
+        let mut uniform_plan =
+            WgpuBabyBearPoseidon2Plan::new_with_constants_source(
+                &device,
+                params,
+                Poseidon2ConstantsSource::Uniform,
+            )
+            .unwrap();
+
+        let mut storage_buf = device.upload::<BabyBear>(&input).unwrap();
+        storage_plan.execute(&device, &mut storage_buf).unwrap();
+        let storage_out = storage_buf.read_to_vec_blocking().unwrap();
+
+        let mut uniform_buf = device.upload::<BabyBear>(&input).unwrap();
+        uniform_plan.execute(&device, &mut uniform_buf).unwrap();
+        let uniform_out = uniform_buf.read_to_vec_blocking().unwrap();
+
+        assert_eq!(
+            uniform_out, storage_out,
+            "Uniform variant must match Storage variant byte-for-byte"
+        );
+    }
+
+    /// Uniform path: empty batch must remain a no-op (mirrors the
+    /// Storage-path test — the encode helper is shared but the bind
+    /// group construction differs).
+    #[test]
+    fn poseidon2_uniform_empty_batch_is_noop() {
+        let Some(device) = try_device() else {
+            eprintln!("skipping: no GPU adapter available");
+            return;
+        };
+        let params = Poseidon2Params::<BabyBear, WIDTH>::babybear_default();
+        let mut plan = WgpuBabyBearPoseidon2Plan::new_with_constants_source(
+            &device,
+            params,
+            Poseidon2ConstantsSource::Uniform,
+        )
+        .unwrap();
+
+        let empty: Vec<BabyBear> = Vec::new();
+        let mut buf = device.upload::<BabyBear>(&empty).unwrap();
+        plan.execute(&device, &mut buf).expect("empty batch must be Ok");
     }
 }
