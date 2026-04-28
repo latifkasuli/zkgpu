@@ -32,7 +32,8 @@ use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
 use zkgpu_plonky3::poseidon2_bridge::{babybear_plonky3_params, p3_to_zkgpu};
 use zkgpu_wgpu::{
     commit_mixed_height_with_w16_leaf, root_from_retained, MixedHeightMatrixInput,
-    WgpuDevice, WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafW16R8Plan,
+    WgpuDevice, WgpuPoseidon2InterleavePairsPlan, WgpuPoseidon2MerkleCompressPlan,
+    WgpuPoseidon2MerkleLeafW16R8Plan,
 };
 
 const ROUNDS_F: usize = 8;
@@ -71,6 +72,7 @@ fn build_matched(
     CpuValMmcsW16,
     WgpuPoseidon2MerkleLeafW16R8Plan,
     WgpuPoseidon2MerkleCompressPlan,
+    WgpuPoseidon2InterleavePairsPlan,
 ) {
     let mut rng = SmallRng::seed_from_u64(seed);
     let ext: ExternalLayerConstants<P3BabyBear, 16> =
@@ -89,8 +91,9 @@ fn build_matched(
             .unwrap();
     let compress =
         WgpuPoseidon2MerkleCompressPlan::new(device.as_ref(), zkgpu_params).unwrap();
+    let interleave = WgpuPoseidon2InterleavePairsPlan::new(device.as_ref()).unwrap();
 
-    (cpu_mmcs, leaf, compress)
+    (cpu_mmcs, leaf, compress, interleave)
 }
 
 fn random_matrix(h: usize, w: usize, seed: u64) -> (RowMajorMatrix<P3BabyBear>, Vec<ZkgpuBabyBear>) {
@@ -122,6 +125,7 @@ fn run_mixed_shapes(
     cpu: &CpuValMmcsW16,
     leaf: &mut WgpuPoseidon2MerkleLeafW16R8Plan,
     compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    interleave: &mut WgpuPoseidon2InterleavePairsPlan,
     shapes: &[(usize, usize)],
     seed_base: u64,
 ) {
@@ -145,8 +149,10 @@ fn run_mixed_shapes(
             width: *w,
         })
         .collect();
-    let retained = commit_mixed_height_with_w16_leaf(device, leaf, compress, &gpu_inputs)
-        .unwrap();
+    let retained = commit_mixed_height_with_w16_leaf(
+        device, leaf, compress, interleave, &gpu_inputs,
+    )
+    .unwrap();
     let gpu_root = root_from_retained(&retained).unwrap();
 
     assert_root_matches(&cpu_cap, gpu_root, &ctx);
@@ -162,9 +168,9 @@ fn w16_dag_single_matrix_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_matched(device.clone(), 0x_D51_0001_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_matched(device.clone(), 0x_D51_0001_u64);
     for &(h, w) in &[(1usize, 8usize), (2, 8), (4, 8), (16, 8), (64, 3), (1024, 8)] {
-        run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &[(h, w)], 0x_F10_0000_u64);
+        run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &mut interleave, &[(h, w)], 0x_F10_0000_u64);
     }
 }
 
@@ -174,13 +180,13 @@ fn w16_dag_same_height_multi_matrix_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_matched(device.clone(), 0x_D51_0002_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_matched(device.clone(), 0x_D51_0002_u64);
     for shapes in &[
         vec![(16usize, 4usize), (16, 4)],
         vec![(8, 3), (8, 5), (8, 1)],
         vec![(64, 8); 4],
     ] {
-        run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, shapes, 0x_F10_0010_u64);
+        run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &mut interleave, shapes, 0x_F10_0010_u64);
     }
 }
 
@@ -194,13 +200,13 @@ fn w16_dag_mixed_height_two_levels_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_matched(device.clone(), 0x_D51_0003_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_matched(device.clone(), 0x_D51_0003_u64);
     for shapes in &[
         vec![(8usize, 4usize), (4, 2)],
         vec![(16, 8), (8, 4)],
         vec![(32, 3), (16, 7)],
     ] {
-        run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, shapes, 0x_F10_0020_u64);
+        run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &mut interleave, shapes, 0x_F10_0020_u64);
     }
 }
 
@@ -210,13 +216,13 @@ fn w16_dag_mixed_height_three_levels_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_matched(device.clone(), 0x_D51_0004_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_matched(device.clone(), 0x_D51_0004_u64);
     for shapes in &[
         vec![(16usize, 4usize), (8, 3), (2, 1)],
         vec![(32, 6), (16, 2), (4, 5)],
         vec![(64, 8), (32, 4), (4, 2)],
     ] {
-        run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, shapes, 0x_F10_0030_u64);
+        run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &mut interleave, shapes, 0x_F10_0030_u64);
     }
 }
 
@@ -226,10 +232,10 @@ fn w16_dag_mixed_height_every_level_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_matched(device.clone(), 0x_D51_0005_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_matched(device.clone(), 0x_D51_0005_u64);
     let shapes: Vec<(usize, usize)> =
         [16usize, 8, 4, 2, 1].iter().map(|&h| (h, 3usize)).collect();
-    run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &shapes, 0x_F10_0040_u64);
+    run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &mut interleave, &shapes, 0x_F10_0040_u64);
 }
 
 #[test]
@@ -238,7 +244,7 @@ fn w16_dag_bench_shape_proxy_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_matched(device.clone(), 0x_D51_0006_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_matched(device.clone(), 0x_D51_0006_u64);
     let shapes = [(1024usize, 8usize), (512, 4)];
-    run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &shapes, 0x_F10_0060_u64);
+    run_mixed_shapes(&device, &cpu, &mut leaf, &mut compress, &mut interleave, &shapes, 0x_F10_0060_u64);
 }

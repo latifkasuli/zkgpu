@@ -23,7 +23,8 @@ pub use poseidon2::{
     MixedHeightMatrixInput, MixedHeightOpening, RetainedLayersHost,
     WgpuBabyBearPoseidon2Plan, WgpuBabyBearPoseidon2PlonkyW16Plan,
     WgpuBabyBearPoseidon2PlonkyW24Plan, WgpuGoldilocksPoseidon2Plan,
-    WgpuPoseidon2MerkleCommit, WgpuPoseidon2MerkleCompressPlan,
-    WgpuPoseidon2MerkleLeafPlan, WgpuPoseidon2MerkleLeafW16R8Plan,
+    WgpuPoseidon2InterleavePairsPlan, WgpuPoseidon2MerkleCommit,
+    WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafPlan,
+    WgpuPoseidon2MerkleLeafW16R8Plan,
 };
 pub use profiling::{GpuProfiler, GpuTiming, TimestampSpan};

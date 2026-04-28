@@ -67,7 +67,8 @@ use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
 use zkgpu_poseidon2::Poseidon2Params;
 use zkgpu_wgpu::{
     commit_mixed_height_with_w16_leaf, MixedHeightMatrixInput, RetainedLayersHost,
-    WgpuDevice, WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafW16R8Plan,
+    WgpuDevice, WgpuPoseidon2InterleavePairsPlan, WgpuPoseidon2MerkleCompressPlan,
+    WgpuPoseidon2MerkleLeafW16R8Plan,
 };
 
 use crate::config::{
@@ -88,6 +89,11 @@ pub struct OpenVmGpuMmcs {
     device: Arc<WgpuDevice>,
     leaf: Arc<Mutex<WgpuPoseidon2MerkleLeafW16R8Plan>>,
     compress: Arc<Mutex<WgpuPoseidon2MerkleCompressPlan>>,
+    /// GPU pair-interleave plan — used at injection levels of the
+    /// mixed-height commit DAG (item #1 of speed-opportunities).
+    /// One plan constructed per adapter instance, reused across every
+    /// commit; same-height commits never invoke it.
+    interleave: Arc<Mutex<WgpuPoseidon2InterleavePairsPlan>>,
     /// CPU leaf hasher, same constants as `leaf`. Used by
     /// `verify_batch` (Stage 2b) and by any consumer that needs a
     /// host-side reference hash.
@@ -143,6 +149,12 @@ impl OpenVmGpuMmcs {
                         "OpenVmGpuMmcs: GPU compress plan construction failed: {e}"
                     )
                 })?;
+        let interleave = WgpuPoseidon2InterleavePairsPlan::new(device.as_ref())
+            .map_err(|e| {
+                format!(
+                    "OpenVmGpuMmcs: GPU interleave plan construction failed: {e}"
+                )
+            })?;
 
         let cpu_hash = LeafHash::new(perm16.clone());
         let cpu_compress = Compress::new(perm16);
@@ -151,6 +163,7 @@ impl OpenVmGpuMmcs {
             device,
             leaf: Arc::new(Mutex::new(leaf)),
             compress: Arc::new(Mutex::new(compress)),
+            interleave: Arc::new(Mutex::new(interleave)),
             cpu_hash,
             cpu_compress,
         })
@@ -295,10 +308,13 @@ impl OpenVmGpuMmcs {
         let layers = {
             let mut leaf = self.leaf.lock().expect("gpu leaf mutex");
             let mut compress = self.compress.lock().expect("gpu compress mutex");
+            let mut interleave =
+                self.interleave.lock().expect("gpu interleave mutex");
             commit_mixed_height_with_w16_leaf(
                 self.device.as_ref(),
                 &mut *leaf,
                 &mut *compress,
+                &mut *interleave,
                 &gpu_inputs,
             )
             .expect("OpenVmGpuMmcs::commit: GPU commit failed")

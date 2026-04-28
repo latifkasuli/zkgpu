@@ -69,8 +69,8 @@ use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
 use zkgpu_poseidon2::Poseidon2Params;
 use zkgpu_wgpu::{
     commit_mixed_height_with_w24_leaf, open_batch_mixed_height, MixedHeightMatrixInput,
-    RetainedLayersHost, WgpuDevice, WgpuPoseidon2MerkleCompressPlan,
-    WgpuPoseidon2MerkleLeafPlan,
+    RetainedLayersHost, WgpuDevice, WgpuPoseidon2InterleavePairsPlan,
+    WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafPlan,
 };
 
 /// Digest length for BabyBear Poseidon2 MMCS (matches Plonky3's
@@ -129,6 +129,13 @@ pub struct GpuPoseidon2Mmcs {
     leaf: Arc<Mutex<WgpuPoseidon2MerkleLeafPlan>>,
     /// W16 binary compression plan — shared with OpenVM's adapter.
     compress: Arc<Mutex<WgpuPoseidon2MerkleCompressPlan>>,
+    /// GPU pair-interleave plan — used at injection levels of the
+    /// mixed-height commit DAG (item #1 of speed-opportunities).
+    /// Same-height commits never invoke it but the field is required
+    /// because the shared backend's signature is uniform across
+    /// shapes; one plan is constructed per adapter instance and
+    /// reused across every commit.
+    interleave: Arc<Mutex<WgpuPoseidon2InterleavePairsPlan>>,
     /// CPU leaf hasher, same constants as `leaf`. Used by
     /// `verify_batch` and any consumer that needs a host-side
     /// reference hash.
@@ -167,6 +174,12 @@ impl GpuPoseidon2Mmcs {
                         "GpuPoseidon2Mmcs: GPU compress plan construction failed: {e}"
                     )
                 })?;
+        let interleave = WgpuPoseidon2InterleavePairsPlan::new(device.as_ref())
+            .map_err(|e| {
+                format!(
+                    "GpuPoseidon2Mmcs: GPU interleave plan construction failed: {e}"
+                )
+            })?;
 
         let cpu_hash = P3Poseidon2Sponge::new(perm24);
         let cpu_compress = P3Poseidon2Compression::new(perm16);
@@ -175,6 +188,7 @@ impl GpuPoseidon2Mmcs {
             device,
             leaf: Arc::new(Mutex::new(leaf)),
             compress: Arc::new(Mutex::new(compress)),
+            interleave: Arc::new(Mutex::new(interleave)),
             cpu_hash,
             cpu_compress,
         })
@@ -286,10 +300,13 @@ impl Mmcs<P3BabyBear> for GpuPoseidon2Mmcs {
         let layers: RetainedLayersHost = {
             let mut leaf = self.leaf.lock().expect("gpu leaf mutex");
             let mut compress = self.compress.lock().expect("gpu compress mutex");
+            let mut interleave =
+                self.interleave.lock().expect("gpu interleave mutex");
             commit_mixed_height_with_w24_leaf(
                 self.device.as_ref(),
                 &mut *leaf,
                 &mut *compress,
+                &mut *interleave,
                 &gpu_inputs,
             )
             .expect("GpuPoseidon2Mmcs::commit: GPU commit failed")

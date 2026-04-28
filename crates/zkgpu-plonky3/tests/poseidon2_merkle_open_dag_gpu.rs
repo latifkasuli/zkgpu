@@ -30,6 +30,7 @@ use zkgpu_babybear::BabyBear as ZkgpuBabyBear;
 use zkgpu_plonky3::poseidon2_bridge::{babybear_plonky3_params, p3_to_zkgpu};
 use zkgpu_wgpu::{
     commit_mixed_height_with_w16_leaf, commit_mixed_height_with_w24_leaf,
+    WgpuPoseidon2InterleavePairsPlan,
     open_batch_mixed_height, MixedHeightMatrixInput, MixedHeightOpening,
     WgpuDevice, WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafPlan,
     WgpuPoseidon2MerkleLeafW16R8Plan,
@@ -131,6 +132,7 @@ fn build_w24_matched(
     W24Mmcs,
     WgpuPoseidon2MerkleLeafPlan,
     WgpuPoseidon2MerkleCompressPlan,
+    WgpuPoseidon2InterleavePairsPlan,
 ) {
     let mut rng16 = SmallRng::seed_from_u64(seed ^ 0xA11_1600_u64);
     let ext16: ExternalLayerConstants<P3BabyBear, 16> =
@@ -154,7 +156,8 @@ fn build_w24_matched(
     let leaf = WgpuPoseidon2MerkleLeafPlan::new(device.as_ref(), zkgpu_params24).unwrap();
     let compress =
         WgpuPoseidon2MerkleCompressPlan::new(device.as_ref(), zkgpu_params16).unwrap();
-    (cpu_mmcs, leaf, compress)
+    let interleave = WgpuPoseidon2InterleavePairsPlan::new(device.as_ref()).unwrap();
+    (cpu_mmcs, leaf, compress, interleave)
 }
 
 /// Shared driver for W24 open parity. Runs CPU + GPU commit, opens
@@ -167,6 +170,7 @@ fn run_w24_open_parity(
     cpu: &W24Mmcs,
     leaf: &mut WgpuPoseidon2MerkleLeafPlan,
     compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    interleave: &mut WgpuPoseidon2InterleavePairsPlan,
     shapes: &[(usize, usize)],
     indices: &[u32],
     seed_base: u64,
@@ -186,8 +190,10 @@ fn run_w24_open_parity(
             width: *w,
         })
         .collect();
-    let retained = commit_mixed_height_with_w24_leaf(device, leaf, compress, &gpu_inputs)
-        .unwrap();
+    let retained = commit_mixed_height_with_w24_leaf(
+        device, leaf, compress, interleave, &gpu_inputs,
+    )
+    .unwrap();
 
     let dims: Vec<Dimensions> = shapes
         .iter()
@@ -242,12 +248,13 @@ fn w24_open_single_matrix_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w24_matched(device.clone(), 0x_0BE1_0001_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w24_matched(device.clone(), 0x_0BE1_0001_u64);
     run_w24_open_parity(
         &device,
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &[(64, 8)],
         &[0, 1, 7, 31, 32, 63],
         0x_F20_0000_u64,
@@ -260,12 +267,13 @@ fn w24_open_same_height_multi_matrix_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w24_matched(device.clone(), 0x_0BE1_0002_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w24_matched(device.clone(), 0x_0BE1_0002_u64);
     run_w24_open_parity(
         &device,
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &[(32, 4), (32, 3)],
         &[0, 5, 15, 31],
         0x_F20_0010_u64,
@@ -278,13 +286,14 @@ fn w24_open_mixed_height_two_levels_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w24_matched(device.clone(), 0x_0BE1_0003_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w24_matched(device.clone(), 0x_0BE1_0003_u64);
     // h_max=16, one injection at height 4
     run_w24_open_parity(
         &device,
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &[(16, 4), (4, 2)],
         &[0, 3, 7, 15],
         0x_F20_0020_u64,
@@ -297,13 +306,14 @@ fn w24_open_mixed_height_three_levels_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w24_matched(device.clone(), 0x_0BE1_0004_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w24_matched(device.clone(), 0x_0BE1_0004_u64);
     // h_max=32, injection at heights 16 and 4
     run_w24_open_parity(
         &device,
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &[(32, 6), (16, 2), (4, 5)],
         &[0, 1, 5, 12, 20, 31],
         0x_F20_0030_u64,
@@ -316,7 +326,7 @@ fn w24_open_mixed_height_every_level_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w24_matched(device.clone(), 0x_0BE1_0005_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w24_matched(device.clone(), 0x_0BE1_0005_u64);
     // Injection at every level
     let shapes: Vec<(usize, usize)> =
         [16usize, 8, 4, 2, 1].iter().map(|&h| (h, 3usize)).collect();
@@ -325,6 +335,7 @@ fn w24_open_mixed_height_every_level_matches_plonky3() {
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &shapes,
         &[0, 5, 10, 15],
         0x_F20_0040_u64,
@@ -339,12 +350,13 @@ fn w24_open_single_row_matrix_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w24_matched(device.clone(), 0x_0BE1_0006_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w24_matched(device.clone(), 0x_0BE1_0006_u64);
     run_w24_open_parity(
         &device,
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &[(1, 8)],
         &[0],
         0x_F20_0050_u64,
@@ -362,6 +374,7 @@ fn build_w16_matched(
     W16Mmcs,
     WgpuPoseidon2MerkleLeafW16R8Plan,
     WgpuPoseidon2MerkleCompressPlan,
+    WgpuPoseidon2InterleavePairsPlan,
 ) {
     let mut rng = SmallRng::seed_from_u64(seed);
     let ext: ExternalLayerConstants<P3BabyBear, 16> =
@@ -382,7 +395,8 @@ fn build_w16_matched(
     .unwrap();
     let compress =
         WgpuPoseidon2MerkleCompressPlan::new(device.as_ref(), zkgpu_params).unwrap();
-    (cpu_mmcs, leaf, compress)
+    let interleave = WgpuPoseidon2InterleavePairsPlan::new(device.as_ref()).unwrap();
+    (cpu_mmcs, leaf, compress, interleave)
 }
 
 fn run_w16_open_parity(
@@ -390,6 +404,7 @@ fn run_w16_open_parity(
     cpu: &W16Mmcs,
     leaf: &mut WgpuPoseidon2MerkleLeafW16R8Plan,
     compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    interleave: &mut WgpuPoseidon2InterleavePairsPlan,
     shapes: &[(usize, usize)],
     indices: &[u32],
     seed_base: u64,
@@ -406,8 +421,10 @@ fn run_w16_open_parity(
             width: *w,
         })
         .collect();
-    let retained = commit_mixed_height_with_w16_leaf(device, leaf, compress, &gpu_inputs)
-        .unwrap();
+    let retained = commit_mixed_height_with_w16_leaf(
+        device, leaf, compress, interleave, &gpu_inputs,
+    )
+    .unwrap();
 
     let dims: Vec<Dimensions> = shapes
         .iter()
@@ -444,12 +461,13 @@ fn w16_open_single_matrix_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w16_matched(device.clone(), 0x_0BE1_1001_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w16_matched(device.clone(), 0x_0BE1_1001_u64);
     run_w16_open_parity(
         &device,
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &[(64, 8)],
         &[0, 1, 7, 31, 32, 63],
         0x_F21_0000_u64,
@@ -462,12 +480,13 @@ fn w16_open_same_height_multi_matrix_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w16_matched(device.clone(), 0x_0BE1_1002_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w16_matched(device.clone(), 0x_0BE1_1002_u64);
     run_w16_open_parity(
         &device,
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &[(32, 4), (32, 3)],
         &[0, 5, 15, 31],
         0x_F21_0010_u64,
@@ -480,12 +499,13 @@ fn w16_open_mixed_height_three_levels_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w16_matched(device.clone(), 0x_0BE1_1003_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w16_matched(device.clone(), 0x_0BE1_1003_u64);
     run_w16_open_parity(
         &device,
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &[(32, 6), (16, 2), (4, 5)],
         &[0, 1, 5, 12, 20, 31],
         0x_F21_0030_u64,
@@ -498,7 +518,7 @@ fn w16_open_mixed_height_every_level_matches_plonky3() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (cpu, mut leaf, mut compress) = build_w16_matched(device.clone(), 0x_0BE1_1004_u64);
+    let (cpu, mut leaf, mut compress, mut interleave) = build_w16_matched(device.clone(), 0x_0BE1_1004_u64);
     let shapes: Vec<(usize, usize)> =
         [16usize, 8, 4, 2, 1].iter().map(|&h| (h, 3usize)).collect();
     run_w16_open_parity(
@@ -506,6 +526,7 @@ fn w16_open_mixed_height_every_level_matches_plonky3() {
         &cpu,
         &mut leaf,
         &mut compress,
+        &mut interleave,
         &shapes,
         &[0, 5, 10, 15],
         0x_F21_0040_u64,
@@ -522,14 +543,14 @@ fn open_rejects_index_out_of_bounds() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (_cpu, mut leaf, mut compress) = build_w24_matched(device.clone(), 0x_0BE1_9001_u64);
+    let (_cpu, mut leaf, mut compress, mut interleave) = build_w24_matched(device.clone(), 0x_0BE1_9001_u64);
     let (_, gpu_storage) = gen_matrices(&[(8, 4)], 0x_F29_0000_u64);
     let inputs: Vec<MixedHeightMatrixInput<'_>> = gpu_storage
         .iter()
         .map(|(flat, h, w)| MixedHeightMatrixInput { flat, height: *h, width: *w })
         .collect();
     let retained =
-        commit_mixed_height_with_w24_leaf(&device, &mut leaf, &mut compress, &inputs)
+        commit_mixed_height_with_w24_leaf(&device, &mut leaf, &mut compress, &mut interleave, &inputs)
             .unwrap();
     let err = open_batch_mixed_height(&inputs, &retained, 8); // h_max=8, valid: 0..8
     assert!(err.is_err(), "open must reject index >= h_max");
@@ -541,14 +562,14 @@ fn open_rejects_empty_matrices() {
         eprintln!("skipping: no GPU adapter available");
         return;
     };
-    let (_cpu, mut leaf, mut compress) = build_w24_matched(device.clone(), 0x_0BE1_9002_u64);
+    let (_cpu, mut leaf, mut compress, mut interleave) = build_w24_matched(device.clone(), 0x_0BE1_9002_u64);
     let (_, gpu_storage) = gen_matrices(&[(8, 4)], 0x_F29_0010_u64);
     let inputs: Vec<MixedHeightMatrixInput<'_>> = gpu_storage
         .iter()
         .map(|(flat, h, w)| MixedHeightMatrixInput { flat, height: *h, width: *w })
         .collect();
     let retained =
-        commit_mixed_height_with_w24_leaf(&device, &mut leaf, &mut compress, &inputs)
+        commit_mixed_height_with_w24_leaf(&device, &mut leaf, &mut compress, &mut interleave, &inputs)
             .unwrap();
     let err = open_batch_mixed_height(&[], &retained, 0);
     assert!(err.is_err(), "open must reject empty matrices slice");

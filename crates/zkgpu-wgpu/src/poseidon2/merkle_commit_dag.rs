@@ -67,6 +67,7 @@ use zkgpu_core::{GpuBuffer, GpuDevice, ZkGpuError};
 use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 
+use super::interleave_pairs::WgpuPoseidon2InterleavePairsPlan;
 use super::merkle_commit::RetainedLayersHost;
 use super::merkle_compress::WgpuPoseidon2MerkleCompressPlan;
 use super::merkle_leaf::{WgpuPoseidon2MerkleLeafPlan, DIGEST_LEN};
@@ -145,13 +146,22 @@ pub struct MixedHeightMatrixInput<'a> {
 ///
 /// See [`commit_mixed_height_internal`] for the full contract;
 /// semantics are identical.
+///
+/// `interleave` is the GPU-resident pair-interleave plan used at
+/// injection levels of the DAG. Same-height inputs (no injection)
+/// take the fast path and never invoke `interleave`, but the
+/// parameter is still required so the function signature stays
+/// uniform across both shapes — callers construct one
+/// [`WgpuPoseidon2InterleavePairsPlan`] per device at startup and
+/// reuse it across every commit.
 pub fn commit_mixed_height_with_w24_leaf(
     device: &WgpuDevice,
     leaf: &mut WgpuPoseidon2MerkleLeafPlan,
     compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    interleave: &mut WgpuPoseidon2InterleavePairsPlan,
     matrices: &[MixedHeightMatrixInput<'_>],
 ) -> Result<RetainedLayersHost, ZkGpuError> {
-    commit_mixed_height_internal(device, leaf, compress, matrices)
+    commit_mixed_height_internal(device, leaf, compress, interleave, matrices)
 }
 
 /// Mixed-height Poseidon2 Merkle commit with full retained layers,
@@ -162,9 +172,10 @@ pub fn commit_mixed_height_with_w16_leaf(
     device: &WgpuDevice,
     leaf: &mut WgpuPoseidon2MerkleLeafW16R8Plan,
     compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    interleave: &mut WgpuPoseidon2InterleavePairsPlan,
     matrices: &[MixedHeightMatrixInput<'_>],
 ) -> Result<RetainedLayersHost, ZkGpuError> {
-    commit_mixed_height_internal(device, leaf, compress, matrices)
+    commit_mixed_height_internal(device, leaf, compress, interleave, matrices)
 }
 
 /// Generic mixed-height Poseidon2 Merkle commit implementation.
@@ -201,6 +212,7 @@ pub(crate) fn commit_mixed_height_internal<L: GpuLeafSponge>(
     device: &WgpuDevice,
     leaf: &mut L,
     compress: &mut WgpuPoseidon2MerkleCompressPlan,
+    interleave: &mut WgpuPoseidon2InterleavePairsPlan,
     matrices: &[MixedHeightMatrixInput<'_>],
 ) -> Result<RetainedLayersHost, ZkGpuError> {
     // --- Validation ---
@@ -286,52 +298,90 @@ pub(crate) fn commit_mixed_height_internal<L: GpuLeafSponge>(
     // Max-height tree depth. `log2(max_height) + 1` retained layers.
     let log_h_max = max_height.trailing_zeros() as usize;
 
-    // --- Level 0: hash the tallest group ---
+    // --- GPU-resident path (item #1 of speed-opportunities) ---
+    //
+    // Pre-allocate every level's GPU buffer up front. Run leaf sponge
+    // for the tallest group into level 0 directly. For each subsequent
+    // level, run pairwise compression on GPU; at injection levels, run
+    // injection-leaf-hash on GPU + GPU pair-interleave + second
+    // compression — all without bouncing through host memory. Then
+    // batch-download every retained layer in one final pass at the end.
+    //
+    // Pre-item-#1 the host-bouncing path paid `2 * log_h_max` PCIe
+    // round-trips per commit at minimum (download `temp_gpu` + upload
+    // `prev_gpu` per level), plus 3 extra round-trips at each injection
+    // level (download temp + upload interleaved + download merged). On
+    // discrete GPUs that's the dominant cost of mixed-height commits.
+
+    let mut gpu_layers: Vec<WgpuBuffer<BabyBear>> = Vec::with_capacity(log_h_max + 1);
+    let mut level_size = max_height;
+    for _ in 0..=log_h_max {
+        gpu_layers.push(
+            device.alloc_zeros::<BabyBear>((level_size as usize) * DIGEST_LEN)?,
+        );
+        level_size /= 2;
+    }
+
+    // --- Level 0: hash tallest group → gpu_layers[0] ---
     let tallest = by_height
         .get(&max_height)
         .expect("max_height is a key we iterated");
-    let layer0_host = hash_group(device, leaf, tallest, max_height)?;
-    let mut layers: Vec<Vec<BabyBear>> = Vec::with_capacity(log_h_max + 1);
-    layers.push(layer0_host);
+    hash_group_gpu(device, leaf, tallest, max_height, &mut gpu_layers[0])?;
 
-    // --- Compression levels ---
-    // At each level, the input is `layers[k-1]` (already on host). We
-    // upload it to GPU, run compression, download temp; if the level
-    // matches an injected group's height, we hash the injected rows,
-    // interleave host-side, run a second compression, download final.
+    // --- Compression chain, GPU-resident ---
     let mut current_height = max_height;
-    for _k in 1..=log_h_max {
+    for k in 1..=log_h_max {
         let next_height = current_height / 2;
-        let prev_host = layers.last().expect("layers non-empty").clone();
 
-        // Step 1: standard pairwise compression of prev_layer.
-        let prev_gpu = device.upload::<BabyBear>(&prev_host)?;
-        let mut temp_gpu =
-            device.alloc_zeros::<BabyBear>((next_height as usize) * DIGEST_LEN)?;
-        compress.compress_level(device, &prev_gpu, &mut temp_gpu, next_height)?;
+        // Borrow `prev` (immutable) and `next` (mutable) from the same
+        // Vec via `split_at_mut`, the standard pattern.
+        let (prev_slice, next_slice) = gpu_layers.split_at_mut(k);
+        let prev = &prev_slice[k - 1];
+        let next = &mut next_slice[0];
 
-        // Step 2: if a matrix group exists at this height, inject.
-        let next_host = if let Some(inj_group) = by_height.get(&next_height) {
-            let inj_hash_host = hash_group(device, leaf, inj_group, next_height)?;
-            let temp_host = temp_gpu.read_to_vec()?;
-            let interleaved =
-                interleave_pairs_host(&temp_host, &inj_hash_host, next_height);
-            let interleaved_gpu = device.upload::<BabyBear>(&interleaved)?;
-            let mut merged_gpu =
-                device.alloc_zeros::<BabyBear>((next_height as usize) * DIGEST_LEN)?;
-            compress.compress_level(
+        if let Some(inj_group) = by_height.get(&next_height) {
+            // Injection level. Three GPU scratch buffers are needed:
+            //   * `temp_gpu`   — pairwise compression of prev (N digests)
+            //   * `inj_gpu`    — leaf-hash of injected group (N digests)
+            //   * `interleaved_gpu` — pair-interleaved (temp, inj) (2N digests)
+            // Then a second compression: interleaved_gpu → next.
+            let n_digests = next_height as usize;
+            let mut temp_gpu = device.alloc_zeros::<BabyBear>(n_digests * DIGEST_LEN)?;
+            compress.compress_level(device, prev, &mut temp_gpu, next_height)?;
+
+            let mut inj_gpu = device.alloc_zeros::<BabyBear>(n_digests * DIGEST_LEN)?;
+            hash_group_gpu(device, leaf, inj_group, next_height, &mut inj_gpu)?;
+
+            let mut interleaved_gpu =
+                device.alloc_zeros::<BabyBear>(2 * n_digests * DIGEST_LEN)?;
+            interleave.interleave(
                 device,
-                &interleaved_gpu,
-                &mut merged_gpu,
+                &temp_gpu,
+                &inj_gpu,
+                &mut interleaved_gpu,
                 next_height,
             )?;
-            merged_gpu.read_to_vec()?
-        } else {
-            temp_gpu.read_to_vec()?
-        };
 
-        layers.push(next_host);
+            compress.compress_level(device, &interleaved_gpu, next, next_height)?;
+        } else {
+            // No injection: pairwise-compress prev → next directly.
+            compress.compress_level(device, prev, next, next_height)?;
+        }
+
         current_height = next_height;
+    }
+
+    // --- Batch download every retained layer ---
+    //
+    // Single host-side phase at the end. The open path (`open_batch_mixed_height`)
+    // walks these host-side layers; we have to materialize them
+    // anyway, but doing all the downloads at once lets the driver
+    // pipeline them rather than serializing across `log_h_max + 1`
+    // separate `submit + poll(wait)` boundaries the way the host-
+    // bouncing path did.
+    let mut layers: Vec<Vec<BabyBear>> = Vec::with_capacity(gpu_layers.len());
+    for buf in &gpu_layers {
+        layers.push(buf.read_to_vec()?);
     }
 
     debug_assert_eq!(layers.len(), log_h_max + 1);
@@ -657,23 +707,28 @@ pub fn root_from_retained(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Hash one height group. Matches Plonky3's `first_digest_layer` /
-/// `compress_and_inject` row-hashing: for each row index `i`, the
-/// hash input is `flat_map(matrix.row(i) for matrix in group)`.
+/// Hash one height group, writing digests to a caller-provided GPU
+/// buffer. Matches Plonky3's `first_digest_layer` / `compress_and_inject`
+/// row-hashing: for each row index `i`, the hash input is
+/// `flat_map(matrix.row(i) for matrix in group)`.
 ///
-/// Performs the flattening host-side — conceptually cheap (we're
-/// already holding `flat: &[BabyBear]` per matrix), and avoids a new
-/// GPU gather kernel. Uploads the concatenated matrix as one buffer,
-/// runs the leaf sponge in a single dispatch, downloads the digests.
-fn hash_group<L: GpuLeafSponge>(
+/// Performs the row concat host-side (cheap — we already hold the
+/// per-matrix `flat: &[BabyBear]` slices) and uploads once, then runs
+/// the leaf sponge dispatch into the caller's `output` buffer with no
+/// download. Replaces the older `hash_group → Vec<BabyBear>` shape
+/// that bounced every level's hashes through host memory; this
+/// version is the GPU-resident counterpart used by the mixed-height
+/// commit path landed in item #1 of the speed-opportunities phase.
+fn hash_group_gpu<L: GpuLeafSponge>(
     device: &WgpuDevice,
     leaf: &mut L,
     group: &[&MixedHeightMatrixInput<'_>],
     group_height: u32,
-) -> Result<Vec<BabyBear>, ZkGpuError> {
+    output: &mut WgpuBuffer<BabyBear>,
+) -> Result<(), ZkGpuError> {
     debug_assert!(
         group.iter().all(|m| m.height == group_height),
-        "hash_group: group must be uniform-height"
+        "hash_group_gpu: group must be uniform-height"
     );
     let total_width: u32 = group
         .iter()
@@ -685,41 +740,36 @@ fn hash_group<L: GpuLeafSponge>(
             )
         })?;
 
+    let required_out = (group_height as usize) * DIGEST_LEN;
+    if output.len() < required_out {
+        return Err(ZkGpuError::InvalidNttSize(format!(
+            "hash_group_gpu output length {} < group_height*DIGEST_LEN = {}",
+            output.len(),
+            required_out,
+        )));
+    }
+
     // Row-major concat: row i of the concat is row i of m0, then row i
-    // of m1, etc. This is the Plonky3 semantics.
-    let mut concat: Vec<BabyBear> =
-        Vec::with_capacity((group_height as usize) * (total_width as usize));
-    for row in 0..group_height as usize {
-        for m in group {
-            let w = m.width as usize;
-            let start = row * w;
-            concat.extend_from_slice(&m.flat[start..start + w]);
+    // of m1, etc. This is the Plonky3 semantics. Single-matrix
+    // shortcut bypasses the row loop and copies the input slice
+    // directly (identical to the same-height fast path's optimization).
+    let input_gpu = if group.len() == 1 {
+        device.upload::<BabyBear>(group[0].flat)?
+    } else {
+        let mut concat: Vec<BabyBear> =
+            Vec::with_capacity((group_height as usize) * (total_width as usize));
+        for row in 0..group_height as usize {
+            for m in group {
+                let w = m.width as usize;
+                let start = row * w;
+                concat.extend_from_slice(&m.flat[start..start + w]);
+            }
         }
-    }
+        device.upload::<BabyBear>(&concat)?
+    };
 
-    let input_gpu = device.upload::<BabyBear>(&concat)?;
-    let mut digest_gpu =
-        device.alloc_zeros::<BabyBear>((group_height as usize) * DIGEST_LEN)?;
-    leaf.hash_rows(device, &input_gpu, &mut digest_gpu, group_height, total_width)?;
-    digest_gpu.read_to_vec()
-}
-
-/// Host-side pair interleave: takes two size-`n` digest arrays and
-/// produces a size-`2n` digest array where pair `i` is
-/// `(left[i], right[i])`. Used at injection levels so the existing
-/// pair-sibling compression kernel can consume the result directly
-/// without needing a two-input compress variant.
-fn interleave_pairs_host(left: &[BabyBear], right: &[BabyBear], n: u32) -> Vec<BabyBear> {
-    let n = n as usize;
-    debug_assert_eq!(left.len(), n * DIGEST_LEN);
-    debug_assert_eq!(right.len(), n * DIGEST_LEN);
-    let mut out = Vec::with_capacity(2 * n * DIGEST_LEN);
-    for i in 0..n {
-        let base = i * DIGEST_LEN;
-        out.extend_from_slice(&left[base..base + DIGEST_LEN]);
-        out.extend_from_slice(&right[base..base + DIGEST_LEN]);
-    }
-    out
+    leaf.hash_rows(device, &input_gpu, output, group_height, total_width)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -730,25 +780,16 @@ fn interleave_pairs_host(left: &[BabyBear], right: &[BabyBear], n: u32) -> Vec<B
 mod tests {
     use super::*;
 
-    #[test]
-    fn interleave_pairs_host_shape() {
-        let left: Vec<BabyBear> =
-            (0..16u32).map(BabyBear::new).collect(); // 2 digests (n=2, DIGEST_LEN=8)
-        let right: Vec<BabyBear> =
-            (100..116u32).map(BabyBear::new).collect();
-        let out = interleave_pairs_host(&left, &right, 2);
-        assert_eq!(out.len(), 32);
-        // Pair 0: left[0..8] then right[0..8].
-        for k in 0..8u32 {
-            assert_eq!(out[k as usize].0, k);
-            assert_eq!(out[8 + k as usize].0, 100 + k);
-        }
-        // Pair 1: left[8..16] then right[8..16].
-        for k in 0..8u32 {
-            assert_eq!(out[16 + k as usize].0, 8 + k);
-            assert_eq!(out[24 + k as usize].0, 108 + k);
-        }
-    }
+    // Note: the previous `interleave_pairs_host_shape` test was
+    // removed when item #1 (GPU-resident mixed-height injection)
+    // landed — the host-side interleave function it tested no longer
+    // exists. The GPU equivalent
+    // (`WgpuPoseidon2InterleavePairsPlan::interleave`) is covered by
+    // the existing mixed-height integration parity tests in
+    // `zkgpu-plonky3/tests/poseidon2_merkle_commit_dag_*.rs` and
+    // `zkgpu-plonky3/tests/poseidon2_merkle_open_dag_gpu.rs`, which
+    // would catch any divergence at the byte level against Plonky3's
+    // CPU `MerkleTreeMmcs`.
 
     #[test]
     fn root_from_retained_rejects_empty_layers() {

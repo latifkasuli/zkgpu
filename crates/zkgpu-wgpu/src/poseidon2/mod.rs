@@ -52,6 +52,7 @@
 //! `max_compute_workgroups_per_dimension`.
 
 mod goldilocks_plan;
+mod interleave_pairs;
 mod merkle_commit;
 mod merkle_commit_dag;
 mod merkle_compress;
@@ -61,6 +62,7 @@ mod plan;
 mod plonky3_plan;
 
 pub use goldilocks_plan::WgpuGoldilocksPoseidon2Plan;
+pub use interleave_pairs::WgpuPoseidon2InterleavePairsPlan;
 pub use merkle_commit::{RetainedLayersHost, WgpuPoseidon2MerkleCommit};
 pub use merkle_commit_dag::{
     commit_mixed_height_with_w16_leaf, commit_mixed_height_with_w24_leaf,
