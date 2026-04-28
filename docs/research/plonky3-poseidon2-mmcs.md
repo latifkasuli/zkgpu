@@ -5,6 +5,16 @@ This note captures the current claim that `zkgpu` can support and reproduce from
 > **Sibling note:** [GPU Poseidon2 MMCS for OpenVM](openvm-poseidon2-mmcs.md) — the **same shared backend**, a different consumer (OpenVM's Plonky3 0.4.1 W16-leaf MMCS), portability-first framing.
 >
 > **v0.2 update (2026-04-28).** The shared backend now runs the mixed-height commit DAG entirely device-resident (item #1 of the speed-opportunities note). The Plonky3-side headline numbers in this note are single-matrix shapes; the same-height fast path was unchanged in v0.2, so the headline ratios below remain accurate as of the same vast.ai host configuration that produced them. The mixed-height parity tests added at adapter convergence (4 tests in `poseidon2_mmcs_gpu.rs`) continue to pass under the new GPU-resident path; per-shape mixed-height timings on the Plonky3 W24 leaf are still not bench-headlined here. See the OpenVM note's v0.2 section for the measured mixed-height GPU-time recovery; that result lands on the shared engine that both adapters drive, so Plonky3 mixed-height consumers benefit without any Plonky3-specific code change.
+>
+> **v0.3 update (2026-04-28) — Stockham multi-dispatch fold (item #4).** The Stockham NTT encoder now folds R4 + R2 global stages into a single `wgpu::ComputePass` instead of starting a fresh pass per stage. The local-fused kernel stays in its own pass (folding it together with global stages broke parity at `log_n ≥ 11`; the most-likely cause is wgpu's automatic barrier emission not handling the workgroup-memory-using pipeline switching after non-workgroup-memory pipelines within the same pass — bears investigation, but the safe fold ships now). Same-shape `target_stack/fri_commit/cpu_dft_gpu_mmcs` numbers on M4 Pro / Metal:
+>
+> | log_h / w | Pre-#4 | Post-#4 | Δ |
+> |---|---:|---:|---:|
+> | 10 / 8 (1 dispatch) | 19.09 ms | 17.66 ms | -7.5% (within noise) |
+> | 12 / 8 | 22.73 ms | 22.14 ms | -2.6% (within noise) |
+> | 14 / 8 (4 R4 stages folded) | **34.61 ms** | **30.95 ms** | **-10.6%** (real) |
+>
+> The win is biggest where there are the most stages to fold — at `log_h = 14` the encoder saves three `begin_compute_pass`/`end_compute_pass` pairs per NTT call. At very small `log_h` (10) only one dispatch happens and the fold is a no-op; at `log_h = 12` the fold saves one or two pass boundaries which is below the discrete-GPU clocking floor we mapped during v0.2. four-step NTT (used at `log_n ≥ 21` on NVIDIA / AMD / Intel; not used at all on Apple / browser) was deliberately not folded in this round — at that scale kernel time dominates and the fold gain is below any measurement window we can run.
 
 ## Claim
 

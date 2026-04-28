@@ -101,7 +101,12 @@ fn random_trace(log_h: usize, w: usize, seed: u64) -> RowMajorMatrix<Val> {
 
 // --- DFT-only sweep (same shapes as gpu_vs_cpu_dft for continuity) -------
 
-const LOG_HS: &[usize] = &[14, 16, 18, 20];
+// Extended downward (10, 12) for Gate 2 item #4 (multi-dispatch per
+// compute pass) — at small log_h the per-pass driver overhead is a
+// larger fraction of total NTT time, where the fold benefit lands.
+// Existing 14/16/18/20 sizes preserve continuity with v0.1/v0.2
+// publish numbers.
+const LOG_HS: &[usize] = &[10, 12, 14, 16, 18, 20];
 const WIDTHS: &[usize] = &[1, 8];
 
 fn bench_coset_lde_batch(c: &mut Criterion) {

@@ -1,8 +1,10 @@
 # Two consumers on one GPU backend
 
-> **Status: pre-alpha.** As of 2026-04-28 (v0.2).
+> **Status: pre-alpha.** As of 2026-04-28 (v0.3).
 >
-> **v0.2 update (2026-04-28).** The mixed-height commit DAG now runs entirely device-resident — the previous host-bouncing pattern at injection levels (download intermediate digests, host-side interleave, re-upload, second compress) is gone. On a same-host A/B (RTX 5090 + Ryzen 9 9900X), the GPU mixed-height commit time at `log_h_max=18` reduced from 25.33 ms to 14.47 ms (-43%). Per-consumer details and the methodology note about the discrete-GPU clocking floor are in [`docs/research/openvm-poseidon2-mmcs.md`'s v0.2 section](research/openvm-poseidon2-mmcs.md#v02-2026-04-28--gpu-resident-mixed-height-injection). Parity validated on both Metal and Vulkan/NVIDIA. The headline-ratio table below is from the v0.1 measurement window and uses different vast.ai host configurations than the v0.2 numbers; we're keeping it as a historical reference rather than rewriting it under shifting host baselines.
+> **v0.2 (2026-04-28).** The mixed-height commit DAG runs entirely device-resident (Gate 2 item #1). On a same-host A/B (RTX 5090 + Ryzen 9 9900X), GPU mixed-height commit time at `log_h_max=18` dropped from 25.33 ms to 14.47 ms (-43%). Details + the discrete-GPU clocking-floor methodology are in [the OpenVM note's v0.2 section](research/openvm-poseidon2-mmcs.md#v02-2026-04-28--gpu-resident-mixed-height-injection). Parity validated on Metal and Vulkan/NVIDIA. The headline-ratio table below is from v0.1 host configurations and is not directly comparable to v0.2/v0.3 numbers.
+>
+> **v0.3 (2026-04-28) — Stockham NTT multi-dispatch fold (Gate 2 item #4).** Stockham R4 + R2 global stages now share one `wgpu::ComputePass` instead of starting a fresh pass per stage. Local-fused kernel stays in its own pass (folding it cross-pipeline broke parity; safe fold ships, full investigation deferred). Measured `target_stack/fri_commit/cpu_dft_gpu_mmcs` on M4 Pro / Metal: -10.6% at `log_h=14` (the four-R4-stages-fold case where multiple `begin_compute_pass` boundaries actually existed); within-noise at `log_h ∈ {10, 12}` (1-2 dispatches, nothing to fold). Details in [the Plonky3 note's v0.3 update](research/plonky3-poseidon2-mmcs.md). Four-step NTT fold deliberately not in this round — only used at `log_n ≥ 21` where kernel time dominates and the fold-gain is below measurement noise.
 
 ## Claim
 
