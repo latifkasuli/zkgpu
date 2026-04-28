@@ -6,6 +6,7 @@ use crate::buffer::WgpuBuffer;
 use crate::device::WgpuDevice;
 use crate::profiling::{GpuProfiler, GpuTiming, TimestampSpan};
 
+use super::encode::NttEncodeMode;
 use super::{NttTimings, StockhamPlan};
 
 impl StockhamPlan {
@@ -43,7 +44,13 @@ impl StockhamPlan {
             })
             .collect();
 
-        self.encode_ntt_stages(&device.device, &mut encoder, buf, &ntt_ts_writes);
+        self.encode_ntt_stages(
+            &device.device,
+            &mut encoder,
+            buf,
+            &ntt_ts_writes,
+            NttEncodeMode::PerPass,
+        );
 
         let scale_ts = profiler.as_ref().and_then(|p| {
             spans
@@ -141,7 +148,13 @@ impl StockhamPlan {
             })
             .collect();
 
-        self.encode_ntt_stages(&device.device, &mut encoder, buf, &ntt_ts_writes);
+        self.encode_ntt_stages(
+            &device.device,
+            &mut encoder,
+            buf,
+            &ntt_ts_writes,
+            NttEncodeMode::PerPass,
+        );
 
         let scale_ts = profiler.as_ref().and_then(|p| {
             spans

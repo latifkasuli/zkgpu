@@ -109,7 +109,13 @@ impl StockhamPlan {
                 label: Some("Stockham NTT encoder"),
             });
 
-        self.encode_ntt_stages(&device.device, &mut encoder, buf, &[]);
+        self.encode_ntt_stages(
+            &device.device,
+            &mut encoder,
+            buf,
+            &[],
+            encode::NttEncodeMode::Folded,
+        );
         self.encode_scale(&device.device, &mut encoder, buf, None);
 
         device.queue.submit(Some(encoder.finish()));
@@ -133,7 +139,13 @@ impl StockhamPlan {
                 label: Some("Stockham NTT encoder"),
             });
 
-        self.encode_ntt_stages(&device.device, &mut encoder, buf, &[]);
+        self.encode_ntt_stages(
+            &device.device,
+            &mut encoder,
+            buf,
+            &[],
+            encode::NttEncodeMode::Folded,
+        );
         self.encode_scale(&device.device, &mut encoder, buf, None);
 
         device.queue.submit(Some(encoder.finish()));
