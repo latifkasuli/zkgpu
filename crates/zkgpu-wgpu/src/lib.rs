@@ -20,11 +20,11 @@ pub use ntt::{NttTimings, PlannerPolicy, StockhamTailOverride, WgpuBatchedNttPla
 pub use poseidon2::{
     commit_mixed_height_with_w16_leaf, commit_mixed_height_with_w24_leaf,
     open_batch_mixed_height, root_from_retained, MERKLE_DIGEST_LEN,
-    MixedHeightMatrixInput, MixedHeightOpening, RetainedLayersHost,
-    WgpuBabyBearPoseidon2Plan, WgpuBabyBearPoseidon2PlonkyW16Plan,
-    WgpuBabyBearPoseidon2PlonkyW24Plan, WgpuGoldilocksPoseidon2Plan,
-    WgpuPoseidon2InterleavePairsPlan, WgpuPoseidon2MerkleCommit,
-    WgpuPoseidon2MerkleCompressPlan, WgpuPoseidon2MerkleLeafPlan,
-    WgpuPoseidon2MerkleLeafW16R8Plan,
+    MixedHeightMatrixInput, MixedHeightOpening, Poseidon2ConstantsSource,
+    RetainedLayersHost, WgpuBabyBearPoseidon2Plan,
+    WgpuBabyBearPoseidon2PlonkyW16Plan, WgpuBabyBearPoseidon2PlonkyW24Plan,
+    WgpuGoldilocksPoseidon2Plan, WgpuPoseidon2InterleavePairsPlan,
+    WgpuPoseidon2MerkleCommit, WgpuPoseidon2MerkleCompressPlan,
+    WgpuPoseidon2MerkleLeafPlan, WgpuPoseidon2MerkleLeafW16R8Plan,
 };
 pub use profiling::{GpuProfiler, GpuTiming, TimestampSpan};
