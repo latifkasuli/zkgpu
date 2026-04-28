@@ -646,21 +646,39 @@ fn profiled_forward_log18_has_multiple_r4_spans() {
     // multi-global-R4 case (≥ 2 R4 dispatches) is what the original P2
     // bug collapsed.
     //
-    // Apple Silicon Metal carve-out: as of wgpu v29, the Metal backend
-    // on M4 Pro reliably writes only the FIRST compute pass's
-    // `ComputePassTimestampWrites` per command buffer; subsequent
-    // passes' begin/end queries read back as zero (see e.g. wgpu issue
-    // tracking around `MTLCounterSampleBuffer` boundaries). That
-    // produces the same all-zero-after-first-span pattern as the bug,
-    // so the duration check can't distinguish healthy from regressed
-    // on Metal — a false-positive risk we don't want in CI. The
-    // regression we're locking is platform-agnostic (it's a wgpu API
-    // misuse, not a backend behavior), so locking it on every
-    // non-Metal backend is sufficient. Verified non-flaky on RTX 5090
-    // Vulkan (5/5 healthy passes; 5/5 caught the simulated regression
-    // — see commit message). Run on a Vulkan/DX12/WebGPU host to
-    // exercise the duration check; Metal hosts get the structural
-    // checks only.
+    // Per-backend behavior under the buggy fold:
+    //
+    // - **Vulkan/NVIDIA (RTX 4090, 5090):** the bug attaches
+    //   `outer_ts = ts_writes[0]` to a single outer pass and leaves
+    //   subsequent spans' query indices unwritten. `resolve_query_set`
+    //   over the full range then waits on those unwritten queries
+    //   forever, hanging the test. CI catches this as a timeout —
+    //   still a signal, just via wall-clock rather than via the
+    //   duration assertion below. Healthy runs complete in <1 s; a
+    //   regression that hangs for the test framework's default timeout
+    //   (60 s+) is unambiguous.
+    //
+    // - **Apple Silicon Metal (M4 Pro):** as of wgpu v29, Metal
+    //   reliably writes only the FIRST compute pass's
+    //   `ComputePassTimestampWrites` per command buffer; subsequent
+    //   passes' begin/end queries read back as zero (see e.g. wgpu
+    //   issue tracking around `MTLCounterSampleBuffer` boundaries).
+    //   That produces the same all-zero-after-first-span pattern as
+    //   the bug, so the duration check can't distinguish healthy from
+    //   regressed on Metal — a false-positive risk we don't want in
+    //   CI. The duration check is skipped on Metal; structural checks
+    //   still run.
+    //
+    // - **Healthy Vulkan + healthy non-Metal in general:** all R4
+    //   spans report non-zero durations; the duration assertion below
+    //   is the regression lock.
+    //
+    // Verified locally on M4 Pro: 10/10 healthy structural-only runs
+    // pass, 5/5 simulated-regression runs catch the all-zero pattern
+    // (the inner panic message includes the spans for diagnosability).
+    // Verified on RTX 5090 Vulkan: 3/3 healthy passes complete in
+    // <1 s; the simulated-regression hang above is the catch mechanism
+    // there.
     const MAX_ATTEMPTS: usize = 4;
 
     let device = init_device();
