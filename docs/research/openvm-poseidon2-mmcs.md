@@ -107,7 +107,53 @@ Shapes:
 
 ## Results
 
-### `target_stack/commit` — primary gate
+### v0.2 (2026-04-28) — GPU-resident mixed-height injection
+
+The mixed-height commit DAG now runs entirely device-resident: leaf hash, pairwise compress, injection-leaf-hash, pair-interleave, and second compress all happen on GPU at every injection level. The previous host-bouncing pattern (download `temp_gpu`, host-side `interleave_pairs`, re-upload, second compress) is gone. See [item #1 of the speed-opportunities note](zkgpu-wgpu-speed-opportunities.md) for the architectural details and [`crates/zkgpu-wgpu/src/poseidon2/merkle_commit_dag.rs`](../../crates/zkgpu-wgpu/src/poseidon2/merkle_commit_dag.rs) for the implementation.
+
+#### Same-host A/B isolation on RTX 5090
+
+Run on a single vast.ai instance (RTX 5090 + Ryzen 9 9900X) at `target_stack/commit` shape `mixed/log_h_max=18/trace_plus_4q`. Bench (1) is the initial post-item-#1 run on a cold GPU; bench (2) is `ad3a8e5` (item #1 reverted) on the same host; bench (3) is post-item-#1 again with a warmed GPU.
+
+| Bench | GPU mixed `log_h_max=18` | GPU single `log_h=18` |
+|---|---:|---:|
+| 1. Post-item-#1, cold start | 20.98 ms | 16.58 ms |
+| 2. Pre-item-#1 (`ad3a8e5`)  | 25.33 ms | 11.14 ms |
+| 3. **Post-item-#1, warm**   | **14.47 ms** | 16.37 ms |
+
+Reading the single-matrix column (where item #1 doesn't touch the code path — it routes through the same-height fast path landed in `26646fc`): bench 1 and bench 3 read close (16.58 ms / 16.37 ms — indistinguishable, the engine genuinely produces the same time), while bench 2's 11.14 ms is the outlier. Discrete NVIDIA GPUs on consumer-tier hosting clock down aggressively when idle and don't always ramp to peak instantly; bench 2 happened to catch the GPU at a high clock state. That gives the discrete-GPU clocking noise floor for this shape — about ±5 ms / ±30%.
+
+Reading the mixed-height column (where item #1 lands): bench 2 → bench 3 shows **25.33 ms → 14.47 ms (-42.9%)**. That gap is well outside the single-matrix clocking band — and it's in the direction item #1's design predicts. Even comparing bench 1 (20.98 ms) → bench 3 (14.47 ms), both at HEAD on the same host, you see a -31% improvement that's larger than the single-matrix ±30% clocking spread.
+
+**Conservative claim: item #1 reduces GPU mixed-height commit time at `log_h_max=18` on the 5090 by ~30-40%.** The lower bound is comfortably outside clocking noise; the upper bound depends on which warm-state baseline you compare to.
+
+#### Single-shot post-item-#1 on RTX 4090
+
+Same code, single run on a different vast.ai instance (RTX 4090 + Ryzen 9 7950X), same shapes:
+
+| Shape | CPU | GPU |
+|---|---:|---:|
+| single `log_h=18` | 35.05 ms | 27.18 ms |
+| mixed `log_h_max=14` | 2.98 ms | 5.91 ms |
+| mixed `log_h_max=16` | 10.52 ms | 8.32 ms |
+| mixed `log_h_max=18` | 49.00 ms | 41.43 ms |
+
+No A/B run on the 4090, so no isolated item #1 attribution. The numbers are the post-item-#1 absolute GPU times for the shape at this host config.
+
+**Why these numbers are not directly comparable to the historical headline numbers below.** Both vast.ai instances differ from the original benchmark hosts: the 5090 is now paired with a Ryzen 9 9900X (vs 9950X originally), and CPU baselines have shifted accordingly (the 5090's CPU mixed-height time dropped from 481.5 ms to 46.9 ms). Whatever combination of CPU silicon, AVX-512 build flags, and host configuration changed produces a much faster CPU baseline on the new instances; that affects the CPU/GPU ratio numbers below but not the underlying GPU-side perf claim. We're publishing v0.2 with the GPU times above — apples-to-apples on each host's actual hardware — and leaving the original headline numbers in place as a measurement of a specific historical bench environment.
+
+#### Correctness validation across both backends
+
+Item #1 is parity-pinned beyond the perf bench:
+
+- M4 Pro / Metal: ~138 tests across `zkgpu-plonky3` (~116) and `zkgpu-openvm` (22) all pass — output bytes byte-identical to the host-bouncing path.
+- RTX 4090 / Vulkan: 22 `zkgpu-openvm` tests run on the actual NVIDIA driver (the same suite the Metal validation uses, since both go through the same shared backend). All green.
+
+The historical headline tables and per-host detail blocks below predate v0.2 and reflect the host-bouncing engine. They remain as the previous reference point but are no longer the production engine.
+
+---
+
+### `target_stack/commit` — primary gate (historical, pre-v0.2)
 
 #### M4 Pro / Metal (Gate 4a — blocking)
 

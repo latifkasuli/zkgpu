@@ -3,6 +3,8 @@
 This note captures the current claim that `zkgpu` can support and reproduce from the code in this repository.
 
 > **Sibling note:** [GPU Poseidon2 MMCS for OpenVM](openvm-poseidon2-mmcs.md) — the **same shared backend**, a different consumer (OpenVM's Plonky3 0.4.1 W16-leaf MMCS), portability-first framing.
+>
+> **v0.2 update (2026-04-28).** The shared backend now runs the mixed-height commit DAG entirely device-resident (item #1 of the speed-opportunities note). The Plonky3-side headline numbers in this note are single-matrix shapes; the same-height fast path was unchanged in v0.2, so the headline ratios below remain accurate as of the same vast.ai host configuration that produced them. The mixed-height parity tests added at adapter convergence (4 tests in `poseidon2_mmcs_gpu.rs`) continue to pass under the new GPU-resident path; per-shape mixed-height timings on the Plonky3 W24 leaf are still not bench-headlined here. See the OpenVM note's v0.2 section for the measured mixed-height GPU-time recovery; that result lands on the shared engine that both adapters drive, so Plonky3 mixed-height consumers benefit without any Plonky3-specific code change.
 
 ## Claim
 

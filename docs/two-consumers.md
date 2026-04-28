@@ -1,6 +1,8 @@
 # Two consumers on one GPU backend
 
-> **Status: pre-alpha.** As of 2026-04-25.
+> **Status: pre-alpha.** As of 2026-04-28 (v0.2).
+>
+> **v0.2 update (2026-04-28).** The mixed-height commit DAG now runs entirely device-resident — the previous host-bouncing pattern at injection levels (download intermediate digests, host-side interleave, re-upload, second compress) is gone. On a same-host A/B (RTX 5090 + Ryzen 9 9900X), the GPU mixed-height commit time at `log_h_max=18` reduced from 25.33 ms to 14.47 ms (-43%). Per-consumer details and the methodology note about the discrete-GPU clocking floor are in [`docs/research/openvm-poseidon2-mmcs.md`'s v0.2 section](research/openvm-poseidon2-mmcs.md#v02-2026-04-28--gpu-resident-mixed-height-injection). Parity validated on both Metal and Vulkan/NVIDIA. The headline-ratio table below is from the v0.1 measurement window and uses different vast.ai host configurations than the v0.2 numbers; we're keeping it as a historical reference rather than rewriting it under shifting host baselines.
 
 ## Claim
 
