@@ -1,7 +1,7 @@
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuBuffer, GpuDevice, NttDirection, NttPlan, ZkGpuError};
 use zkgpu_ntt::ntt_cpu_reference;
-use zkgpu_wgpu::{PlannerPolicy, WgpuDevice, WgpuNttPlan};
+use zkgpu_wgpu::{GpuFamily, GpuTiming, PlannerPolicy, WgpuDevice, WgpuNttPlan};
 
 fn init_device() -> WgpuDevice {
     WgpuDevice::new().expect("GPU device required for integration tests")
@@ -615,59 +615,143 @@ fn profiled_forward_has_no_scale_span() {
 // global-stage timestamp span into a single outer-pass span, so the
 // per-stage labels in `gpu_stage_ns` reported stale durations. The fix
 // (PerPass mode for profiled execution) restores 1:1 dispatch-to-pass
-// mapping. The earlier profiled tests at `log_n = 10` don't exercise the
-// multi-global-R4 case that triggered the bug — at small log_n the plan
-// often has zero or one global stage. log_n = 14 forces multiple R4
-// global stages, locking the regression.
+// mapping. The earlier profiled tests at `log_n = 10` don't exercise
+// the multi-global-R4 case that triggered the bug — at small log_n the
+// plan often has zero or one global stage. log_n = 14 forces multiple
+// R4 global stages, locking the regression.
+//
+// Two-tier assertion shape (post second-reviewer feedback on the v1 of
+// this test):
+//
+// 1. **Span count + labels** — the cheap structural check. Both the
+//    healthy and the buggy paths produce labelled spans of the right
+//    cardinality, so this alone doesn't catch the bug, but it catches
+//    a *different* class of regression (label-formatting drift,
+//    num_dispatches mismatch).
+//
+// 2. **Non-zero R4 durations across attempts** — the actual fold-
+//    regression lock. Under the buggy fold, only one timestamp pair
+//    fires (the outer pass's), so at most one R4 span reports a
+//    non-zero duration; the others read undefined-resolved-as-zero.
+//    Under the healthy PerPass path each R4 dispatch fires its own
+//    pair, so ≥ 2 R4 spans should be non-zero.
+//
+//    Apple Silicon's Metal backend has documented flakiness on
+//    `ComputePassTimestampWrites` — under load some passes silently
+//    fail to write their timestamps, producing the same all-zero
+//    pattern as the regression. To distinguish: retry up to
+//    `MAX_ATTEMPTS` times. The healthy path will produce ≥ 2 non-zero
+//    R4 spans on at least one attempt (Metal's flake rate is well
+//    under 50% in practice). The bug path is deterministic — every
+//    attempt produces ≤ 1 non-zero R4 span.
 #[test]
-fn profiled_forward_log14_has_multiple_r4_spans() {
+fn profiled_forward_log18_has_multiple_r4_spans() {
+    // log_n=18: each R4 dispatch processes ~256k field elements, well
+    // above any timestamp-granularity floor on real backends. The
+    // multi-global-R4 case (≥ 2 R4 dispatches) is what the original P2
+    // bug collapsed.
+    //
+    // Apple Silicon Metal carve-out: as of wgpu v29, the Metal backend
+    // on M4 Pro reliably writes only the FIRST compute pass's
+    // `ComputePassTimestampWrites` per command buffer; subsequent
+    // passes' begin/end queries read back as zero (see e.g. wgpu issue
+    // tracking around `MTLCounterSampleBuffer` boundaries). That
+    // produces the same all-zero-after-first-span pattern as the bug,
+    // so the duration check can't distinguish healthy from regressed
+    // on Metal — a false-positive risk we don't want in CI. The
+    // regression we're locking is platform-agnostic (it's a wgpu API
+    // misuse, not a backend behavior), so locking it on every
+    // non-Metal backend is sufficient. Verified non-flaky on RTX 5090
+    // Vulkan (5/5 healthy passes; 5/5 caught the simulated regression
+    // — see commit message). Run on a Vulkan/DX12/WebGPU host to
+    // exercise the duration check; Metal hosts get the structural
+    // checks only.
+    const MAX_ATTEMPTS: usize = 4;
+
     let device = init_device();
-    let n = 1 << 14;
+    let log_n = 18;
+    let n = 1 << log_n;
     let data: Vec<BabyBear> = (0..n as u32).map(BabyBear::new).collect();
 
+    let on_metal = matches!(device.caps().gpu_family, GpuFamily::Apple);
+
     let mut plan =
-        WgpuNttPlan::new(&device, 14, NttDirection::Forward).expect("forward plan failed");
-    let mut buf = device.upload(&data).expect("upload failed");
+        WgpuNttPlan::new(&device, log_n, NttDirection::Forward).expect("forward plan failed");
 
-    let timings = plan
-        .execute_kernels_profiled(&device, &mut buf)
-        .expect("profiled execution failed");
+    let mut last_spans: Option<Vec<GpuTiming>> = None;
 
-    // Skip silently if the device doesn't support GPU timestamps —
-    // the profiler is None on those backends.
-    let Some(t) = timings else {
-        return;
-    };
+    for attempt in 0..MAX_ATTEMPTS {
+        let mut buf = device.upload(&data).expect("upload failed");
+        let timings = plan
+            .execute_kernels_profiled(&device, &mut buf)
+            .expect("profiled execution failed");
 
-    let expected_dispatches = plan.num_dispatches() as usize;
-    assert_eq!(
-        t.gpu_stage_ns.len(),
-        expected_dispatches,
-        "profiled span count should match num_dispatches() — fold regression \
-         would collapse to fewer spans"
-    );
+        // Skip silently if the device doesn't support GPU timestamps —
+        // the profiler is None on those backends.
+        let Some(t) = timings else {
+            return;
+        };
 
-    let r4_span_count = t
-        .gpu_stage_ns
-        .iter()
-        .filter(|s| s.label.starts_with("r4 stages"))
-        .count();
-    assert!(
-        r4_span_count >= 2,
-        "log_n=14 forward should produce at least 2 R4-global-stage spans, \
-         got {r4_span_count}; spans={:?}",
-        t.gpu_stage_ns.iter().map(|s| &s.label).collect::<Vec<_>>(),
-    );
+        // Tier 1: structural checks (cheap, run every attempt).
+        let expected_dispatches = plan.num_dispatches() as usize;
+        assert_eq!(
+            t.gpu_stage_ns.len(),
+            expected_dispatches,
+            "profiled span count should match num_dispatches() — fold regression \
+             would collapse to fewer spans"
+        );
 
-    // Every span should have a non-zero label and a sensible duration
-    // (or zero if the device skipped that span; we just check labels
-    // are populated, not durations, since GPU clocks vary).
-    for span in &t.gpu_stage_ns {
+        let r4_spans: Vec<&GpuTiming> = t
+            .gpu_stage_ns
+            .iter()
+            .filter(|s| s.label.starts_with("r4 stages"))
+            .collect();
         assert!(
-            !span.label.is_empty(),
-            "every profiled span should have a non-empty label"
+            r4_spans.len() >= 2,
+            "log_n={log_n} forward should produce at least 2 R4-global-stage spans, \
+             got {}; spans={:?}",
+            r4_spans.len(),
+            t.gpu_stage_ns.iter().map(|s| &s.label).collect::<Vec<_>>(),
+        );
+        for span in &t.gpu_stage_ns {
+            assert!(
+                !span.label.is_empty(),
+                "every profiled span should have a non-empty label"
+            );
+        }
+
+        // Tier 2: duration check — this is what locks the original bug.
+        // The buggy fold path produces ≤ 1 non-zero R4 span deterministically.
+        // Skipped on Metal (see carve-out comment above).
+        if on_metal {
+            // Structural checks already passed; skip duration check
+            // on the one platform where it false-positives.
+            return;
+        }
+        let nonzero_r4 = r4_spans.iter().filter(|s| s.duration_ns > 0.0).count();
+        if nonzero_r4 >= 2 {
+            // Healthy: at least one attempt produced 2+ non-zero R4 spans,
+            // confirming each dispatch got its own measurable pass.
+            return;
+        }
+        last_spans = Some(t.gpu_stage_ns.clone());
+        eprintln!(
+            "profiled_forward_log{log_n}: attempt {} saw only {nonzero_r4} non-zero R4 spans \
+             (fold regression?); retrying",
+            attempt + 1
         );
     }
+
+    // Every attempt produced ≤ 1 non-zero R4 span. That's deterministic
+    // bug behavior — Metal's flake rate is well under 50%, so 4 attempts
+    // failing in a row is overwhelmingly the fold regression.
+    panic!(
+        "regression: across {MAX_ATTEMPTS} attempts, no run produced 2+ non-zero R4 spans. \
+         Healthy PerPass profiling should fire each dispatch's timestamps; the buggy \
+         Folded path collapses them into a single outer-pass span. \
+         Last spans={:?}",
+        last_spans.expect("at least one attempt produced timings"),
+    );
 }
 
 // ---------------------------------------------------------------------------

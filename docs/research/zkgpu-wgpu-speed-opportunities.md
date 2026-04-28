@@ -212,7 +212,7 @@ This was previously listed as Conditional / future #3 with a "needs a microbench
 > | RTX 4090 / Vulkan | +0.5% | −0.9% | +0.4% |
 > | RTX 5090 / Vulkan | **−4.1%** | **−5.0%** | −2.1% |
 >
-> Metal regresses by 2-4%, the 4090 is null, only the 5090 shows a clean win. **The Metal-regression gate criterion fails, so the production kernels (`merkle_leaf`, `merkle_leaf_w16`, `merkle_compress`, `plonky3_w16`, `plonky3_w24`) keep the Storage path.** The Uniform pilot stays accessible behind the explicit constructor for callers who want to opt in on 5090-class hardware. The faster generated-module-constants variant remains unimplemented; if it's pursued later, it's a different mechanism (WGSL `const` array inlined at plan-build) and gets its own A/B against this baseline. Full verdict + reproducer: `research/benchmarks/poseidon2-uniform-pilot-2026-04-28/verdict.md` (gitignored).
+> Metal regresses by 2-4%, the 4090 is null, only the 5090 shows a clean win. **The Metal-regression gate criterion fails, so the production kernels (`merkle_leaf`, `merkle_leaf_w16`, `merkle_compress`, `plonky3_w16`, `plonky3_w24`) keep the Storage path.** The Uniform pilot stays accessible behind the explicit constructor for callers who want to opt in on 5090-class hardware. The faster generated-module-constants variant remains unimplemented; if it's pursued later, it's a different mechanism (WGSL `const` array inlined at plan-build) and gets its own A/B against this baseline. Full verdict + reproducer: [`docs/research/poseidon2-uniform-pilot-verdict.md`](poseidon2-uniform-pilot-verdict.md).
 
 Today the Poseidon2 round constants are uploaded as **storage buffers** and read via `var<storage, read>` at shader binding 2. See:
 
@@ -223,18 +223,18 @@ babybear_poseidon2_merkle_compress.wgsl:158
   @group(0) @binding(2) var<storage, read> poseidon_constants: array<u32>;
 ```
 
-These constants are immutable per plan but currently use the storage path — costing a binding slot, one buffer alloc per plan, and storage-cache pressure on every kernel invocation. Two experiments are worth running side-by-side:
+These constants are immutable per plan but currently use the storage path — costing a binding slot, one buffer alloc per plan, and storage-cache pressure on every kernel invocation. Two experiments were proposed to run side-by-side:
 
 - **Safer portable path: constants in a uniform buffer.** Move binding 2 from `var<storage, read>` to `var<uniform>` (subject to the WebGPU 64 KB uniform-buffer ceiling — for BabyBear Plonky3 W24 the constants are well under that; W16 is even smaller). Same plumbing, different binding type. Browser-safe.
 - **Faster specialized path: generated WGSL with module-level constants.** At plan build time, generate the WGSL string with the round constants baked into a `const POSEIDON_CONSTANTS: array<u32, N> = array<u32, N>(...)` block. Drops the binding entirely; lets the WGSL compiler hoist the constants into registers / immediate operands; pairs naturally with item #3 (immediates) since both shrink the bind-group fingerprint. Native-friendly; works in browser too but at the cost of per-plan shader compilation (no shader-module reuse across plans with different constants).
 
-Implementation surface:
+#### Outcome (2026-04-28, Uniform path benched)
 
-- For each Poseidon2 plan (`merkle_leaf.rs`, `merkle_leaf_w16.rs`, `merkle_compress.rs`, the various NTT-side Poseidon2 plans), add a constants source enum: `Storage` (today), `Uniform` (safer experiment), `ModuleConstant` (faster experiment).
-- Pipeline cache key must include the constants source variant (different shader content → different module identity).
-- Bench both variants on at least one mobile (M4 Pro Metal) and one discrete (RTX 5090 Vulkan) host. Adopt whichever wins on each platform per capability/family.
+The Uniform path was implemented as a pilot on the standalone `WgpuBabyBearPoseidon2Plan` only (commit `898b5bd`), benched on three hosts (commit `05b9f56` + verdict committed alongside this update at `docs/research/poseidon2-uniform-pilot-verdict.md`), and **does not propagate**. Per-host A/B in the Status banner above. Apple Silicon regresses, the 4090 is null, only the 5090 wins; the Metal-≥-5%-win gate (set in commit `898b5bd`) is not met. Five production kernels (`merkle_leaf`, `merkle_leaf_w16`, `merkle_compress`, `plonky3_w16`, `plonky3_w24`) keep the Storage path. The pilot Uniform constructor stays accessible via `Poseidon2ConstantsSource::Uniform` for callers who want to opt in on 5090-class hardware.
 
-Estimated effort: 2-3 days, dominated by the WGSL generation path and per-platform bench validation.
+The faster generated-module-constants path remains unimplemented and is **not blocked by this verdict** — it's a different mechanism (WGSL `const` array inlined at plan-build) with its own performance profile. If pursued, it gets its own A/B against the Storage baseline, not against the Uniform pilot.
+
+Estimated effort to re-open if circumstances change (e.g. Naga's Metal codegen for `array<vec4<u32>>` lane-select improves, or a wider Poseidon2 variant lands): the Uniform pilot's plan/kernel/test scaffolding is reusable; rerunning the per-host A/B is the gating cost.
 
 ### 7. Trusted shader modules for audited native kernels
 

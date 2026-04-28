@@ -354,6 +354,13 @@ impl WgpuBabyBearPoseidon2Plan {
         // reserved keywords in WGSL — Naga rejected the module, wgpu
         // returned a tombstone pipeline, and the only symptom was
         // GPU output being all zeros. Keep the scope.
+        //
+        // Native-only — `pop_validation_scope` is `#[cfg(not(wasm32))]`
+        // because wasm needs the async variant. Mirrors the gating
+        // pattern in `ntt::stockham::build`, `ntt::four_step::build`,
+        // and `ntt::batched`. The browser/WebGPU portability claim
+        // breaks if this scope leaks to a wasm build.
+        #[cfg(not(target_arch = "wasm32"))]
         let scope = device.push_validation_scope();
 
         let module = registry.get_or_create_module(
@@ -384,6 +391,7 @@ impl WgpuBabyBearPoseidon2Plan {
             None,
         );
 
+        #[cfg(not(target_arch = "wasm32"))]
         device.pop_validation_scope(scope, "Poseidon2 plan build")?;
 
         Ok(Self {
