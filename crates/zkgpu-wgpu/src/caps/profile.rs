@@ -306,12 +306,30 @@ impl CapabilityProfile {
             | PlatformClass::AppleNative
             | PlatformClass::UnknownNative => MOBILE_DESIRED_BUFFER,
         };
+        // Item #3 (immediates): request a non-zero `max_immediate_size`
+        // when the adapter advertises `Features::IMMEDIATES`. The
+        // default Limits has `max_immediate_size = 0`, which causes
+        // pipeline-layout creation with `immediate_size > 0` to fail
+        // with "Immediate data has size N which exceeds device
+        // immediate data size limit 0..0". The adapter's reported max
+        // is the upper bound; our largest current need (R4 stage
+        // params) is 32 bytes — we request the adapter max so future
+        // migrations of larger param structs don't have to revisit
+        // this. When the adapter doesn't advertise IMMEDIATES, leave
+        // the limit at 0; the kernels' uniform-buffer fallback path
+        // doesn't touch immediates regardless.
+        let max_immediate_size = if self.has_immediates {
+            adapter_limits.max_immediate_size
+        } else {
+            0
+        };
         wgpu::Limits {
             max_storage_buffer_binding_size: desired_buffer
                 .min(adapter_limits.max_storage_buffer_binding_size),
             max_buffer_size: desired_buffer.min(adapter_limits.max_buffer_size),
             max_compute_workgroup_size_x: 256,
             max_compute_invocations_per_workgroup: 256,
+            max_immediate_size,
             ..defaults
         }
     }

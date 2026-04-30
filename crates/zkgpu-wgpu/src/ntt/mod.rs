@@ -23,6 +23,7 @@ pub use planner::PlannerPolicy;
 use planner::{plan_ntt, PlannedNtt, StockhamTailOverride as PlannerTailOverride, MAX_BABYBEAR_LOG_N};
 
 pub use stockham::NttTimings;
+pub use stockham::R4ParamMode;
 
 /// Public mirror of the planner's tail override, re-exported for callers
 /// that construct `PlannerPolicy` directly (testkit, web, ffi runners).
@@ -86,6 +87,19 @@ pub struct WgpuNttPlan {
     log_n: u32,
 }
 
+/// Item #3 (immediates): default R4 param mode is `Immediate` whenever
+/// the device advertises `wgpu::Features::IMMEDIATES`. Adapters that
+/// don't (older Vulkan, OpenGL emulation paths that didn't update,
+/// some constrained WebGPU implementations) fall back to `Storage`
+/// transparently. Both modes produce bit-identical NTT output.
+fn default_r4_param_mode(device: &WgpuDevice) -> stockham::R4ParamMode {
+    if device.caps.has_immediates {
+        stockham::R4ParamMode::Immediate
+    } else {
+        stockham::R4ParamMode::Storage
+    }
+}
+
 enum PlanImpl {
     Stockham(stockham::StockhamPlan),
     FourStep(four_step::FourStepPlan),
@@ -110,6 +124,26 @@ impl WgpuNttPlan {
         Self::new_with_policy(device, log_n, direction, &policy)
     }
 
+    /// Create a plan with an explicit R4 param-mode override.
+    ///
+    /// Item #3 (immediates) bench-only knob. Production callers go
+    /// through [`Self::new`], which auto-detects from
+    /// `device.caps.has_immediates`. This constructor exists so the
+    /// `ntt_param_mode` bench can A/B `Storage` vs `Immediate` on the
+    /// same hardware. Building `R4ParamMode::Immediate` on a device
+    /// that doesn't advertise `Features::IMMEDIATES` returns
+    /// `ZkGpuError::InvalidNttSize`.
+    pub fn new_with_r4_param_mode(
+        device: &WgpuDevice,
+        log_n: u32,
+        direction: NttDirection,
+        r4_param_mode: stockham::R4ParamMode,
+    ) -> Result<Self, ZkGpuError> {
+        let policy = PlannerPolicy::from_caps(device.caps())
+            .with_public_tail_override(StockhamTailOverride::Auto);
+        Self::new_with_options(device, log_n, direction, &policy, r4_param_mode)
+    }
+
     /// Create a plan with an explicit planner policy.
     ///
     /// Useful for benchmarks that need to force a specific family, or for
@@ -120,6 +154,23 @@ impl WgpuNttPlan {
         log_n: u32,
         direction: NttDirection,
         policy: &PlannerPolicy,
+    ) -> Result<Self, ZkGpuError> {
+        Self::new_with_options(
+            device,
+            log_n,
+            direction,
+            policy,
+            default_r4_param_mode(device),
+        )
+    }
+
+    /// Internal constructor wired by all the public entry points.
+    fn new_with_options(
+        device: &WgpuDevice,
+        log_n: u32,
+        direction: NttDirection,
+        policy: &PlannerPolicy,
+        r4_param_mode: stockham::R4ParamMode,
     ) -> Result<Self, ZkGpuError> {
         if log_n > MAX_BABYBEAR_LOG_N {
             return Err(ZkGpuError::InvalidNttSize(format!(
@@ -169,7 +220,10 @@ impl WgpuNttPlan {
         let inner = match planned {
             PlannedNtt::Stockham(config) => {
                 PlanImpl::Stockham(stockham::StockhamPlan::new(
-                    device, config, direction,
+                    device,
+                    config,
+                    direction,
+                    r4_param_mode,
                 )?)
             }
             PlannedNtt::FourStep(config) => {

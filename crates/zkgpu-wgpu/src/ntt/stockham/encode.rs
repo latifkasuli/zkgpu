@@ -2,7 +2,7 @@ use zkgpu_babybear::BabyBear;
 
 use crate::buffer::WgpuBuffer;
 
-use super::StockhamPlan;
+use super::{R4ParamSource, StockhamPlan};
 
 /// Selects how `encode_ntt_stages` lays out compute passes.
 ///
@@ -71,52 +71,108 @@ impl StockhamPlan {
         // recorder retains references to bind groups until the pass ends.
 
         // Pre-build all bind groups with their associated pipelines.
-        enum Stage {
-            R4(wgpu::BindGroup),
+        // R4 stage bind groups have either 5 entries (Storage mode) or
+        // 4 entries (Immediate mode — slot 3 is gone). The Stage enum
+        // carries the optional immediate-payload reference so the
+        // dispatch site can call `pass.set_immediates(0, ...)` before
+        // each R4 dispatch in Immediate mode.
+        enum Stage<'p> {
+            R4 {
+                bind_group: wgpu::BindGroup,
+                /// `Some(&[u32; 8])` when the plan is in Immediate
+                /// mode; `None` when the params live in the bind
+                /// group at slot 3 (Storage mode).
+                immediate: Option<&'p [u32; 8]>,
+            },
             R2Global(wgpu::BindGroup),
         }
 
-        let mut stages: Vec<Stage> = Vec::with_capacity(
-            self.r4_stage_param_buffers.len()
+        let mut stages: Vec<Stage<'_>> = Vec::with_capacity(
+            self.r4_param_source.len()
                 + self.global_stage_param_buffers.len(),
         );
         let mut dispatch_idx: usize = 0;
 
-        // Phase 1a: Radix-4 global stage bind groups
-        for param_buffer in self.r4_stage_param_buffers.iter() {
-            let (src_buf, dst_buf) = if dispatch_idx % 2 == 0 {
-                (&buf.inner, &self.scratch_buffer)
-            } else {
-                (&self.scratch_buffer, &buf.inner)
-            };
-            let bg = wgpu_device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.ntt_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: src_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: dst_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: self.r4_twiddle_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: param_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: self.r4_twiddle_prime_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-            stages.push(Stage::R4(bg));
-            dispatch_idx += 1;
+        // Phase 1a: Radix-4 global stage bind groups (mode-dependent).
+        match &self.r4_param_source {
+            R4ParamSource::Storage(buffers) => {
+                for param_buffer in buffers.iter() {
+                    let (src_buf, dst_buf) = if dispatch_idx % 2 == 0 {
+                        (&buf.inner, &self.scratch_buffer)
+                    } else {
+                        (&self.scratch_buffer, &buf.inner)
+                    };
+                    let bg = wgpu_device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &self.r4_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: src_buf.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: dst_buf.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: self.r4_twiddle_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: param_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: self.r4_twiddle_prime_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                    stages.push(Stage::R4 {
+                        bind_group: bg,
+                        immediate: None,
+                    });
+                    dispatch_idx += 1;
+                }
+            }
+            R4ParamSource::Immediate(param_blocks) => {
+                for params in param_blocks.iter() {
+                    let (src_buf, dst_buf) = if dispatch_idx % 2 == 0 {
+                        (&buf.inner, &self.scratch_buffer)
+                    } else {
+                        (&self.scratch_buffer, &buf.inner)
+                    };
+                    // 4-entry bind group — binding 3 is absent because
+                    // params arrive via `pass.set_immediates(0, ...)`.
+                    let bg = wgpu_device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &self.r4_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: src_buf.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: dst_buf.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: self.r4_twiddle_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: self.r4_twiddle_prime_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                    stages.push(Stage::R4 {
+                        bind_group: bg,
+                        immediate: Some(params),
+                    });
+                    dispatch_idx += 1;
+                }
+            }
         }
 
         // Phase 1b: Radix-2 remainder global stage bind groups
@@ -224,11 +280,19 @@ impl StockhamPlan {
                     });
 
                     for stage in &stages {
-                        let (pipeline, bind_group, dispatch) = match stage {
-                            Stage::R4(bg) => (&self.r4_pipeline, bg, &self.r4_dispatch),
-                            Stage::R2Global(bg) => {
-                                (&self.global_pipeline, bg, &self.r2_dispatch)
-                            }
+                        let (pipeline, bind_group, dispatch, immediate) = match stage {
+                            Stage::R4 { bind_group, immediate } => (
+                                &self.r4_pipeline,
+                                bind_group,
+                                &self.r4_dispatch,
+                                *immediate,
+                            ),
+                            Stage::R2Global(bg) => (
+                                &self.global_pipeline,
+                                bg,
+                                &self.r2_dispatch,
+                                None,
+                            ),
                         };
 
                         // Set pipeline + bind group before every dispatch.
@@ -238,6 +302,14 @@ impl StockhamPlan {
                         // skip optimization isn't worth correctness risk.
                         pass.set_pipeline(pipeline);
                         pass.set_bind_group(0, bind_group, &[]);
+                        // Item #3 immediate path: write the per-stage
+                        // param block to register-resident bytes. The
+                        // wgpu API requires immediates be set AFTER the
+                        // pipeline (which carries the layout's
+                        // `immediate_size`) and BEFORE the dispatch.
+                        if let Some(params) = immediate {
+                            pass.set_immediates(0, bytemuck::cast_slice(params));
+                        }
                         pass.dispatch_workgroups(dispatch.x, dispatch.y, 1);
                     }
                 }
@@ -260,10 +332,15 @@ impl StockhamPlan {
                 // `execute_kernels_profiled` relies on for per-stage
                 // labelling in `NttTimings::gpu_stage_ns`.
                 for (i, stage) in stages.iter().enumerate() {
-                    let (pipeline, bind_group, dispatch) = match stage {
-                        Stage::R4(bg) => (&self.r4_pipeline, bg, &self.r4_dispatch),
+                    let (pipeline, bind_group, dispatch, immediate) = match stage {
+                        Stage::R4 { bind_group, immediate } => (
+                            &self.r4_pipeline,
+                            bind_group,
+                            &self.r4_dispatch,
+                            *immediate,
+                        ),
                         Stage::R2Global(bg) => {
-                            (&self.global_pipeline, bg, &self.r2_dispatch)
+                            (&self.global_pipeline, bg, &self.r2_dispatch, None)
                         }
                     };
                     let ts = ts_writes.get(i).and_then(|t| t.clone());
@@ -273,6 +350,9 @@ impl StockhamPlan {
                     });
                     pass.set_pipeline(pipeline);
                     pass.set_bind_group(0, bind_group, &[]);
+                    if let Some(params) = immediate {
+                        pass.set_immediates(0, bytemuck::cast_slice(params));
+                    }
                     pass.dispatch_workgroups(dispatch.x, dispatch.y, 1);
                 }
 

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use wgpu::util::DeviceExt;
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuField, NttDirection, ZkGpuError};
@@ -5,7 +7,7 @@ use zkgpu_core::{GpuField, NttDirection, ZkGpuError};
 use crate::device::WgpuDevice;
 use crate::dispatch::plan_linear_dispatch;
 
-use super::StockhamPlan;
+use super::{R4ParamMode, R4ParamSource, StockhamPlan};
 use super::super::common::{bgl_storage_entry, bgl_uniform_entry};
 use super::super::planner::{StockhamPlanConfig, WORKGROUP_SIZE};
 use super::super::babybear_twiddles::{
@@ -16,21 +18,53 @@ const STOCKHAM_R2_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_stockham_r2.wgsl");
 const STOCKHAM_R4_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_stockham_r4.wgsl");
+const STOCKHAM_R4_IMMEDIATE_SOURCE: &str =
+    include_str!("../../kernels/portable/babybear_stockham_r4_immediate.wgsl");
 const STOCKHAM_LOCAL_R4_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_stockham_local_r4.wgsl");
 const SCALE_SOURCE: &str =
     include_str!("../../kernels/portable/babybear_scale.wgsl");
 
 const NTT_BGL_LABEL: &str = "Stockham NTT bind group layout";
+const R4_IMMEDIATE_BGL_LABEL: &str = "Stockham R4 Immediate bind group layout";
 const SCALE_BGL_LABEL: &str = "Scale bind group layout";
+
+/// Item #3 (immediates) drift-prevention: the R4 immediate-mode param
+/// block size in bytes. This single value is the source of truth for
+/// BOTH `PipelineLayoutDescriptor::immediate_size` AND the cache-key
+/// `PipelineSpec::immediate_size` — see the design note at the top of
+/// `pipeline_registry.rs`. The two fields cannot drift because they're
+/// both derived from this constant. The size matches the WGSL
+/// `R4Params` struct in `babybear_stockham_r4_immediate.wgsl` (8 ×
+/// u32 = 32 bytes).
+const R4_IMMEDIATE_SIZE_BYTES: u32 = 32;
 
 impl StockhamPlan {
     /// Create a Stockham NTT plan from a pre-validated config.
+    ///
+    /// `r4_param_mode` selects how the radix-4 stage params reach the
+    /// kernel. `Storage` is the original path (per-stage uniform
+    /// buffer); `Immediate` is the item #3 pilot path
+    /// (`set_immediates`). The caller is responsible for picking a
+    /// mode the device actually supports (see
+    /// `device.caps.has_immediates`); attempting to build an
+    /// `Immediate` plan on a device without `Features::IMMEDIATES`
+    /// returns `ZkGpuError::InvalidNttSize`. The trampoline at
+    /// `WgpuNttPlan::new` does the auto-detection so most callers
+    /// don't think about this.
     pub(crate) fn new(
         device: &WgpuDevice,
         config: StockhamPlanConfig,
         direction: NttDirection,
+        r4_param_mode: R4ParamMode,
     ) -> Result<Self, ZkGpuError> {
+        if r4_param_mode == R4ParamMode::Immediate && !device.caps.has_immediates {
+            return Err(ZkGpuError::InvalidNttSize(
+                "R4ParamMode::Immediate requires wgpu::Features::IMMEDIATES, \
+                 which the active device does not advertise"
+                    .to_string(),
+            ));
+        }
         let log_n = config.log_n;
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -76,21 +110,79 @@ impl StockhamPlan {
             device.pipeline_cache.as_ref(),
         );
 
-        // --- Radix-4 global pipeline ---
-        let r4_module = reg.get_or_create_module(
-            &device.device,
-            STOCKHAM_R4_SOURCE,
-            "Stockham R4 shader",
-        );
-        let r4_pipeline = reg.get_or_create_pipeline(
-            &device.device,
-            STOCKHAM_R4_SOURCE,
-            "stockham_r4_butterfly",
-            NTT_BGL_LABEL,
-            &ntt_pipeline_layout,
-            &r4_module,
-            device.pipeline_cache.as_ref(),
-        );
+        // --- Radix-4 global pipeline (mode-dependent) ---
+        //
+        // Storage mode: shares the 5-entry NTT BGL + pipeline layout
+        // with R2 and local. Today's path.
+        //
+        // Immediate mode: distinct 4-entry BGL (no slot 3) +
+        // pipeline layout with `immediate_size = 32`. The
+        // `R4_IMMEDIATE_SIZE_BYTES` constant feeds BOTH the layout
+        // descriptor and the `PipelineSpec` cache key — drift-
+        // prevention rule from the design note in
+        // `pipeline_registry.rs`. The `_with_spec` pipeline path
+        // ensures the cache distinguishes the two specializations
+        // (different `immediate_size` → different cache slot →
+        // separately compiled pipeline).
+        let (r4_bind_group_layout, r4_pipeline) = match r4_param_mode {
+            R4ParamMode::Storage => {
+                let r4_module = reg.get_or_create_module(
+                    &device.device,
+                    STOCKHAM_R4_SOURCE,
+                    "Stockham R4 shader",
+                );
+                let pipe = reg.get_or_create_pipeline(
+                    &device.device,
+                    STOCKHAM_R4_SOURCE,
+                    "stockham_r4_butterfly",
+                    NTT_BGL_LABEL,
+                    &ntt_pipeline_layout,
+                    &r4_module,
+                    device.pipeline_cache.as_ref(),
+                );
+                (Arc::clone(&ntt_bind_group_layout), pipe)
+            }
+            R4ParamMode::Immediate => {
+                let r4_imm_bgl = reg.get_or_create_bgl(
+                    &device.device,
+                    R4_IMMEDIATE_BGL_LABEL,
+                    &[
+                        bgl_storage_entry(0, true),  // src
+                        bgl_storage_entry(1, false), // dst
+                        bgl_storage_entry(2, true),  // twiddles
+                        // binding 3 deliberately absent — params via
+                        // var<immediate>, not a uniform buffer.
+                        bgl_storage_entry(4, true), // twiddles_prime
+                    ],
+                );
+                let r4_imm_layout = device.device.create_pipeline_layout(
+                    &wgpu::PipelineLayoutDescriptor {
+                        label: Some("Stockham R4 Immediate pipeline layout"),
+                        bind_group_layouts: &[Some(&r4_imm_bgl)],
+                        immediate_size: R4_IMMEDIATE_SIZE_BYTES,
+                    },
+                );
+                let r4_imm_module = reg.get_or_create_module(
+                    &device.device,
+                    STOCKHAM_R4_IMMEDIATE_SOURCE,
+                    "Stockham R4 Immediate shader",
+                );
+                let pipe = reg.get_or_create_pipeline_with_spec(
+                    &device.device,
+                    STOCKHAM_R4_IMMEDIATE_SOURCE,
+                    "stockham_r4_butterfly",
+                    R4_IMMEDIATE_BGL_LABEL,
+                    &r4_imm_layout,
+                    &r4_imm_module,
+                    device.pipeline_cache.as_ref(),
+                    &crate::pipeline_registry::PipelineSpec {
+                        immediate_size: R4_IMMEDIATE_SIZE_BYTES,
+                        ..crate::pipeline_registry::PipelineSpec::default()
+                    },
+                );
+                (r4_imm_bgl, pipe)
+            }
+        };
 
         // --- Local pipeline (portable radix-4 DIF) ---
         //
@@ -295,29 +387,52 @@ impl StockhamPlan {
                     usage: wgpu::BufferUsages::STORAGE,
                 });
 
-        let mut r4_stage_param_buffers = Vec::with_capacity(config.r4_stage_params.len());
-        for sp in &config.r4_stage_params {
-            // Slot 7 (`_pad0` in the WGSL struct) now carries the
-            // 2D-dispatch `groups_per_row` for thread-index reconstruction.
-            let params = [
-                sp.n,
-                sp.s,
-                sp.m4,
-                sp.twiddle_offset,
-                omega4,
-                omega4_prime,
-                r4_dispatch.groups_per_row,
-                0u32,
-            ];
-            let buf = device
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Stockham R4 stage params"),
-                    contents: bytemuck::cast_slice(&params),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-            r4_stage_param_buffers.push(buf);
-        }
+        // R4 stage params: shape depends on mode.
+        // - Storage: pre-built `wgpu::Buffer` per stage, bound at slot 3.
+        // - Immediate: pre-computed [u32; 8] per stage, written via
+        //   `pass.set_immediates(0, &bytes)` before each dispatch.
+        let r4_param_source = match r4_param_mode {
+            R4ParamMode::Storage => {
+                let mut buffers = Vec::with_capacity(config.r4_stage_params.len());
+                for sp in &config.r4_stage_params {
+                    let params = [
+                        sp.n,
+                        sp.s,
+                        sp.m4,
+                        sp.twiddle_offset,
+                        omega4,
+                        omega4_prime,
+                        r4_dispatch.groups_per_row,
+                        0u32,
+                    ];
+                    let buf = device.device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("Stockham R4 stage params"),
+                            contents: bytemuck::cast_slice(&params),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        },
+                    );
+                    buffers.push(buf);
+                }
+                R4ParamSource::Storage(buffers)
+            }
+            R4ParamMode::Immediate => {
+                let mut bytes = Vec::with_capacity(config.r4_stage_params.len());
+                for sp in &config.r4_stage_params {
+                    bytes.push([
+                        sp.n,
+                        sp.s,
+                        sp.m4,
+                        sp.twiddle_offset,
+                        omega4,
+                        omega4_prime,
+                        r4_dispatch.groups_per_row,
+                        0u32,
+                    ]);
+                }
+                R4ParamSource::Immediate(bytes)
+            }
+        };
 
         // --- Local twiddles and params (radix-4 DIF) ---
         let (local_twiddles, local_twiddles_prime, local_omega4, local_omega4_prime) =
@@ -372,12 +487,13 @@ impl StockhamPlan {
             r4_pipeline,
             local_pipeline,
             ntt_bind_group_layout,
+            r4_bind_group_layout,
             global_twiddle_buffer,
             global_twiddle_prime_buffer,
             global_stage_param_buffers,
             r4_twiddle_buffer,
             r4_twiddle_prime_buffer,
-            r4_stage_param_buffers,
+            r4_param_source,
             local_twiddle_buffer,
             local_twiddle_prime_buffer,
             local_param_buffer,

@@ -29,11 +29,23 @@ use super::planner::StockhamPlanConfig;
 ///
 /// For inverse NTT, a final GPU dispatch multiplies every element by
 /// `n^{-1} mod P`, avoiding a host round-trip.
+///
+/// **Item #3 pilot (Gate 2):** the radix-4 global stage carries its
+/// per-stage params via either a uniform buffer (today's path,
+/// `R4ParamSource::Storage`) or via `wgpu::Features::IMMEDIATES`
+/// register writes (`R4ParamSource::Immediate`). The choice is fixed
+/// at plan build — auto-detected from `device.caps.has_immediates`,
+/// or overridden via `WgpuNttPlan::new_with_options` for benching.
+/// R2 global stages and the local-fused kernel keep the uniform path
+/// regardless; only R4 is migrated by this pilot.
 pub(crate) struct StockhamPlan {
     pub(super) global_pipeline: Arc<wgpu::ComputePipeline>,
     pub(super) r4_pipeline: Arc<wgpu::ComputePipeline>,
     pub(super) local_pipeline: Arc<wgpu::ComputePipeline>,
     pub(super) ntt_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    /// R4 BGL — equal to `ntt_bind_group_layout` in `Storage` mode,
+    /// a distinct 4-entry layout (no slot 3) in `Immediate` mode.
+    pub(super) r4_bind_group_layout: Arc<wgpu::BindGroupLayout>,
 
     pub(super) global_twiddle_buffer: wgpu::Buffer,
     pub(super) global_twiddle_prime_buffer: wgpu::Buffer,
@@ -41,7 +53,8 @@ pub(crate) struct StockhamPlan {
 
     pub(super) r4_twiddle_buffer: wgpu::Buffer,
     pub(super) r4_twiddle_prime_buffer: wgpu::Buffer,
-    pub(super) r4_stage_param_buffers: Vec<wgpu::Buffer>,
+    /// R4 stage params, stored in the shape the active mode needs.
+    pub(super) r4_param_source: R4ParamSource,
 
     pub(super) local_twiddle_buffer: wgpu::Buffer,
     pub(super) local_twiddle_prime_buffer: wgpu::Buffer,
@@ -73,6 +86,41 @@ pub struct NttTimings {
     pub wall_clock: std::time::Duration,
     pub gpu_stage_ns: Vec<GpuTiming>,
     pub gpu_total_ns: f64,
+}
+
+/// How R4 stage params reach the kernel. Item #3 of
+/// `docs/research/zkgpu-wgpu-speed-opportunities.md`. The enum is
+/// `pub(crate)` so the bench harness can override the auto-detected
+/// choice via `R4ParamMode`; production callers go through
+/// `WgpuNttPlan::new` and get the auto-detected default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum R4ParamMode {
+    /// Per-stage uniform buffer at bind-group entry 3. Today's
+    /// shipping default. Works on every wgpu backend.
+    Storage,
+    /// Per-stage params flow through `wgpu::Features::IMMEDIATES` —
+    /// `set_immediates` writes 32 bytes directly to register-resident
+    /// space. Drops the bind-group entry and the per-stage
+    /// `wgpu::Buffer` allocation. Requires `caps.has_immediates`.
+    Immediate,
+}
+
+/// Internal binding state for R4 stage params. See [`R4ParamMode`].
+pub(super) enum R4ParamSource {
+    /// One uniform buffer per stage; bound at entry 3 in encode.
+    Storage(Vec<wgpu::Buffer>),
+    /// One 32-byte param block per stage; written via
+    /// `pass.set_immediates(0, ...)` before each R4 dispatch.
+    Immediate(Vec<[u32; 8]>),
+}
+
+impl R4ParamSource {
+    pub(super) fn len(&self) -> usize {
+        match self {
+            R4ParamSource::Storage(v) => v.len(),
+            R4ParamSource::Immediate(v) => v.len(),
+        }
+    }
 }
 
 impl StockhamPlan {

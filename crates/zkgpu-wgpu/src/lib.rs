@@ -16,7 +16,9 @@ pub use buffer::WgpuBuffer;
 pub use caps::{CapabilityProfile, DetectionSource, DeviceTier, DriverQuirks, GpuFamily, MemoryModel, PlatformClass, driver_quirks, is_gpu_usable};
 pub use device::WgpuDevice;
 pub use ntt::goldilocks::{WgpuGoldilocksNttPlan, MAX_GOLDILOCKS_LOG_N};
-pub use ntt::{NttTimings, PlannerPolicy, StockhamTailOverride, WgpuBatchedNttPlan, WgpuNttPlan};
+pub use ntt::{
+    NttTimings, PlannerPolicy, R4ParamMode, StockhamTailOverride, WgpuBatchedNttPlan, WgpuNttPlan,
+};
 pub use poseidon2::{
     commit_mixed_height_with_w16_leaf, commit_mixed_height_with_w24_leaf,
     open_batch_mixed_height, root_from_retained, MERKLE_DIGEST_LEN,
