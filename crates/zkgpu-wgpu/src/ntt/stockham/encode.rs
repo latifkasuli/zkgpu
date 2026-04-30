@@ -22,6 +22,17 @@ use super::StockhamPlan;
 #[derive(Clone, Copy)]
 pub(super) enum NttEncodeMode {
     Folded,
+    // The integration-test build (`cargo test --test gpu_ntt_validation
+    // --no-run`) flags `PerPass` as never-constructed even though
+    // `profiled.rs` references it from `execute_kernels_profiled`.
+    // The lib-only `cargo check -p zkgpu-wgpu` is clean, so this is a
+    // dead-code-analyzer artefact specific to how the integration-test
+    // target sees the lib (the public NTT API at `ntt/mod.rs` only
+    // reaches `PerPass` via the profiled trampoline; the analyzer
+    // apparently doesn't trace far enough). The variant IS used at
+    // runtime — every profiled bench/test exercises it. Allow the
+    // dead-code lint locally so the test matrix stays warning-clean.
+    #[allow(dead_code)]
     PerPass,
 }
 

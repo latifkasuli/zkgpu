@@ -673,12 +673,24 @@ fn profiled_forward_log18_has_multiple_r4_spans() {
     //   spans report non-zero durations; the duration assertion below
     //   is the regression lock.
     //
-    // Verified locally on M4 Pro: 10/10 healthy structural-only runs
-    // pass, 5/5 simulated-regression runs catch the all-zero pattern
-    // (the inner panic message includes the spans for diagnosability).
-    // Verified on RTX 5090 Vulkan: 3/3 healthy passes complete in
-    // <1 s; the simulated-regression hang above is the catch mechanism
-    // there.
+    // Honest summary of where the regression actually gets caught:
+    //
+    // - **M4 Pro Metal:** structural checks only. Doesn't catch the
+    //   original P2 bug, because that bug preserved span count and
+    //   labels — the part Metal can verify. A separate
+    //   backend-independent unit test could close this gap by
+    //   asserting on the encoder pass-count contract directly; not
+    //   added here because no mock encoder exists in zkgpu-wgpu yet.
+    //   Verified 10/10 healthy passes on M4 Pro to confirm the
+    //   structural assertions don't false-positive.
+    // - **RTX 5090 Vulkan:** verified 3/3 healthy passes complete in
+    //   <1 s. Simulated regression deterministically hangs cargo test
+    //   on `resolve_query_set`; the wall-clock timeout is the catch
+    //   mechanism. The duration assertion below is reached only on
+    //   the healthy path on this backend.
+    // - **Other Vulkan/DX12 hosts:** untested in CI. The duration
+    //   assertion is what locks the regression there if the backend
+    //   doesn't share Vulkan's resolve-on-unwritten hang behavior.
     const MAX_ATTEMPTS: usize = 4;
 
     let device = init_device();
