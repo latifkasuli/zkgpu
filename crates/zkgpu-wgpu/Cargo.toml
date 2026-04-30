@@ -58,3 +58,7 @@ harness = false
 [[bench]]
 name = "poseidon2_constants_source"
 harness = false
+
+[[bench]]
+name = "ntt_r4_param_mode"
+harness = false
