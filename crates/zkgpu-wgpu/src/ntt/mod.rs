@@ -87,17 +87,24 @@ pub struct WgpuNttPlan {
     log_n: u32,
 }
 
-/// Item #3 (immediates): default R4 param mode is `Immediate` whenever
-/// the device advertises `wgpu::Features::IMMEDIATES`. Adapters that
-/// don't (older Vulkan, OpenGL emulation paths that didn't update,
-/// some constrained WebGPU implementations) fall back to `Storage`
-/// transparently. Both modes produce bit-identical NTT output.
-fn default_r4_param_mode(device: &WgpuDevice) -> stockham::R4ParamMode {
-    if device.caps.has_immediates {
-        stockham::R4ParamMode::Immediate
-    } else {
-        stockham::R4ParamMode::Storage
-    }
+/// Item #3 (immediates): default R4 param mode.
+///
+/// **Currently `Storage` even when `caps.has_immediates`** — pilot
+/// shape mirroring item #6's. The Immediate path is implemented and
+/// validated for parity, but the default doesn't switch until per-host
+/// bench data confirms a clean win across the consumer hot-path log_n
+/// range (typically 18). M4 Pro / Metal data (commit ac379b4) shows
+/// Immediate +2-5% slower at log_n ∈ {10, 14, 18} and -11.6% faster
+/// at log_n=20; NVIDIA Vulkan A/B is pending vast.ai availability.
+/// Once a uniform-win or thresholded-win story is confirmed, this
+/// function flips to return Immediate (or a thresholded mix) and the
+/// bench feeds back into the gate decision in the speed-opportunities
+/// doc.
+///
+/// Callers wanting to opt in explicitly use
+/// `WgpuNttPlan::new_with_r4_param_mode`.
+fn default_r4_param_mode(_device: &WgpuDevice) -> stockham::R4ParamMode {
+    stockham::R4ParamMode::Storage
 }
 
 enum PlanImpl {
