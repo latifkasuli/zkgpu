@@ -431,6 +431,7 @@ fn mock_caps_identity(
         has_timestamp_query_inside_passes: false,
         has_mappable_primary_buffers: false,
         has_pipeline_cache: false,
+        has_immediates: false,
         has_shader_int64: false,
         transient_saves_memory: false,
         max_buffer_size: 0,

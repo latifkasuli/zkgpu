@@ -37,6 +37,22 @@ pub struct CapabilityProfile {
     pub has_mappable_primary_buffers: bool,
     pub has_pipeline_cache: bool,
 
+    /// Whether the adapter advertises `wgpu::Features::IMMEDIATES`.
+    ///
+    /// Item #3 of the speed-opportunities phase
+    /// ([`docs/research/zkgpu-wgpu-speed-opportunities.md`]) uses this
+    /// to gate the per-dispatch param-block path: when present, small
+    /// per-stage uniforms (e.g. R4 `(stage_idx, log_stride, n)`) flow
+    /// through `ComputePass::set_immediates` to register-resident bytes
+    /// instead of through a uniform buffer + bind-group entry. When
+    /// absent, the kernel falls back to the uniform-buffer path.
+    ///
+    /// Classified by wgpu v29 as "Web and native" — supported on
+    /// Vulkan, Metal, DX12, OpenGL (emulated as uniforms), and WebGPU.
+    /// Adapters that don't advertise it set this `false` and the
+    /// fallback path is used; no kernel-correctness change.
+    pub has_immediates: bool,
+
     /// Whether the adapter advertises `wgpu::Features::SHADER_INT64`.
     ///
     /// **Detection only in Phase A** — this bool is populated from
@@ -105,6 +121,7 @@ impl CapabilityProfile {
             features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES);
         let has_mappable = features.contains(wgpu::Features::MAPPABLE_PRIMARY_BUFFERS);
         let has_pipeline_cache = features.contains(wgpu::Features::PIPELINE_CACHE);
+        let has_immediates = features.contains(wgpu::Features::IMMEDIATES);
         // SHADER_INT64 is native-only (Vulkan / DX12-DXC / Metal 2.3+)
         // per the wgpu docs and always absent on browser-WebGPU. We
         // only *detect* here; actual feature requesting is gated by
@@ -147,6 +164,7 @@ impl CapabilityProfile {
             has_timestamp_query_inside_passes: has_timestamp_inside,
             has_mappable_primary_buffers: has_mappable,
             has_pipeline_cache,
+            has_immediates,
             has_shader_int64,
             transient_saves_memory: info.transient_saves_memory,
             max_buffer_size: 0,
@@ -219,6 +237,17 @@ impl CapabilityProfile {
         }
         if self.has_pipeline_cache {
             f |= wgpu::Features::PIPELINE_CACHE;
+        }
+        // IMMEDIATES is requested whenever the adapter advertises it.
+        // Item #3 uses it to skip the per-stage param uniform buffer +
+        // bind-group entry; kernels that haven't migrated keep working
+        // off the uniform path regardless. Requesting an unused feature
+        // costs nothing on the kernels' fast path — the feature only
+        // changes behavior for pipelines whose layout sets
+        // `immediate_size > 0`. Safe to opt in unconditionally where
+        // available.
+        if self.has_immediates {
+            f |= wgpu::Features::IMMEDIATES;
         }
         // SHADER_INT64 is **never** requested here, even when
         // `goldilocks-vulkan-int64` is enabled. Phase A is detection-
@@ -348,6 +377,9 @@ impl CapabilityProfile {
         if self.has_pipeline_cache {
             flags.push(("pipeline_cache", "true".to_string()));
         }
+        if self.has_immediates {
+            flags.push(("immediates", "true".to_string()));
+        }
         if self.transient_saves_memory {
             flags.push(("transient_memory", "true".to_string()));
         }
@@ -431,6 +463,7 @@ mod tests {
             has_timestamp_query_inside_passes: false,
             has_mappable_primary_buffers: has_mpb,
             has_pipeline_cache: false,
+            has_immediates: false,
             has_shader_int64: false,
             transient_saves_memory: false,
             max_buffer_size: 0,
