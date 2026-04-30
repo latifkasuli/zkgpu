@@ -767,9 +767,13 @@ fn profiled_forward_log18_has_multiple_r4_spans() {
         );
     }
 
-    // Every attempt produced ≤ 1 non-zero R4 span. That's deterministic
-    // bug behavior — Metal's flake rate is well under 50%, so 4 attempts
-    // failing in a row is overwhelmingly the fold regression.
+    // Every non-Metal attempt produced ≤ 1 non-zero R4 span. That's
+    // deterministic bug behavior — the retry budget exists only to
+    // absorb transient timestamp noise on flaky non-Metal backends
+    // (no specific case observed yet, but the budget is cheap), and 4
+    // attempts failing in a row is overwhelmingly the fold regression
+    // rather than coincident flakes. (Metal returns before this block
+    // via the carve-out above; see the `on_metal` branch.)
     panic!(
         "regression: across {MAX_ATTEMPTS} attempts, no run produced 2+ non-zero R4 spans. \
          Healthy PerPass profiling should fire each dispatch's timestamps; the buggy \
