@@ -39,7 +39,7 @@ Without evidence that consumer pipelines reuse the same buffer often enough for 
 | 18 | 81.954 µs | 82.029 µs | +0.09% | 0.60 |
 | 20 | 111.03 µs | 107.94 µs | **−2.8%** | **0.01** |
 
-Storage path changed by < 1% across all log_n with p ≫ 0.05 — confirming that the variance we do see is session-to-session noise rather than the collapse leaking into the unchanged path. The only stat-significant Immediate result is log_n=20 (−2.8%, p=0.01); CIs are just barely disjoint (Storage 20 lower bound 109.18 µs, Immediate 20 upper bound 109.07 µs).
+Storage path changed by < 1% across all log_n with p ≫ 0.05 — confirming that the variance we do see is session-to-session noise rather than the collapse leaking into the unchanged path. The only stat-significant Immediate result is log_n=20 (−2.8%, p=0.01); the same-session before/after CIs are just barely disjoint there (Immediate-before 95% CI lower bound 109.88 µs, Immediate-after 95% CI upper bound 109.07 µs).
 
 ### M4 Pro / Metal
 

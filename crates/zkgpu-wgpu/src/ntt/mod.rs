@@ -138,7 +138,7 @@ impl WgpuNttPlan {
     /// Item #3 (immediates) opt-in entry point. [`Self::new`] always
     /// uses [`R4ParamMode::Storage`] (the verdict-pinned default —
     /// see `default_r4_param_mode` above); this constructor exposes
-    /// [`R4ParamMode::Immediate`] for two callers:
+    /// [`R4ParamMode::Immediate`] for three callers:
     ///
     /// - The `ntt_r4_param_mode` Criterion bench, which A/Bs the two
     ///   modes on the same hardware.
@@ -149,9 +149,24 @@ impl WgpuNttPlan {
     /// - Downstream callers who measure on their own hardware and
     ///   want Immediate for a specific workload.
     ///
-    /// Building `R4ParamMode::Immediate` on a device that doesn't
-    /// advertise `Features::IMMEDIATES` returns
-    /// `ZkGpuError::InvalidNttSize` at construction.
+    /// Two `ZkGpuError::InvalidNttSize` failure modes for
+    /// `R4ParamMode::Immediate`:
+    ///
+    /// 1. **`Features::IMMEDIATES` not advertised by the device.**
+    ///    Older Vulkan drivers and some constrained WebGPU
+    ///    implementations don't have it; the kernel can't be built.
+    /// 2. **Auto-policy resolved to Four-Step at the chosen
+    ///    `log_n`.** This constructor uses the same auto-policy as
+    ///    [`Self::new`] (per `PlannerPolicy::from_caps`), so on
+    ///    platforms where Four-Step kicks in at large `log_n`
+    ///    (Adreno Android `≥ 18`, others `≥ 20`), the planner will
+    ///    pick Four-Step — but `R4ParamMode` is a Stockham-only
+    ///    knob (Four-Step has its own param flow), and the
+    ///    construction is rejected to prevent the silent
+    ///    arg-discarding footgun. To force Stockham + Immediate
+    ///    end-to-end at any `log_n`, use
+    ///    [`Self::new_with_options`] with
+    ///    `PlannerPolicy::stockham_only()`.
     pub fn new_with_r4_param_mode(
         device: &WgpuDevice,
         log_n: u32,
