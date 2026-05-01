@@ -975,6 +975,17 @@ fn r4_immediate_matches_storage_log18_inverse() {
     // following the R4 stages, so any bug that swapped scratch/data
     // ping-pong direction in the Immediate path's bind-group plumbing
     // would surface here.
+    //
+    // **Family pinning**: this test must build a Stockham plan, not a
+    // Four-Step plan — the R4ParamMode is a Stockham-side knob, and
+    // Four-Step has its own param flow that wouldn't exercise the
+    // Immediate pipeline at all. The default `new_with_r4_param_mode`
+    // routes through the auto-policy, which on Adreno Android picks
+    // Four-Step at log_n ≥ 18; the test would silently pass without
+    // touching the Immediate path on that platform. Pin
+    // `PlannerPolicy::stockham_only()` explicitly via
+    // `new_with_options` so the family selection can't drift on us
+    // across platforms or future planner tweaks.
     let device = init_device();
     if !device.caps().has_immediates {
         eprintln!(
@@ -987,17 +998,20 @@ fn r4_immediate_matches_storage_log18_inverse() {
     let n = 1usize << log_n;
     let data: Vec<BabyBear> = (0..n as u32).map(BabyBear::new).collect();
 
-    let mut storage_plan = WgpuNttPlan::new_with_r4_param_mode(
+    let policy = PlannerPolicy::stockham_only();
+    let mut storage_plan = WgpuNttPlan::new_with_options(
         &device,
         log_n,
         NttDirection::Inverse,
+        &policy,
         R4ParamMode::Storage,
     )
     .expect("storage plan failed");
-    let mut imm_plan = WgpuNttPlan::new_with_r4_param_mode(
+    let mut imm_plan = WgpuNttPlan::new_with_options(
         &device,
         log_n,
         NttDirection::Inverse,
+        &policy,
         R4ParamMode::Immediate,
     )
     .expect("immediate plan failed");

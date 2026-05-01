@@ -183,8 +183,20 @@ impl WgpuNttPlan {
         )
     }
 
-    /// Internal constructor wired by all the public entry points.
-    fn new_with_options(
+    /// Create a plan with both an explicit planner policy and an
+    /// explicit R4 param-mode override.
+    ///
+    /// The shared backbone of the four public constructors above. The
+    /// distinction matters for callers (e.g. the
+    /// `r4_immediate_matches_storage_log18_inverse` integration test)
+    /// who need to pin BOTH the family selection AND the R4 param
+    /// mode: pinning only `R4ParamMode::Immediate` doesn't help if
+    /// the planner's per-platform threshold picks Four-Step at the
+    /// chosen `log_n`, in which case the Stockham R4 Immediate
+    /// pipeline is never built. Combine `PlannerPolicy::stockham_only`
+    /// (or another Stockham-pinning policy) with
+    /// `R4ParamMode::Immediate` to lock the test surface end-to-end.
+    pub fn new_with_options(
         device: &WgpuDevice,
         log_n: u32,
         direction: NttDirection,
