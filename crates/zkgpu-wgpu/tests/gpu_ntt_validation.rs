@@ -1076,3 +1076,81 @@ fn r4_immediate_rejects_when_feature_absent() {
     }
 }
 
+#[test]
+fn r4_immediate_rejects_when_planner_picks_four_step() {
+    // Public-API contract for `WgpuNttPlan::new_with_options`: when
+    // the policy resolves to Four-Step at the chosen `log_n`,
+    // `R4ParamMode::Immediate` is rejected at construction rather
+    // than silently falling through to the unchanged Four-Step path.
+    // Without this check, a caller could call
+    // `new_with_options(.., &four_step_policy, R4ParamMode::Immediate)`
+    // and think they were benching the Immediate kernel while
+    // actually running the Storage-equivalent Four-Step path.
+    //
+    // We exercise this by constructing a `four_step_only` policy and
+    // pairing it with `R4ParamMode::Immediate`. Skips on devices
+    // without `Features::IMMEDIATES` (those would already fail
+    // earlier in plan-build for a different reason — both errors
+    // are valid surface, but we want to specifically lock the
+    // Four-Step rejection here).
+    let device = init_device();
+    if !device.caps().has_immediates {
+        eprintln!(
+            "skipping r4_immediate_rejects_when_planner_picks_four_step: \
+             device does not advertise wgpu::Features::IMMEDIATES; the \
+             feature-absent rejection path is covered separately"
+        );
+        return;
+    }
+    let log_n = 22u32;
+    let policy = PlannerPolicy::force_four_step();
+    let result = WgpuNttPlan::new_with_options(
+        &device,
+        log_n,
+        NttDirection::Forward,
+        &policy,
+        R4ParamMode::Immediate,
+    );
+    match result {
+        Ok(_) => panic!(
+            "Immediate + Four-Step should be rejected at construction; \
+             the constructor silently falling through to Four-Step \
+             would mean a downstream caller benching Immediate is \
+             actually running the unchanged Four-Step path"
+        ),
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(
+                msg.contains("Stockham") || msg.contains("Four-Step"),
+                "error should explain the family/mode mismatch: {msg}"
+            );
+            assert!(
+                msg.contains("Immediate"),
+                "error should name the rejected mode: {msg}"
+            );
+        }
+    }
+
+    // Sanity: same call with `R4ParamMode::Storage` succeeds on
+    // Four-Step — Storage is the no-op default, valid on every
+    // family.
+    let storage_result = WgpuNttPlan::new_with_options(
+        &device,
+        log_n,
+        NttDirection::Forward,
+        &policy,
+        R4ParamMode::Storage,
+    );
+    if let Err(e) = storage_result {
+        // Some platforms might not have enough buffer for log_n=22;
+        // a buffer-size error is acceptable, but any other error
+        // means our gating accidentally widened.
+        let msg = format!("{e}");
+        assert!(
+            msg.contains("buffer") || msg.contains("Buffer") || msg.contains("size"),
+            "Storage + Four-Step should succeed or fail with a \
+             buffer-size error, got: {msg}"
+        );
+    }
+}
+

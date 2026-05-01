@@ -196,6 +196,18 @@ impl WgpuNttPlan {
     /// pipeline is never built. Combine `PlannerPolicy::stockham_only`
     /// (or another Stockham-pinning policy) with
     /// `R4ParamMode::Immediate` to lock the test surface end-to-end.
+    ///
+    /// **`r4_param_mode` is Stockham-only.** The Four-Step kernel
+    /// has its own param flow that doesn't go through the R4 stage
+    /// pipeline at all. To prevent silent argument-discarding (where
+    /// a caller asks for `R4ParamMode::Immediate` while the planner
+    /// picks Four-Step at the chosen `log_n`, and the Immediate
+    /// pipeline never gets built), this constructor returns
+    /// `ZkGpuError::InvalidNttSize` when the policy resolves to a
+    /// Four-Step plan with `r4_param_mode == Immediate`. `Storage`
+    /// is accepted regardless of family (it's the no-op default for
+    /// Four-Step) so most callers don't need to think about this —
+    /// it's only the explicit-Immediate case that gets validated.
     pub fn new_with_options(
         device: &WgpuDevice,
         log_n: u32,
@@ -222,6 +234,28 @@ impl WgpuNttPlan {
         }
 
         let planned = plan_ntt(log_n, policy)?;
+
+        // Reject `R4ParamMode::Immediate` when the planner resolved
+        // to Four-Step. Four-Step's per-stage param flow is separate
+        // from the Stockham R4 pipeline; passing Immediate here
+        // without this check would silently fall through to the
+        // unchanged Four-Step path, leading callers to think they're
+        // benching or opting into immediates while running the
+        // Storage-equivalent path instead. Storage is fine on either
+        // family (it's the no-op default) so we only validate the
+        // Immediate case.
+        if matches!(r4_param_mode, stockham::R4ParamMode::Immediate)
+            && matches!(planned, PlannedNtt::FourStep(_))
+        {
+            return Err(ZkGpuError::InvalidNttSize(format!(
+                "R4ParamMode::Immediate is Stockham-only; the planner \
+                 resolved log_n={log_n} to Four-Step under the active \
+                 policy. Pin a Stockham-family policy (e.g. \
+                 PlannerPolicy::stockham_only()) to use the Immediate \
+                 path, or accept R4ParamMode::Storage with the \
+                 auto-policy."
+            )));
+        }
 
         // Total-memory preflight: check aggregate N-sized buffer footprint.
         //
