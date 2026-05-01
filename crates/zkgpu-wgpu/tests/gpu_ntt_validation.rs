@@ -1,7 +1,9 @@
 use zkgpu_babybear::BabyBear;
 use zkgpu_core::{GpuBuffer, GpuDevice, NttDirection, NttPlan, ZkGpuError};
 use zkgpu_ntt::ntt_cpu_reference;
-use zkgpu_wgpu::{GpuFamily, GpuTiming, PlannerPolicy, WgpuDevice, WgpuNttPlan};
+use zkgpu_wgpu::{
+    GpuFamily, GpuTiming, PlannerPolicy, R4ParamMode, WgpuDevice, WgpuNttPlan,
+};
 
 fn init_device() -> WgpuDevice {
     WgpuDevice::new().expect("GPU device required for integration tests")
@@ -863,6 +865,200 @@ fn portable_local_roundtrip_log13() {
             got, want,
             "portable-local roundtrip mismatch at idx={i}: got={got}, want={want}"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item #3 R4ParamMode::Immediate parity
+//
+// The Immediate path is opt-in (default stays Storage per the verdict in
+// `docs/research/r4-immediate-pilot-verdict.md`), so the rest of the test
+// surface only ever exercises Storage. The bench harness
+// (`benches/ntt_r4_param_mode.rs`) does run the Immediate path but
+// discards the output buffer, so a wrong WGSL layout, BGL drop,
+// `set_immediates` byte-packing bug, or pipeline-cache key drift would
+// silently report `Success` there.
+//
+// This test is the parity lock: build a Storage plan AND an Immediate
+// plan over the same input, run both, and assert byte-for-byte equality.
+// log_n=14 chosen because:
+//
+// 1. It exercises multi-R4 — at least 2 R4 global stages run, so a bug
+//    in per-stage `set_immediates` ordering or per-stage param packing
+//    would diverge from Storage.
+// 2. It's small enough to run cheap in CI.
+// 3. It sits below the M4 Pro "encoder cost > kernel cost" crossover,
+//    so the per-stage cost paid is the one that actually exercises the
+//    `set_immediates` API surface most.
+//
+// Skipped with a clear notice when `caps.has_immediates` is false; that
+// happens on adapters that don't advertise `Features::IMMEDIATES` (older
+// Vulkan drivers, some constrained WebGPU implementations). On those
+// hosts, building an Immediate plan returns `ZkGpuError::InvalidNttSize`
+// at construction by design — there's nothing to test parity against.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn r4_immediate_matches_storage_log14_forward() {
+    let device = init_device();
+    if !device.caps().has_immediates {
+        eprintln!(
+            "skipping r4_immediate_matches_storage_log14_forward: \
+             device does not advertise wgpu::Features::IMMEDIATES"
+        );
+        return;
+    }
+    let log_n = 14u32;
+    let n = 1usize << log_n;
+    let data: Vec<BabyBear> = (0..n as u32).map(BabyBear::new).collect();
+
+    let mut storage_plan = WgpuNttPlan::new_with_r4_param_mode(
+        &device,
+        log_n,
+        NttDirection::Forward,
+        R4ParamMode::Storage,
+    )
+    .expect("storage plan failed");
+    let mut imm_plan = WgpuNttPlan::new_with_r4_param_mode(
+        &device,
+        log_n,
+        NttDirection::Forward,
+        R4ParamMode::Immediate,
+    )
+    .expect("immediate plan failed");
+
+    let mut storage_buf = device.upload(&data).expect("upload failed");
+    storage_plan
+        .execute(&device, &mut storage_buf)
+        .expect("storage execute failed");
+    let storage_out = storage_buf.read_to_vec().expect("readback failed");
+
+    let mut imm_buf = device.upload(&data).expect("upload failed");
+    imm_plan
+        .execute(&device, &mut imm_buf)
+        .expect("immediate execute failed");
+    let imm_out = imm_buf.read_to_vec().expect("readback failed");
+
+    assert_eq!(
+        imm_out.len(),
+        storage_out.len(),
+        "Immediate output length must match Storage"
+    );
+    for (i, (imm, stor)) in imm_out.iter().zip(storage_out.iter()).enumerate() {
+        assert_eq!(
+            imm, stor,
+            "R4ParamMode::Immediate divergence at idx={i}, log_n={log_n}: \
+             immediate={imm}, storage={stor}"
+        );
+    }
+
+    // Cross-check: both must also match the CPU reference. A bug that
+    // shifted both Storage and Immediate equally (unlikely but
+    // possible) would slip past the byte-equality check above.
+    let mut cpu = data.clone();
+    ntt_cpu_reference(&mut cpu, NttDirection::Forward);
+    for (i, (imm, c)) in imm_out.iter().zip(cpu.iter()).enumerate() {
+        assert_eq!(
+            imm, c,
+            "R4ParamMode::Immediate diverges from CPU at idx={i}, log_n={log_n}: \
+             immediate={imm}, cpu={c}"
+        );
+    }
+}
+
+#[test]
+fn r4_immediate_matches_storage_log18_inverse() {
+    // Larger log_n + inverse direction. log_n=18 puts more R4 stages
+    // in play (4 stages on a typical plan) and crosses the trace-shape
+    // threshold the consumer hot path operates at; the inverse
+    // direction additionally exercises the post-NTT scale dispatch
+    // following the R4 stages, so any bug that swapped scratch/data
+    // ping-pong direction in the Immediate path's bind-group plumbing
+    // would surface here.
+    let device = init_device();
+    if !device.caps().has_immediates {
+        eprintln!(
+            "skipping r4_immediate_matches_storage_log18_inverse: \
+             device does not advertise wgpu::Features::IMMEDIATES"
+        );
+        return;
+    }
+    let log_n = 18u32;
+    let n = 1usize << log_n;
+    let data: Vec<BabyBear> = (0..n as u32).map(BabyBear::new).collect();
+
+    let mut storage_plan = WgpuNttPlan::new_with_r4_param_mode(
+        &device,
+        log_n,
+        NttDirection::Inverse,
+        R4ParamMode::Storage,
+    )
+    .expect("storage plan failed");
+    let mut imm_plan = WgpuNttPlan::new_with_r4_param_mode(
+        &device,
+        log_n,
+        NttDirection::Inverse,
+        R4ParamMode::Immediate,
+    )
+    .expect("immediate plan failed");
+
+    let mut storage_buf = device.upload(&data).expect("upload failed");
+    storage_plan
+        .execute(&device, &mut storage_buf)
+        .expect("storage execute failed");
+    let storage_out = storage_buf.read_to_vec().expect("readback failed");
+
+    let mut imm_buf = device.upload(&data).expect("upload failed");
+    imm_plan
+        .execute(&device, &mut imm_buf)
+        .expect("immediate execute failed");
+    let imm_out = imm_buf.read_to_vec().expect("readback failed");
+
+    for (i, (imm, stor)) in imm_out.iter().zip(storage_out.iter()).enumerate() {
+        assert_eq!(
+            imm, stor,
+            "R4ParamMode::Immediate inverse divergence at idx={i}, log_n={log_n}: \
+             immediate={imm}, storage={stor}"
+        );
+    }
+}
+
+#[test]
+fn r4_immediate_rejects_when_feature_absent() {
+    // The plan-build path returns `ZkGpuError::InvalidNttSize` (with a
+    // message naming `Features::IMMEDIATES`) when the caller asks for
+    // `R4ParamMode::Immediate` on a device that doesn't advertise the
+    // feature. Verify both sides:
+    //
+    // - On a feature-bearing device, building Immediate succeeds.
+    // - We don't have a way to spawn a feature-LACKING device on the
+    //   same hardware in this test env, so the negative case is
+    //   covered structurally: when `!has_immediates`, every other
+    //   immediate test in this file skips with the eprintln above,
+    //   which is the production-runtime contract.
+    let device = init_device();
+    let log_n = 14u32;
+    let result = WgpuNttPlan::new_with_r4_param_mode(
+        &device,
+        log_n,
+        NttDirection::Forward,
+        R4ParamMode::Immediate,
+    );
+    match (device.caps().has_immediates, result) {
+        (true, Ok(_)) => {} // expected
+        (true, Err(e)) => panic!(
+            "Immediate plan should succeed on feature-bearing device, got {e}"
+        ),
+        (false, Ok(_)) => panic!(
+            "Immediate plan should fail on feature-lacking device, but succeeded"
+        ),
+        (false, Err(e)) => {
+            let msg = format!("{e}");
+            assert!(
+                msg.contains("IMMEDIATES") || msg.contains("immediate"),
+                "error should name the missing feature: {msg}"
+            );
+        }
     }
 }
 

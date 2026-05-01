@@ -89,20 +89,22 @@ pub struct WgpuNttPlan {
 
 /// Item #3 (immediates): default R4 param mode.
 ///
-/// **Currently `Storage` even when `caps.has_immediates`** — pilot
-/// shape mirroring item #6's. The Immediate path is implemented and
-/// validated for parity, but the default doesn't switch until per-host
-/// bench data confirms a clean win across the consumer hot-path log_n
-/// range (typically 18). M4 Pro / Metal data (commit ac379b4) shows
-/// Immediate +2-5% slower at log_n ∈ {10, 14, 18} and -11.6% faster
-/// at log_n=20; NVIDIA Vulkan A/B is pending vast.ai availability.
-/// Once a uniform-win or thresholded-win story is confirmed, this
-/// function flips to return Immediate (or a thresholded mix) and the
-/// bench feeds back into the gate decision in the speed-opportunities
-/// doc.
+/// **Always `Storage`.** Per the three-host A/B in
+/// `docs/research/r4-immediate-pilot-verdict.md` (commit 6ecf389), no
+/// host showed a uniform Immediate win across the consumer hot-path
+/// log_n range. M4 Pro Metal regresses 2-5% at log_n ∈ {10, 14, 18}
+/// and wins 11.6% only at log_n=20; RTX 4090 Vulkan regresses 6.3% at
+/// log_n=14; RTX 5090 Vulkan is mostly null. Production keeps Storage
+/// on every backend.
 ///
-/// Callers wanting to opt in explicitly use
-/// `WgpuNttPlan::new_with_r4_param_mode`.
+/// The Immediate path stays accessible — kernel, plan, parity tests,
+/// and bench all live in tree — but it's strictly opt-in via
+/// [`WgpuNttPlan::new_with_r4_param_mode`]. Callers who measure on
+/// their own hardware and find a win for their specific consumer
+/// workload can flip per-plan; the auto-default doesn't change unless
+/// a future re-evaluation trigger from the verdict document fires
+/// (new hardware, Naga codegen improvement, or a workload shape that
+/// dominates at log_n ≥ 19 on Apple).
 fn default_r4_param_mode(_device: &WgpuDevice) -> stockham::R4ParamMode {
     stockham::R4ParamMode::Storage
 }
@@ -133,13 +135,23 @@ impl WgpuNttPlan {
 
     /// Create a plan with an explicit R4 param-mode override.
     ///
-    /// Item #3 (immediates) bench-only knob. Production callers go
-    /// through [`Self::new`], which auto-detects from
-    /// `device.caps.has_immediates`. This constructor exists so the
-    /// `ntt_param_mode` bench can A/B `Storage` vs `Immediate` on the
-    /// same hardware. Building `R4ParamMode::Immediate` on a device
-    /// that doesn't advertise `Features::IMMEDIATES` returns
-    /// `ZkGpuError::InvalidNttSize`.
+    /// Item #3 (immediates) opt-in entry point. [`Self::new`] always
+    /// uses [`R4ParamMode::Storage`] (the verdict-pinned default —
+    /// see `default_r4_param_mode` above); this constructor exposes
+    /// [`R4ParamMode::Immediate`] for two callers:
+    ///
+    /// - The `ntt_r4_param_mode` Criterion bench, which A/Bs the two
+    ///   modes on the same hardware.
+    /// - The `r4_immediate_*` integration tests in
+    ///   `gpu_ntt_validation.rs`, which lock byte-for-byte parity
+    ///   between the two modes whenever the device advertises
+    ///   `Features::IMMEDIATES`.
+    /// - Downstream callers who measure on their own hardware and
+    ///   want Immediate for a specific workload.
+    ///
+    /// Building `R4ParamMode::Immediate` on a device that doesn't
+    /// advertise `Features::IMMEDIATES` returns
+    /// `ZkGpuError::InvalidNttSize` at construction.
     pub fn new_with_r4_param_mode(
         device: &WgpuDevice,
         log_n: u32,

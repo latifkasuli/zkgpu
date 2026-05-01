@@ -30,14 +30,18 @@ use super::planner::StockhamPlanConfig;
 /// For inverse NTT, a final GPU dispatch multiplies every element by
 /// `n^{-1} mod P`, avoiding a host round-trip.
 ///
-/// **Item #3 pilot (Gate 2):** the radix-4 global stage carries its
-/// per-stage params via either a uniform buffer (today's path,
-/// `R4ParamSource::Storage`) or via `wgpu::Features::IMMEDIATES`
-/// register writes (`R4ParamSource::Immediate`). The choice is fixed
-/// at plan build — auto-detected from `device.caps.has_immediates`,
-/// or overridden via `WgpuNttPlan::new_with_options` for benching.
-/// R2 global stages and the local-fused kernel keep the uniform path
-/// regardless; only R4 is migrated by this pilot.
+/// **Item #3 (Gate 2):** the radix-4 global stage carries its
+/// per-stage params via either a uniform buffer (the production
+/// default, [`R4ParamSource::Storage`]) or via
+/// `wgpu::Features::IMMEDIATES` register writes
+/// ([`R4ParamSource::Immediate`]). The choice is fixed at plan
+/// build. `WgpuNttPlan::new` always picks Storage per the verdict in
+/// `docs/research/r4-immediate-pilot-verdict.md` (no host cleared
+/// the propagation gate); `WgpuNttPlan::new_with_r4_param_mode`
+/// exposes the Immediate path for benches and downstream callers
+/// who measure on their own hardware. R2 global stages and the
+/// local-fused kernel keep the uniform path regardless; only R4
+/// has a dual implementation.
 pub(crate) struct StockhamPlan {
     pub(super) global_pipeline: Arc<wgpu::ComputePipeline>,
     pub(super) r4_pipeline: Arc<wgpu::ComputePipeline>,
@@ -89,19 +93,27 @@ pub struct NttTimings {
 }
 
 /// How R4 stage params reach the kernel. Item #3 of
-/// `docs/research/zkgpu-wgpu-speed-opportunities.md`. The enum is
-/// `pub(crate)` so the bench harness can override the auto-detected
-/// choice via `R4ParamMode`; production callers go through
-/// `WgpuNttPlan::new` and get the auto-detected default.
+/// `docs/research/zkgpu-wgpu-speed-opportunities.md`.
+///
+/// Production callers go through [`crate::WgpuNttPlan::new`] which
+/// always picks [`Storage`](Self::Storage) — see the verdict in
+/// `docs/research/r4-immediate-pilot-verdict.md` for why no host
+/// cleared the propagation gate. This enum is exposed publicly so
+/// benches and downstream callers who measure on their own hardware
+/// can opt into [`Immediate`](Self::Immediate) explicitly via
+/// [`crate::WgpuNttPlan::new_with_r4_param_mode`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum R4ParamMode {
-    /// Per-stage uniform buffer at bind-group entry 3. Today's
-    /// shipping default. Works on every wgpu backend.
+    /// Per-stage uniform buffer at bind-group entry 3. The shipping
+    /// default on every backend. Works whether or not
+    /// `Features::IMMEDIATES` is advertised.
     Storage,
     /// Per-stage params flow through `wgpu::Features::IMMEDIATES` —
     /// `set_immediates` writes 32 bytes directly to register-resident
     /// space. Drops the bind-group entry and the per-stage
-    /// `wgpu::Buffer` allocation. Requires `caps.has_immediates`.
+    /// `wgpu::Buffer` allocation. Requires `caps.has_immediates`;
+    /// constructing a plan with this variant on a device that
+    /// doesn't advertise the feature returns `InvalidNttSize`.
     Immediate,
 }
 

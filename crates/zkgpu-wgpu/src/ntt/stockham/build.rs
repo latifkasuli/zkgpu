@@ -43,15 +43,15 @@ impl StockhamPlan {
     /// Create a Stockham NTT plan from a pre-validated config.
     ///
     /// `r4_param_mode` selects how the radix-4 stage params reach the
-    /// kernel. `Storage` is the original path (per-stage uniform
-    /// buffer); `Immediate` is the item #3 pilot path
-    /// (`set_immediates`). The caller is responsible for picking a
-    /// mode the device actually supports (see
-    /// `device.caps.has_immediates`); attempting to build an
-    /// `Immediate` plan on a device without `Features::IMMEDIATES`
-    /// returns `ZkGpuError::InvalidNttSize`. The trampoline at
-    /// `WgpuNttPlan::new` does the auto-detection so most callers
-    /// don't think about this.
+    /// kernel. `Storage` is the production path (per-stage uniform
+    /// buffer); `Immediate` is the opt-in item #3 path
+    /// (`set_immediates`). The trampoline `WgpuNttPlan::new` always
+    /// passes `Storage` per the verdict in
+    /// `docs/research/r4-immediate-pilot-verdict.md`; callers who
+    /// want the Immediate path go through
+    /// `WgpuNttPlan::new_with_r4_param_mode`. Attempting to build an
+    /// `Immediate` plan on a device that doesn't advertise
+    /// `Features::IMMEDIATES` returns `ZkGpuError::InvalidNttSize`.
     pub(crate) fn new(
         device: &WgpuDevice,
         config: StockhamPlanConfig,
