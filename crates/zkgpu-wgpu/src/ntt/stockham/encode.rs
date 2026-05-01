@@ -136,15 +136,29 @@ impl StockhamPlan {
                 }
             }
             R4ParamSource::Immediate(param_blocks) => {
-                for params in param_blocks.iter() {
-                    let (src_buf, dst_buf) = if dispatch_idx % 2 == 0 {
+                // Item #5 (bind-group reuse) win specific to the
+                // Immediate path: every R4 stage in this branch shares
+                // the SAME static bindings (twiddles at slot 2,
+                // twiddles_prime at slot 4) and the SAME ping-pong
+                // src/dst pair (slots 0/1), with only the parity
+                // alternating. The per-stage immediate payload arrives
+                // via `pass.set_immediates(0, ...)` later, NOT through
+                // the bind group. So instead of building one bind
+                // group per stage like the Storage branch must (its
+                // slot-3 param_buffer differs per stage), we build
+                // exactly TWO here — one per parity — and clone the
+                // appropriate one into each stage. wgpu::BindGroup
+                // is internally Arc-managed, so `clone()` is a cheap
+                // ref-count bump, not a fresh allocation. Cuts the
+                // per-encode bind-group create cost in Immediate
+                // mode from `O(num_r4_stages)` to `O(1)`.
+                let make_bg = |parity: usize| -> wgpu::BindGroup {
+                    let (src_buf, dst_buf) = if parity == 0 {
                         (&buf.inner, &self.scratch_buffer)
                     } else {
                         (&self.scratch_buffer, &buf.inner)
                     };
-                    // 4-entry bind group — binding 3 is absent because
-                    // params arrive via `pass.set_immediates(0, ...)`.
-                    let bg = wgpu_device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    wgpu_device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: None,
                         layout: &self.r4_bind_group_layout,
                         entries: &[
@@ -165,9 +179,24 @@ impl StockhamPlan {
                                 resource: self.r4_twiddle_prime_buffer.as_entire_binding(),
                             },
                         ],
-                    });
+                    })
+                };
+                // Only build the parities we'll actually use. Empty
+                // R4 stage list means no bind groups; one stage means
+                // only parity 0; two-or-more covers both parities.
+                let need_parity_0 = !param_blocks.is_empty();
+                let need_parity_1 = param_blocks.len() >= 2;
+                let bg_0 = if need_parity_0 { Some(make_bg(0)) } else { None };
+                let bg_1 = if need_parity_1 { Some(make_bg(1)) } else { None };
+                for params in param_blocks.iter() {
+                    let parity = dispatch_idx % 2;
+                    let shared = if parity == 0 {
+                        bg_0.as_ref().expect("parity 0 bind group built when needed")
+                    } else {
+                        bg_1.as_ref().expect("parity 1 bind group built when needed")
+                    };
                     stages.push(Stage::R4 {
-                        bind_group: bg,
+                        bind_group: shared.clone(),
                         immediate: Some(params),
                     });
                     dispatch_idx += 1;

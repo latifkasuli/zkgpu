@@ -1,9 +1,25 @@
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use zkgpu_core::{GpuBuffer, GpuField, ZkGpuError};
 
 use crate::async_util;
+
+/// Monotonic counter used to assign each `WgpuBuffer` a stable
+/// process-unique identifier. Cheap to read (`Relaxed` is enough — we
+/// only need uniqueness, not happens-before with anything else); IDs
+/// don't get reused over a process lifetime.
+///
+/// **Why this exists.** wgpu v29's `Buffer` doesn't expose a stable
+/// public identity (no `id()` / `global_id()` method on the public
+/// API). Item #5 (bind-group reuse across `execute()` calls) needs a
+/// stable cache key for the user-side data buffer; otherwise the
+/// plan can't tell whether two consecutive executes are operating on
+/// the same buffer or a fresh one. Tagging at construction with a
+/// per-process atomic counter gives us that key without reaching into
+/// wgpu internals.
+static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct WgpuBuffer<F: GpuField> {
     pub(crate) inner: wgpu::Buffer,
@@ -14,6 +30,16 @@ pub struct WgpuBuffer<F: GpuField> {
     /// fast path). Readback can map `inner` directly, skipping the
     /// staging-copy round-trip.
     mappable: bool,
+    /// Process-unique stable ID assigned at construction. See
+    /// [`NEXT_BUFFER_ID`]. Reserved for item #5's optional
+    /// cross-execute bind-group cache (not yet wired in any plan —
+    /// the within-encode bind-group reuse landed in this commit
+    /// already collapses the easy N-to-2 case in Immediate mode;
+    /// the cross-execute cache for the Storage path waits until we
+    /// have evidence consumer pipelines reuse the same buffer often
+    /// enough for the cache hit rate to matter).
+    #[allow(dead_code)]
+    pub(crate) id: u64,
     _marker: PhantomData<F>,
 }
 
@@ -31,6 +57,7 @@ impl<F: GpuField> WgpuBuffer<F> {
             device,
             queue,
             mappable,
+            id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
             _marker: PhantomData,
         }
     }
